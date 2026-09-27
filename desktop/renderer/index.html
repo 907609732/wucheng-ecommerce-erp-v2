@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>五成电子商务集团 ERP V2</title>
+  <link rel="stylesheet" href="../../node_modules/gridjs/dist/theme/mermaid.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">WUCHENG E-COMMERCE · ERP V2</p>
+        <h1>五成电子商务集团 ERP V2</h1>
+        <p class="subtitle">完全在本机采集、校验并通过企业应用机器人发送到钉钉。</p>
+      </div>
+      <div class="status" id="statusBadge">待配置</div>
+    </header>
+
+    <nav class="view-tabs" aria-label="页面导航">
+      <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
+      <button class="view-tab" type="button" data-view="inventory">商品库存</button>
+      <button class="view-tab" type="button" data-view="settings">设置</button>
+    </nav>
+
+    <div data-view-panel="dashboard">
+    <section class="summary-grid">
+      <article class="summary-card"><span>运行状态</span><strong id="runState">空闲</strong></article>
+      <article class="summary-card"><span>下次执行</span><strong id="nextRun">未启用</strong></article>
+      <article class="summary-card"><span>登录状态</span><strong id="loginState">待刷新</strong></article>
+      <article class="summary-card"><span>软件更新</span><strong id="updateState">未检查</strong></article>
+    </section>
+
+    <section class="actions panel">
+      <button class="primary" id="runNow">立即同步并发送</button>
+      <button id="refreshLogin">登录 / 刷新菜鸟状态</button>
+      <button id="openData">打开数据目录</button>
+      <button id="openLogs">打开日志目录</button>
+      <button id="checkUpdate">检查更新</button>
+      <button class="primary hidden" id="installUpdate">重启并安装更新</button>
+    </section>
+
+    <section class="panel logs-panel">
+      <div class="section-heading"><div><p class="eyebrow">ACTIVITY</p><h2>运行日志</h2></div></div>
+      <pre id="logs">等待运行…</pre>
+    </section>
+    </div>
+
+    <div data-view-panel="inventory" class="hidden">
+      <section class="inventory-summary-grid">
+        <article class="summary-card"><span>来源日期</span><strong id="inventorySourceDate">--</strong></article>
+        <article class="summary-card"><span>SKU 数量</span><strong id="inventorySkuCount">--</strong></article>
+        <article class="summary-card"><span>库存合计</span><strong id="inventoryTotal">--</strong></article>
+        <article class="summary-card"><span>需关注</span><strong id="inventoryLowCount">--</strong></article>
+      </section>
+
+      <section class="panel inventory-panel">
+        <div class="section-heading inventory-heading">
+          <div><p class="eyebrow">ALL INVENTORY</p><h2>菜鸟云仓全部商品</h2></div>
+          <div class="inventory-actions">
+            <span id="inventoryValidationState" class="config-state">正在读取…</span>
+            <button id="refreshInventory" type="button">刷新库存</button>
+          </div>
+        </div>
+        <div class="inventory-filter" role="group" aria-label="库存筛选">
+          <button class="inventory-filter-button active" type="button" data-inventory-filter="all">全部</button>
+          <button class="inventory-filter-button" type="button" data-inventory-filter="alert">需关注</button>
+          <button class="inventory-filter-button" type="button" data-inventory-filter="critical">严重缺货</button>
+        </div>
+        <p id="inventoryMessage" class="inventory-message">正在读取本地已校验库存…</p>
+        <div id="inventoryGrid" class="inventory-grid"></div>
+        <p class="inventory-note">这里展示最新已导入的全部云仓 SKU；钉钉报告仍只发送符合现有补货预警条件的商品。</p>
+      </section>
+    </div>
+
+    <div data-view-panel="settings" class="hidden">
+    <section class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
+        <p class="section-intro">各分区可单独保存，未完成机器人配置也能先保存菜鸟账号。</p>
+      </div>
+
+      <form id="accountSettingsForm" class="settings-card">
+        <div class="settings-card-heading">
+          <div><h3>菜鸟账号</h3><p>用于打开菜鸟云仓并获取库存文件。</p></div>
+          <span id="accountConfigState" class="config-state">待配置</span>
+        </div>
+        <div class="form-grid">
+          <label>菜鸟账号<input id="cainiaoUsername" autocomplete="username" required></label>
+          <div class="secret-field">
+            <label for="cainiaoPassword">菜鸟密码</label>
+            <div class="secret-input-row"><input id="cainiaoPassword" type="password" autocomplete="current-password" placeholder="请输入密码"><button type="button" class="secret-toggle" data-secret-target="cainiaoPassword" aria-label="显示菜鸟密码">显示</button></div>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <p id="accountSaveMessage" class="save-message"></p>
+          <button class="primary" type="submit">保存账号设置</button>
+        </div>
+      </form>
+
+      <form id="robotSettingsForm" class="settings-card">
+        <div class="settings-card-heading">
+          <div><h3>钉钉机器人</h3><p>单独配置库存报告的发送机器人和目标群。</p></div>
+          <span id="robotConfigState" class="config-state">待配置</span>
+        </div>
+        <fieldset>
+          <legend>发送方式</legend>
+          <div class="mode-tabs">
+            <label><input type="radio" name="deliveryMode" value="app">企业应用机器人（推荐）</label>
+            <label><input type="radio" name="deliveryMode" value="webhook">群 Webhook</label>
+          </div>
+          <div id="appFields" class="form-grid">
+            <div class="secret-field">
+              <label for="dingtalkClientId">Client ID</label>
+              <div class="secret-input-row"><input id="dingtalkClientId" type="password" autocomplete="off" placeholder="请输入 Client ID"><button type="button" class="secret-toggle" data-secret-target="dingtalkClientId" aria-label="显示 Client ID">显示</button></div>
+            </div>
+            <div class="secret-field">
+              <label for="dingtalkClientSecret">Client Secret</label>
+              <div class="secret-input-row"><input id="dingtalkClientSecret" type="password" autocomplete="off" placeholder="请输入 Client Secret"><button type="button" class="secret-toggle" data-secret-target="dingtalkClientSecret" aria-label="显示 Client Secret">显示</button></div>
+            </div>
+            <label>Robot Code<input id="dingtalkRobotCode"></label>
+            <label>群会话 ID<input id="dingtalkConversationId"></label>
+            <label>目标用户 ID（可选）<input id="dingtalkTargetUserId"></label>
+            <label>目标用户名称（可选）<input id="dingtalkTargetName"></label>
+          </div>
+          <div id="webhookFields" class="form-grid hidden">
+            <div class="secret-field">
+              <label for="dingtalkWebhook">Webhook 地址</label>
+              <div class="secret-input-row"><input id="dingtalkWebhook" type="password" autocomplete="off" placeholder="请输入 Webhook"><button type="button" class="secret-toggle" data-secret-target="dingtalkWebhook" aria-label="显示 Webhook 地址">显示</button></div>
+            </div>
+            <div class="secret-field">
+              <label for="dingtalkWebhookSecret">加签密钥（可选）</label>
+              <div class="secret-input-row"><input id="dingtalkWebhookSecret" type="password" autocomplete="off" placeholder="可选"><button type="button" class="secret-toggle" data-secret-target="dingtalkWebhookSecret" aria-label="显示加签密钥">显示</button></div>
+            </div>
+          </div>
+        </fieldset>
+        <div class="settings-actions">
+          <p id="robotSaveMessage" class="save-message"></p>
+          <button class="primary" type="submit">保存机器人设置</button>
+        </div>
+      </form>
+
+      <form id="automationSettingsForm" class="settings-card">
+        <div class="settings-card-heading"><div><h3>自动任务</h3><p>本机每日直发，不依赖服务器、SSH 或 WSL。</p></div></div>
+        <div class="form-grid">
+          <label>每天执行时间<input id="scheduleTime" type="time" required></label>
+          <label>低库存阈值<input id="lowStockThreshold" type="number" min="0" max="999999" required></label>
+        </div>
+        <div class="switch-row">
+          <label class="check"><input id="scheduleEnabled" type="checkbox">启用每日自动同步</label>
+          <label class="check"><input id="startAtLogin" type="checkbox">登录 Windows 后自动启动</label>
+        </div>
+        <div class="settings-actions">
+          <p id="automationSaveMessage" class="save-message"></p>
+          <button class="primary" type="submit">保存自动任务</button>
+        </div>
+      </form>
+
+      <section class="settings-card">
+        <div class="settings-card-heading">
+          <div><h3>AI Runtime</h3><p>同一核心支持源码、CLI、本地 stdio MCP、便携版与安装版，可供脚本和 AI 客户端调用。</p></div>
+          <span class="config-state ready">已启用</span>
+        </div>
+        <div class="integration-grid">
+          <div><strong>CLI 状态查询</strong><code id="cliCommand">正在读取…</code></div>
+          <div><strong>AI Debug 诊断</strong><code id="debugCommand">正在读取…</code></div>
+          <div><strong>运行形态</strong><code id="runtimeModes">正在读取…</code></div>
+          <div><strong>扩展目录</strong><code id="extensionDirectory">正在读取…</code></div>
+          <div><strong>MCP 配置</strong><code id="mcpCommand">正在读取…</code></div>
+        </div>
+        <p class="field-help">同一核心支持源码、CLI、MCP、便携版和安装版；AI 可导出脱敏 Debug Bundle。扩展代码必须由用户显式信任，写入型 action 仍需二次确认。</p>
+      </section>
+
+      <section class="settings-card">
+        <div class="settings-card-heading">
+          <div><h3>在线升级</h3><p>企业内部更新凭据已随软件内置，无需每台电脑重复配置。</p></div>
+          <span class="config-state ready">已内置</span>
+        </div>
+        <p class="field-help">软件会自动检查私有发布版本；下载完成后仍由用户点击“重启并安装更新”。</p>
+      </section>
+
+      <p class="security-note">密码、Secret 与 Webhook 使用 Windows DPAPI 加密；内置更新凭据首次启动后也会转存 DPAPI。</p>
+    </section>
+    </div>
+  </main>
+  <script src="../../node_modules/gridjs/dist/gridjs.production.min.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+name: Release Windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan secrets with Gitleaks
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "gitleaks.zip"
+          $toolDir = Join-Path $env:RUNNER_TEMP "gitleaks"
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern "gitleaks_8.30.1_windows_x64.zip" --output $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
+          & (Join-Path $toolDir "gitleaks.exe") git --redact --no-banner
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install trusted Electron runtime
+        run: node node_modules/electron/install.js
+      - run: npm run test:desktop
+      - run: node tests/desktop-mcp-smoke.mjs
+      - run: npm run ai:inspect:tools
+      - run: npm run test:core
+      - run: npm run test:warehouse-sales
+      - name: Build Windows release
+        env:
+          CAINIAO_INTERNAL_UPDATE_TOKEN: ${{ secrets.CAINIAO_INTERNAL_UPDATE_TOKEN }}
+        run: npm run desktop:build -- --publish never
+      - name: Publish complete GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = node -p "require('./package.json').version"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --generate-notes --verify-tag
+          }
+          $assets = Get-ChildItem dist -File | Where-Object {
+            $_.Name -match '\.(exe|yml|blockmap)$'
+          }
+          foreach ($asset in $assets) {
+            gh release upload $tag $asset.FullName --repo $env:GITHUB_REPOSITORY --clobber
+          }
+          $remoteAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
+          foreach ($required in @(
+            "WuchengERP-V2-Setup-$version-x64.exe",
+            "WuchengERP-V2-Portable-$version-x64.exe",
+            "WuchengERP-V2-Setup-$version-x64.exe.blockmap",
+            'latest.yml'
+          )) {
+            if ($remoteAssets -notcontains $required) { throw "Missing release asset: $required" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/*.exe
+            dist/*.yml
+            dist/*.blockmap

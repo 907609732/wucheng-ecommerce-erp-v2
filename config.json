@@ -1,0 +1,83 @@
+{
+  "startUrl": "https://b.cainiao.com/business/dsc/oms/inventory/inventoryreport",
+  "timezone": "Asia/Shanghai",
+  "downloadDir": "downloads",
+  "reportDir": "reports",
+  "login": {
+    "usernameSelectors": [
+      "input[name='loginId']",
+      "input[name='username']",
+      "input[name='account']",
+      "input[type='tel']",
+      "input[type='text']"
+    ],
+    "passwordSelectors": [
+      "input[name='password']",
+      "input[type='password']"
+    ],
+    "submitSelectors": [
+      "button:has-text('登录')",
+      "button:has-text('登 录')",
+      "input[type='submit']",
+      "button[type='submit']"
+    ]
+  },
+  "downloadSteps": [
+    { "type": "click", "selector": "text=库存明细" },
+    { "type": "wait", "ms": 2000 },
+    { "type": "click", "selector": "button:has-text('查询')" },
+    { "type": "wait", "ms": 3000 },
+    { "type": "click", "selector": "button:has-text('导出明细')" },
+    { "type": "waitForSelector", "selector": "button:has-text('下载')", "timeout": 120000 },
+    { "type": "download", "selector": "button:has-text('下载')", "timeout": 120000 }
+  ],
+  "autoDownload": {
+    "enabled": true,
+    "navigationTexts": ["库存", "库存查询", "库存管理"],
+    "downloadTexts": ["导出", "下载", "导出库存", "导出数据"]
+  },
+  "inventoryColumns": {
+    "sku": ["SKU", "sku", "商家编码", "商家SKU", "货品条码", "条码", "商品编码", "货品编码"],
+    "barcode": ["商品编码", "商品条码", "货品条码", "条码", "货品编码"],
+    "name": ["商品名称", "货品名称", "品名", "名称"],
+    "quantity": ["期末库存", "当前仓库存", "当前仓库存数", "菜鸟云仓库存", "上海仓库库存", "诸暨仓库库存", "库存数量", "可用库存", "库存", "数量", "可售库存", "实物库存"]
+  },
+  "erp": {
+    "defaultLowStockThreshold": 10,
+    "warehouses": [
+      { "id": "cainiao", "name": "菜鸟云仓" },
+      { "id": "shanghai", "name": "上海仓库" },
+      { "id": "zhuji", "name": "诸暨仓库" }
+    ],
+    "platforms": [
+      { "id": "cainiao", "name": "菜鸟云仓" },
+      { "id": "qianniu", "name": "千牛/淘宝" },
+      { "id": "jd", "name": "京东" },
+      { "id": "pdd", "name": "拼多多" }
+    ],
+    "stores": [
+      { "id": "店口五金店", "name": "店口五金店" },
+      { "id": "西施五金店", "name": "西施五金店" }
+    ],
+    "importColumns": {
+      "orders": {
+        "orderId": ["订单号", "主订单编号", "订单编号", "订单ID", "订单id", "父订单号"],
+        "sku": ["SKU", "sku", "商家编码", "商品编码", "货品编码", "商家SKU", "商家sku", "规格编码"],
+        "name": ["商品名称", "宝贝标题", "货品名称", "商品标题", "标题", "名称"],
+        "quantity": ["数量", "购买数量", "商品数量", "件数", "成交数量"],
+        "amount": ["实付金额", "买家实付", "订单金额", "商品金额", "支付金额", "成交金额", "应收金额"],
+        "status": ["订单状态", "交易状态", "售后状态", "退款状态", "状态"],
+        "orderDate": ["下单时间", "付款时间", "成交时间", "订单创建时间", "创建时间", "支付时间"],
+        "customer": ["买家昵称", "买家账号", "收件人", "客户", "用户"],
+        "store": ["店铺", "店铺名称", "店铺名", "网店", "来源店铺"]
+      },
+      "shipping": {
+        "orderId": ["订单号", "主订单编号", "订单编号", "运单号", "物流单号"],
+        "amount": ["邮费", "运费", "物流费用", "快递费", "费用", "金额", "结算金额"],
+        "month": ["月份", "账期", "结算月份"],
+        "date": ["日期", "结算时间", "发货时间", "创建时间"],
+        "note": ["备注", "说明", "物流公司", "快递公司"]
+      }
+    }
+  }
+}

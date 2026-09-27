@@ -1,0 +1,48 @@
+{
+  "name": "wucheng-ecommerce-erp-v2",
+  "version": "0.1.0",
+  "description": "五成电子商务集团本地优先、AI 可调用的 Windows ERP V2",
+  "author": "五成电子商务集团",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "scripts": {
+    "desktop": "electron .",
+    "ai:status": "electron . --cli status",
+    "ai:doctor": "electron . --cli doctor",
+    "ai:mcp": "electron . --mcp-stdio",
+    "ai:inspect": "mcp-inspector --web --config mcp-inspector.json",
+    "ai:inspect:tools": "mcp-inspector --cli --config mcp-inspector.json --server wucheng-ecommerce-erp-v2 --method tools/list --format json --strict",
+    "desktop:pack": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --dir",
+    "desktop:build": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --win nsis portable",
+    "desktop:publish": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --win nsis portable --publish always",
+    "setup": "playwright install chromium",
+    "test:login": "node core/playwright-login.js",
+    "sync:inventory:local": "node core/sync-cainiao-inventory.js",
+    "sync:sales:monthly": "node core/sync-cainiao-monthly-sales.js",
+    "sync:sales:backfill": "node core/backfill-cainiao-monthly-sales.js --from 2025-08 --to 2026-07",
+    "monthly:report": "node core/monthly-report.js",
+    "test:core": "node --test tests/dingtalk-auth.test.js tests/dingtalk-app-robot.test.js tests/dingtalk-inventory-reminder.test.js tests/inventory-validation.test.js",
+    "test:warehouse-sales": "node --test tests/warehouse-monthly-sales.test.js",
+    "test:desktop": "node --test tests/desktop-settings.test.js tests/desktop-ai-interface.test.js tests/desktop-inventory.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.1.0",
+    "adm-zip": "^0.6.1",
+    "axios": "^1.20.0",
+    "dingtalk-stream": "^2.1.5",
+    "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.9",
+    "gridjs": "^6.2.0",
+    "playwright": "^1.49.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.1.0",
+    "@modelcontextprotocol/inspector": "^2.8.0",
+    "@playwright/test": "^1.61.0",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  }
+}

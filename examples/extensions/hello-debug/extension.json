@@ -1,0 +1,14 @@
+{
+  "id": "hello.debug",
+  "name": "Hello Debug",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entry": "extension.mjs",
+  "actions": [
+    {
+      "name": "diagnose",
+      "description": "返回扩展上下文和调用参数，不修改数据",
+      "sideEffect": "read"
+    }
+  ]
+}

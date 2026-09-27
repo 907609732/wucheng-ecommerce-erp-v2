@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan secrets with Gitleaks
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "gitleaks.zip"
+          $toolDir = Join-Path $env:RUNNER_TEMP "gitleaks"
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern "gitleaks_8.30.1_windows_x64.zip" --output $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
+          & (Join-Path $toolDir "gitleaks.exe") git --redact --no-banner
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install trusted Electron runtime
+        run: node node_modules/electron/install.js
+      - run: npm run test:desktop
+      - run: node tests/desktop-mcp-smoke.mjs
+      - run: npm run ai:inspect:tools
+      - run: npm run test:core
+      - run: npm run test:warehouse-sales
+      - run: npm audit --omit=dev --audit-level=high
