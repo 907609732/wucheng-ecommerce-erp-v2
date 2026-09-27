@@ -12,7 +12,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Scan secrets with Gitleaks
@@ -25,7 +25,7 @@ jobs:
           gh release download v8.30.1 --repo gitleaks/gitleaks --pattern "gitleaks_8.30.1_windows_x64.zip" --output $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
           & (Join-Path $toolDir "gitleaks.exe") git --redact --no-banner
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -67,7 +67,7 @@ jobs:
           )) {
             if ($remoteAssets -notcontains $required) { throw "Missing release asset: $required" }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-release
           path: |
