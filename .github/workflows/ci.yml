@@ -25,7 +25,7 @@ jobs:
           gh release download v8.30.1 --repo gitleaks/gitleaks --pattern "gitleaks_8.30.1_windows_x64.zip" --output $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
           & (Join-Path $toolDir "gitleaks.exe") git --redact --no-banner
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
