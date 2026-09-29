@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_SETTINGS,
   nextRunAt,
+  nextMonthlyRunAt,
   normalizeSettings,
   validateAutomationSettings,
   validateCainiaoSettings,
@@ -109,4 +110,9 @@ test("nextRunAt schedules tomorrow after today's time passed", () => {
   assert.equal(result.getDate(), 27);
   assert.equal(result.getHours(), 22);
   assert.equal(result.getMinutes(), 0);
+});
+
+test("nextMonthlyRunAt uses this month's first day before the cutoff and next month after it", () => {
+  assert.equal(nextMonthlyRunAt("22:00", new Date("2026-09-01T10:00:00+08:00")).toISOString(), "2026-09-01T14:00:00.000Z");
+  assert.equal(nextMonthlyRunAt("22:00", new Date("2026-09-02T10:00:00+08:00")).toISOString(), "2026-10-01T14:00:00.000Z");
 });

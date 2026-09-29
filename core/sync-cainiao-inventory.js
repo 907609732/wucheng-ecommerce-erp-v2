@@ -63,7 +63,7 @@ async function findVisibleDownloadButton(page, timeout = 120000) {
       for (let index = await candidates.count() - 1; index >= 0; index -= 1) {
         const candidate = candidates.nth(index);
         const text = (await candidate.textContent().catch(() => '')).trim();
-        if (text.includes('下载') && !text.includes('导出') && await isInViewport(page, candidate)) {
+        if (text.includes('下载') && !text.includes('导出') && await candidate.isVisible().catch(() => false)) {
           return candidate;
         }
       }
@@ -108,18 +108,136 @@ async function saveDownload(download, dateStr) {
   return downloadPath;
 }
 
-async function findVisibleExportButton(page) {
-  let button = await findVisibleLocator(page, [
-    'button:has-text("导出明细")',
-    '.ant-btn:has-text("导出明细")'
-  ]);
-  if (button) return button;
-  const candidates = page.getByText('导出明细', { exact: true });
-  for (let index = 0; index < await candidates.count(); index += 1) {
-    const candidate = candidates.nth(index);
-    if (await isInViewport(page, candidate)) return candidate;
+export function buildMonthPickerPlan(currentMonth, targetMonth) {
+  const currentYear = Number(String(currentMonth).slice(0, 4));
+  const targetYear = Number(String(targetMonth).slice(0, 4));
+  const targetMonthNumber = Number(String(targetMonth).slice(5, 7));
+  if (!Number.isInteger(currentYear) || !Number.isInteger(targetYear)
+    || !Number.isInteger(targetMonthNumber) || targetMonthNumber < 1 || targetMonthNumber > 12) {
+    throw new Error(`无效月份: ${currentMonth} => ${targetMonth}`);
+  }
+  return {
+    direction: targetYear < currentYear ? 'previous' : targetYear > currentYear ? 'next' : 'same',
+    steps: Math.abs(targetYear - currentYear),
+    targetYear,
+    monthLabel: `${targetMonthNumber}月`
+  };
+}
+
+async function findVisiblePickerYear(page, monthBox) {
+  const yearLabels = page.getByText(/^\d{4}年$/, { exact: true });
+  for (let index = await yearLabels.count() - 1; index >= 0; index -= 1) {
+    const candidate = yearLabels.nth(index);
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box || !await isTopmostInViewport(page, candidate)) continue;
+    const nearMonthInput = box.x >= monthBox.x - 80
+      && box.x <= monthBox.x + monthBox.width + 80
+      && box.y > monthBox.y
+      && box.y < monthBox.y + 120;
+    if (!nearMonthInput) continue;
+    const text = (await candidate.textContent()).trim();
+    return { box, year: Number(text.slice(0, 4)) };
   }
   return null;
+}
+
+async function waitForPickerYear(page, monthBox, expectedYear, timeout = 2500) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const header = await findVisiblePickerYear(page, monthBox);
+    if (header?.year === expectedYear) return header;
+    await page.waitForTimeout(100);
+  }
+  return null;
+}
+
+export async function selectCainiaoMonth(page, monthInput, targetMonth) {
+  const monthBox = await monthInput.boundingBox().catch(() => null);
+  if (!monthBox) throw new Error('月份选择器没有可点击区域');
+
+  const currentMonth = await monthInput.inputValue();
+  if (currentMonth === targetMonth) return true;
+
+  // 部分旧版控件允许键盘提交，先保留这条最快路径。
+  try {
+    await monthInput.fill(targetMonth);
+    await monthInput.press('Enter');
+    await page.waitForTimeout(400);
+    if (await monthInput.inputValue() === targetMonth) return true;
+  } catch {
+    // 新版菜鸟月份控件为只读输入框，需要使用下方的面板选择。
+  }
+
+  await page.mouse.click(monthBox.x + monthBox.width / 2, monthBox.y + monthBox.height / 2);
+  await page.waitForTimeout(300);
+  let header = await findVisiblePickerYear(page, monthBox);
+  if (!header) return false;
+
+  const plan = buildMonthPickerPlan(`${header.year}-01`, targetMonth);
+  if (plan.steps > 20) throw new Error(`目标月份距当前年份过远，拒绝自动翻页: ${targetMonth}`);
+  for (let step = 0; step < plan.steps; step += 1) {
+    const expectedYear = header.year + (plan.direction === 'previous' ? -1 : 1);
+    // 菜鸟当前控件没有可用的 aria-label；箭头与年份标题同行，左右各留约 16px。
+    const arrowX = plan.direction === 'previous'
+      ? monthBox.x + 16
+      : monthBox.x + monthBox.width - 8;
+    await page.mouse.click(arrowX, header.box.y + header.box.height / 2);
+    header = await waitForPickerYear(page, monthBox, expectedYear);
+    if (!header) return false;
+  }
+
+  const monthLabels = page.getByText(plan.monthLabel, { exact: true });
+  for (let index = await monthLabels.count() - 1; index >= 0; index -= 1) {
+    const candidate = monthLabels.nth(index);
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box || !await isTopmostInViewport(page, candidate)) continue;
+    const insidePicker = box.x >= monthBox.x - 20
+      && box.x <= monthBox.x + monthBox.width + 20
+      && box.y > header.box.y
+      && box.y < monthBox.y + 280;
+    if (!insidePicker) continue;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      if (await monthInput.inputValue() === targetMonth) return true;
+      await page.waitForTimeout(100);
+    }
+    return false;
+  }
+  return false;
+}
+
+export async function findVisibleExportButton(page) {
+  const groups = [
+    page.getByRole('button', { name: '导出明细', exact: true }),
+    page.locator('button:has-text("导出明细"), .ant-btn:has-text("导出明细")')
+  ];
+  for (const candidates of groups) {
+    for (let index = await candidates.count() - 1; index >= 0; index -= 1) {
+      const candidate = candidates.nth(index);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+  }
+  return null;
+}
+
+export async function clickCainiaoControl(locator, { label = '控件', timeout = 1200 } = {}) {
+  // Playwright normally auto-scrolls and waits up to 30 seconds. Cainiao's sticky tab layer can
+  // keep intercepting the same point, causing visible up/down retries. Scroll once, allow a short
+  // actionability window, then use the existing safe force-click fallback for a visible control.
+  await locator.scrollIntoViewIfNeeded({ timeout }).catch(() => {});
+  try {
+    await locator.click({ trial: true, timeout });
+    await locator.click({ timeout });
+    return { forced: false };
+  } catch (error) {
+    const visible = await locator.isVisible().catch(() => false);
+    const enabled = await locator.isEnabled().catch(() => false);
+    if (!visible || !enabled) throw error;
+    console.warn(`⚠️ ${label}被页面浮层遮挡，快速强制点击继续`);
+    await locator.click({ force: true, timeout });
+    return { forced: true };
+  }
 }
 
 export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
@@ -190,8 +308,6 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
   if (!detailTabBox) throw new Error('“库存明细”标签没有可点击区域');
   await page.mouse.click(detailTabBox.x + detailTabBox.width / 2, detailTabBox.y + detailTabBox.height / 2);
   await page.waitForTimeout(5000);
-  const visibleExportButton = await findVisibleExportButton(page);
-
   const activeDetailTab = page.locator([
     '.cn-next-tabs-tab.active:has-text("库存明细")',
     '.next-tabs-tab.active:has-text("库存明细")',
@@ -204,7 +320,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
     'th:has-text("入库汇总")'
   ]);
   const activeDetailVisible = await activeDetailTab.isVisible().catch(() => false);
-  if (!visibleExportButton || (!activeDetailVisible && !detailContent)) {
+  if (!activeDetailVisible && !detailContent) {
     const screenshotPath = path.join('reports', `cainiao-detail-tab-switch-failed-${Date.now()}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: true });
     throw new Error(`点击“库存明细”后页面未切换成功，已停止导出。排查截图: ${screenshotPath}`);
@@ -255,18 +371,10 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
         throw new Error('月粒度每次只允许导出一个自然月');
       }
       const beforeMonth = await monthInput.inputValue();
-      try {
-        await monthInput.fill(targetMonth);
-        await monthInput.press('Enter');
-      } catch {
-        const monthBox = await monthInput.boundingBox();
-        if (!monthBox) throw new Error('月份选择器没有可点击区域');
-        await page.mouse.click(monthBox.x + monthBox.width / 2, monthBox.y + monthBox.height / 2);
-      }
-      await page.waitForTimeout(700);
+      const monthSelected = await selectCainiaoMonth(page, monthInput, targetMonth);
       const afterMonth = await monthInput.inputValue();
       console.log('📅 月份控件提交前后:', beforeMonth, '=>', afterMonth);
-      if (process.env.CAINIAO_DATE_PICKER_DIAGNOSTIC === '1' || afterMonth !== targetMonth) {
+      if (process.env.CAINIAO_DATE_PICKER_DIAGNOSTIC === '1' || !monthSelected || afterMonth !== targetMonth) {
         if (afterMonth !== targetMonth) {
           const monthBox = await monthInput.boundingBox();
           if (monthBox) await page.mouse.click(monthBox.x + monthBox.width / 2, monthBox.y + monthBox.height / 2);
@@ -357,17 +465,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
   ]);
   if (queryBtn) {
     console.log('🔍 点击查询...');
-    try {
-      await queryBtn.click();
-    } catch (error) {
-      // 菜鸟新版标签栏动画偶尔会短暂盖住可见的查询按钮；保留正常点击
-      // 优先，仅在 Playwright 已确认是事件拦截时回退为强制点击。
-      if (!/intercepts pointer events|receives events/i.test(String(error?.message || error))) {
-        throw error;
-      }
-      console.warn('⚠️ 查询按钮被页面标签层遮挡，使用强制点击继续');
-      await queryBtn.click({ force: true });
-    }
+    await clickCainiaoControl(queryBtn, { label: '查询按钮' });
     await page.waitForTimeout(3000);
   }
 
@@ -389,7 +487,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
     try {
       const [download] = await Promise.all([
         page.waitForEvent('download', { timeout: 15000 }),
-        exportBtn.click(),
+        clickCainiaoControl(exportBtn, { label: '导出明细按钮' }),
       ]);
       downloadPath = await saveDownload(download, dateStr);
     } catch (e) {
@@ -399,7 +497,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
         try {
           const [download] = await Promise.all([
             page.waitForEvent('download', { timeout: 120000 }),
-            downloadBtn.click({ force: true }),
+            clickCainiaoControl(downloadBtn, { label: '下载按钮' }),
           ]);
           downloadPath = await saveDownload(download, dateStr);
         } catch (downloadError) {
@@ -462,10 +560,10 @@ export async function main() {
   // 1. 从菜鸟导出
   const file = await exportWithSingleAuthRecovery();
   if (!file || !fs.existsSync(file)) {
-    throw new Error('没有下载到新的库存文件，已停止后续导入、钉钉通知和云端同步。');
+    throw new Error('没有下载到新的库存文件，已停止后续本地导入和钉钉通知。');
   }
 
-  // 2. 发布前先验证原始文件。失败时不能修改 ERP、同步云端或发送钉钉。
+  // 2. 发布前先验证原始文件。失败时不能修改本地 ERP 或发送钉钉。
   console.log('\n🔐 正在校验库存数据...');
   const strictSourceDate = process.env.CAINIAO_EXPECTED_SOURCE_DATE || "";
   const preliminary = validateCainiaoInventoryFile({ file, expectedSourceDate: strictSourceDate, minRows: 10 });

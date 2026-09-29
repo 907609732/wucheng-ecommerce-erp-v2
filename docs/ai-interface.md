@@ -1,13 +1,13 @@
-# 五成电子商务集团 ERP V2 AI 接口
+# 云仓库存同步 AI 接口
 
-桌面版从 v0.3.0 起提供 CLI 和 MCP，v0.3.1 增加受控 AI Debug，v0.4.0 将其升级为可发现、可扩展的 AI Runtime。同一核心支持源码、便携 EXE、安装版、CLI 和 MCP，并复用 Windows DPAPI 保存的账号与机器人配置。库存日报采用本机直发：本机完成采集、校验和导入后，直接调用钉钉企业应用机器人，不依赖云端 ERP、SSH 或 WSL。
+当前桌面版提供 CLI、MCP、受控 AI Debug 和可发现、可扩展的 AI Runtime。同一核心支持源码、便携 EXE、安装版、CLI 和 MCP，并复用 Windows DPAPI 保存的账号与机器人配置。库存日报采用本机直发：本机完成采集、校验和导入后，直接调用钉钉企业应用机器人，不依赖云端 ERP、SSH 或 WSL。
 
 ## CLI
 
 PowerShell 示例：
 
 ```powershell
-$app = "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\五成电子商务集团 ERP V2.exe"
+$app = "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\云仓库存同步.exe"
 & $app --cli status
 & $app --cli capabilities
 & $app --cli logs --limit=30
@@ -37,7 +37,7 @@ MCP 客户端使用以下本地进程配置：
 
 ```json
 {
-  "command": "C:\\Users\\当前用户\\AppData\\Local\\Programs\\wucheng-ecommerce-erp-v2\\五成电子商务集团 ERP V2.exe",
+  "command": "C:\\Users\\当前用户\\AppData\\Local\\Programs\\wucheng-ecommerce-erp-v2\\云仓库存同步.exe",
   "args": ["--mcp-stdio"]
 }
 ```

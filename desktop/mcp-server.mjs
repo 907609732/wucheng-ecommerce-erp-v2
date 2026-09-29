@@ -21,12 +21,12 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
   );
 
   server.registerTool("inventory_status", {
-    description: "读取五成电子商务集团 ERP V2 状态、配置完整性和自动任务状态，不返回密码或密钥。",
+    description: "读取云仓库存同步状态、配置完整性和自动任务状态，不返回密码或密钥。",
     inputSchema: z.object({})
   }, async () => result(await getStatus()));
 
   server.registerTool("inventory_recent_logs", {
-    description: "读取五成电子商务集团 ERP V2 最近的运行日志。",
+    description: "读取云仓库存同步最近的运行日志。",
     inputSchema: z.object({
       limit: z.number().int().min(1).max(100).default(30).describe("返回最近多少行，范围 1 到 100")
     })
@@ -131,6 +131,6 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
 
 export function serveInventoryMcp(options) {
   const handle = serveStdio(() => createInventoryMcpServer(options));
-  console.error(`五成电子商务集团 ERP V2 MCP ${options.version} 已通过 stdio 启动`);
+  console.error(`云仓库存同步 MCP ${options.version} 已通过 stdio 启动`);
   return handle;
 }

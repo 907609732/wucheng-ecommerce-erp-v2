@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'">
-  <title>五成电子商务集团 ERP V2</title>
+  <title>云仓库存同步</title>
   <link rel="stylesheet" href="../../node_modules/gridjs/dist/theme/mermaid.min.css">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -13,7 +13,7 @@
     <header class="hero">
       <div>
         <p class="eyebrow">WUCHENG E-COMMERCE · ERP V2</p>
-        <h1>五成电子商务集团 ERP V2</h1>
+        <h1>云仓库存同步</h1>
         <p class="subtitle">完全在本机采集、校验并通过企业应用机器人发送到钉钉。</p>
       </div>
       <div class="status" id="statusBadge">待配置</div>
@@ -22,6 +22,7 @@
     <nav class="view-tabs" aria-label="页面导航">
       <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
       <button class="view-tab" type="button" data-view="inventory">商品库存</button>
+      <button class="view-tab" type="button" data-view="sales">销售趋势</button>
       <button class="view-tab" type="button" data-view="settings">设置</button>
     </nav>
 
@@ -36,6 +37,7 @@
     <section class="actions panel">
       <button class="primary" id="runNow">立即同步并发送</button>
       <button id="refreshLogin">登录 / 刷新菜鸟状态</button>
+      <button class="danger hidden" id="stopTask">强制中止当前任务</button>
       <button id="openData">打开数据目录</button>
       <button id="openLogs">打开日志目录</button>
       <button id="checkUpdate">检查更新</button>
@@ -72,6 +74,71 @@
         <p id="inventoryMessage" class="inventory-message">正在读取本地已校验库存…</p>
         <div id="inventoryGrid" class="inventory-grid"></div>
         <p class="inventory-note">这里展示最新已导入的全部云仓 SKU；钉钉报告仍只发送符合现有补货预警条件的商品。</p>
+      </section>
+    </div>
+
+    <div data-view-panel="sales" class="hidden">
+      <section id="monthlySalesDueBanner" class="sales-due-banner hidden">
+        <div><strong id="monthlySalesDueTitle">上月销量尚未同步</strong><p id="monthlySalesDueText">按你的设置这里只提醒，不会自动补跑。</p></div>
+        <button class="primary" id="syncDueMonthlySales" type="button">同步上月销量</button>
+      </section>
+
+      <section class="sales-summary-grid">
+        <article class="summary-card"><span id="salesTotalLabel">选定年销量</span><strong id="salesYearTotal">--</strong></article>
+        <article class="summary-card"><span>月均销量</span><strong id="salesMonthlyAverage">--</strong></article>
+        <article class="summary-card"><span>峰值月份</span><strong id="salesPeakMonth">--</strong></article>
+        <article class="summary-card"><span>有效月份</span><strong id="salesValidMonths">0 / 12</strong></article>
+      </section>
+
+      <section class="panel sales-controls-panel">
+        <div class="sales-controls">
+          <label>统计年份<select id="salesYear"></select></label>
+          <label>排名月份<select id="salesMonth"></select></label>
+          <label class="sales-sku-field">商品名称 / SKU<input id="salesSku" list="salesSkuOptions" placeholder="输入商品名称或 SKU 搜索" autocomplete="off"><datalist id="salesSkuOptions"></datalist></label>
+          <button id="refreshMonthlySales" type="button">刷新统计</button>
+        </div>
+        <div class="sales-scope-tabs" role="group" aria-label="销售趋势范围">
+          <button class="sales-scope-button active" type="button" data-sales-scope="overall">全店总量</button>
+          <button class="sales-scope-button" type="button" data-sales-scope="sku">单个商品</button>
+          <button class="sales-scope-button" type="button" data-sales-scope="top5">年度 Top 5</button>
+        </div>
+        <p id="monthlySalesMessage" class="inventory-message">正在读取本地月销量…</p>
+      </section>
+
+      <section id="monthlySalesEmpty" class="panel empty-sales hidden">
+        <p class="eyebrow">MONTHLY SALES</p>
+        <h2>尚无月销量数据</h2>
+        <p>可以从菜鸟云仓逐月导出完整自然月数据；数据只写入本机，不会发送钉钉。</p>
+        <button class="primary" id="emptyBackfillMonthlySales" type="button">补抓最近 24 个月</button>
+      </section>
+
+      <div id="monthlySalesContent">
+        <section class="sales-chart-grid">
+          <article class="panel chart-card"><div class="section-heading"><div><p class="eyebrow">MONTH TREND</p><h2>月销量折线图</h2></div></div><div id="monthlySalesChart" class="sales-chart" role="img" aria-label="月销量折线图"></div></article>
+          <article class="panel chart-card"><div class="section-heading"><div><p class="eyebrow">YEAR TREND</p><h2>年度销量折线图</h2></div></div><div id="annualSalesChart" class="sales-chart" role="img" aria-label="年度销量折线图"></div></article>
+        </section>
+
+        <section class="panel sales-ranking-panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">MONTH RANKING</p><h2 id="salesRankingTitle">商品月销量排名</h2></div>
+            <span id="salesCoverageState" class="config-state">正在读取…</span>
+          </div>
+          <div class="sales-table-wrap">
+            <table class="sales-table">
+              <thead><tr><th>排名</th><th>商品</th><th>SKU</th><th>toC</th><th>toB</th><th>总销量</th><th>上月</th><th>环比</th></tr></thead>
+              <tbody id="salesRankingBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel sales-backfill-panel">
+        <div><p class="eyebrow">HISTORY</p><h2>历史月销量补抓</h2><p>逐月执行、已有有效数据自动跳过；遇到登录、下载或校验错误立即停止。</p></div>
+        <div class="backfill-controls">
+          <label>起始月份<input id="salesBackfillFrom" type="month"></label>
+          <label>结束月份<input id="salesBackfillTo" type="month"></label>
+          <button id="backfillMonthlySales" type="button">开始补抓</button>
+        </div>
       </section>
     </div>
 
@@ -146,10 +213,12 @@
         <div class="settings-card-heading"><div><h3>自动任务</h3><p>本机每日直发，不依赖服务器、SSH 或 WSL。</p></div></div>
         <div class="form-grid">
           <label>每天执行时间<input id="scheduleTime" type="time" required></label>
+          <label>每月销量执行时间<input id="monthlySalesTime" type="time" required></label>
           <label>低库存阈值<input id="lowStockThreshold" type="number" min="0" max="999999" required></label>
         </div>
         <div class="switch-row">
           <label class="check"><input id="scheduleEnabled" type="checkbox">启用每日自动同步</label>
+          <label class="check"><input id="monthlySalesEnabled" type="checkbox">每月 1 日自动同步上月销量</label>
           <label class="check"><input id="startAtLogin" type="checkbox">登录 Windows 后自动启动</label>
         </div>
         <div class="settings-actions">
@@ -175,8 +244,8 @@
 
       <section class="settings-card">
         <div class="settings-card-heading">
-          <div><h3>在线升级</h3><p>企业内部更新凭据已随软件内置，无需每台电脑重复配置。</p></div>
-          <span class="config-state ready">已内置</span>
+          <div><h3>在线升级</h3><p>正式发布版会内置企业更新凭据，并在首次启动后转存到 Windows 安全存储。</p></div>
+          <span class="config-state" id="updateCredentialState">检测中</span>
         </div>
         <p class="field-help">软件会自动检查私有发布版本；下载完成后仍由用户点击“重启并安装更新”。</p>
       </section>
@@ -186,6 +255,7 @@
     </div>
   </main>
   <script src="../../node_modules/gridjs/dist/gridjs.production.min.js"></script>
+  <script src="../../node_modules/echarts/dist/echarts.min.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

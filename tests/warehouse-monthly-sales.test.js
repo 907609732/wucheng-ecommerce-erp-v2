@@ -16,6 +16,7 @@ const {
   validateWarehouseMonthlySalesFile
 } = await import("../core/erp/warehouse-monthly-sales.js");
 const { getDb } = await import("../core/erp/db.js");
+const { backfillWarehouseMonthlySales, monthsBetween } = await import("../core/backfill-cainiao-monthly-sales.js");
 
 function writeWorkbook(name, rows) {
   const file = path.join(testDir, name);
@@ -107,6 +108,7 @@ test("月报含真实 @ 参数，已发送防重", async () => {
   const preview = buildWarehouseMonthlySalesMarkdown("2026-05", { publicUrl: "https://erp.example" });
   assert.match(preview.text, /toC销售出 \+ toB销售出/);
   assert.match(preview.text, /查看网站趋势看板/);
+  assert.doesNotMatch(buildWarehouseMonthlySalesMarkdown("2026-05").text, /查看网站趋势看板/);
   const first = await sendWarehouseMonthlySalesReport("2026-05", { sender, config });
   assert.equal(first.sent, true);
   assert.match(sent[0].msgParam.text, /^@user-1 测试用户/);
@@ -148,4 +150,32 @@ test("网络未知状态记账且不自动重发", async () => {
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "unknown");
   assert.equal(calls, 1);
+});
+
+test("历史补抓只写本地，跳过已验证月份且不调用云同步", async () => {
+  assert.deepEqual(monthsBetween("2025-12", "2026-02"), ["2025-12", "2026-01", "2026-02"]);
+  assert.throws(() => monthsBetween("2026-03", "2026-02"), /起始月份不能晚于结束月份/);
+  assert.throws(() => monthsBetween("bad-month", "2026-02"));
+
+  const validMonths = new Set(["2026-01"]);
+  const collected = [];
+  const database = {
+    prepare: () => ({
+      get: (month) => validMonths.has(month) ? { valid: 1 } : undefined
+    })
+  };
+  const result = await backfillWarehouseMonthlySales({
+    from: "2026-01",
+    to: "2026-03",
+    database,
+    collect: async ({ month, warehouseId }) => {
+      assert.equal(warehouseId, "cainiao");
+      collected.push(month);
+      validMonths.add(month);
+    }
+  });
+
+  assert.deepEqual(collected, ["2026-02", "2026-03"]);
+  assert.deepEqual(result.skipped, ["2026-01"]);
+  assert.deepEqual(result.collected, ["2026-02", "2026-03"]);
 });

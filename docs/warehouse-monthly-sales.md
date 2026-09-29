@@ -5,13 +5,13 @@
 - 销量（件）仅等于菜鸟库存明细中的 `toC销售出 + toB销售出`。
 - 调拨、盘亏、加工等其他出库不计入销量，不展示或估算销售金额。
 - 只有来源日期完整覆盖自然月、必要列齐全、SKU 唯一且销量非负的数据才进入正式表。
-- 缺失月份返回 `null`，页面显示“无数据”，不会补 0 或插值。
+- 未通过整月校验的缺失月份返回 `null`，页面显示“无数据”，不会插值；已校验月份内未出现的单个 SKU 按 0 件处理。
 
 正式数据存放在 `warehouse_monthly_sales`；校验记录存放在
 `warehouse_monthly_sales_validations`。它们与每日库存快照及旧的
 `monthly_outbound` 完全隔离。
 
-## 三个运行入口
+## 运行入口
 
 单月抓取、校验和本地导入：
 
@@ -25,38 +25,42 @@ npm.cmd run sync:sales:monthly -- --month 2026-08
 npm.cmd run sync:sales:monthly -- --month 2026-05 --file "downloads\完整月文件.xlsx"
 ```
 
-单月抓取、同步云端并发送一次月报：
-
-```powershell
-npm.cmd run sync:sales:monthly:cloud -- --month 2026-08
-```
-
-历史 12 个月补抓（2025-08 至 2026-07）：
+默认补抓最近 24 个完整自然月：
 
 ```powershell
 npm.cmd run sync:sales:backfill
 ```
 
 历史补抓逐月最多导出一次；任何登录、验证码、滑块、下载或校验错误都会立即停止。
-再次运行会跳过已验证月份，从失败月份继续。全部月份验证后只上传一次数据库快照，
-并显式跳过历史钉钉消息。
+再次运行会跳过已验证月份，从失败月份继续。全部月份只保存在本机 SQLite，
+不会上传数据库，也不会补发历史钉钉消息。
 
-## API 与网站
+菜鸟页面可能限制可选历史月份。2026-09-27 本机验收时仅开放 2025-09 至
+2026-08 共 12 个完整月；更早月份在选择器中为禁用状态，程序会停止并保留缺失提醒，
+不会伪造历史数据。
 
-`GET /api/reports/warehouse-monthly-sales` 支持：
+也可以显式指定补抓范围：
 
-- `from=YYYY-MM`
-- `to=YYYY-MM`
-- `warehouseId=cainiao`
-- `sku=SKU或商品名`
+```powershell
+npm.cmd run sync:sales:backfill -- --from 2025-08 --to 2026-07
+```
 
-经营看板中的“菜鸟云仓 SKU 月销量趋势”使用本地 npm 依赖 Chart.js 4。
-有效完整月份少于 8 个时使用柱状图；达到 8 个后切换折线图。页面同时提供
-KPI、总量趋势、Top 5 趋势、单 SKU、月度排名和 SKU × 月份明细表。
+## 桌面趋势看板
 
-## 钉钉与防重
+`getWarehouseMonthlySales` 提供总量趋势、Top 5、单 SKU、月度排名和
+SKU × 月份明细；缺失月份保持 `null`。
 
-月报只走现有云端企业应用机器人，并使用 `userIds` 和正文 `@用户ID` 真实提醒目标用户。
+V2 桌面端“销售趋势”页面提供：
+
+- 选定年份 12 个月折线图，以及按自然年汇总的年度折线图。
+- 全店总量、单 SKU 和年度 Top 5 三种范围。
+- 点击月份查看商品名称、SKU、toC、toB、总销量、上月销量和环比排名。
+- 最近 24 个月历史补抓，以及每月 1 日定时采集上月完整数据。
+- 错过定时任务时只提示手动补跑；不自动打开菜鸟页面。
+
+月销量采集只写入本机，不触发钉钉。缺失月份在折线图中保持断点，少于 12 个有效月的年度标记为“年内累计/数据不完整”。
+
+代码层保留企业应用机器人月报生成与发送能力，并使用 `userIds` 和正文 `@用户ID` 提醒目标用户。
 `monthly_report_deliveries` 以“报告类型 + 月份”唯一防重：
 
 - `sent`：明确成功，之后跳过。
@@ -64,12 +68,4 @@ KPI、总量趋势、Top 5 趋势、单 SKU、月度排名和 SKU × 月份明�
 - `pending`：已有发送中的实例，之后跳过。
 - `failed`：钉钉明确拒绝，可在修复配置后人工重试。
 
-预览不会创建投递台账，也不会发送真实消息：
-
-```powershell
-$body = @{ type = "warehouse-monthly"; month = "2026-08"; dryRun = $true } | ConvertTo-Json
-Invoke-RestMethod http://127.0.0.1:3000/api/dingtalk/send-report -Method Post -ContentType application/json -Body $body
-```
-
-网站链接由 `ERP_PUBLIC_URL` 配置。正式月度任务每月 5 日 09:00（Asia/Shanghai）
-运行上一完整月；现有每日 22:00 库存任务不做任何修改。
+该发送能力目前没有暴露为 npm 命令，避免误触真实钉钉消息。现有每日 22:00 库存任务不受影响。

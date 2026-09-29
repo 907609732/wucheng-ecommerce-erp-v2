@@ -60,9 +60,9 @@ jobs:
           }
           $remoteAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
           foreach ($required in @(
-            "WuchengERP-V2-Setup-$version-x64.exe",
-            "WuchengERP-V2-Portable-$version-x64.exe",
-            "WuchengERP-V2-Setup-$version-x64.exe.blockmap",
+            "CloudWarehouseInventorySync-Setup-$version-x64.exe",
+            "CloudWarehouseInventorySync-Portable-$version-x64.exe",
+            "CloudWarehouseInventorySync-Setup-$version-x64.exe.blockmap",
             'latest.yml'
           )) {
             if ($remoteAssets -notcontains $required) { throw "Missing release asset: $required" }

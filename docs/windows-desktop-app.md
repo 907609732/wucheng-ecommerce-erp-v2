@@ -1,20 +1,21 @@
-# 五成电子商务集团 ERP V2（Windows EXE）
+# 云仓库存同步（Windows EXE）
 
 ## 功能
 
 - 所有业务配置统一放在“设置”页，菜鸟账号、钉钉机器人和自动任务可分别保存。
 - 密码、Client Secret 和 Webhook 由 Electron `safeStorage` 调用 Windows DPAPI 加密保存。
 - 支持钉钉企业应用机器人和群 Webhook 两种发送方式。
-- 支持立即同步、人工刷新菜鸟登录态、每日定时同步和登录 Windows 后自动启动。
+- 支持立即同步、人工刷新菜鸟登录态、运行中强制中止任务、每日库存同步、每月销量同步和登录 Windows 后自动启动。
+- “销售趋势”页支持月/年折线图、单 SKU、Top 5、月度排名和最近 24 个月历史补抓；月销量任务不会发送钉钉。
 - 支持从私有 GitHub Releases 自动检查、后台下载并重启安装新版本。
-- v0.4.0 AI Runtime 支持源码、CLI、本地 stdio MCP、便携 EXE 和安装版，并提供能力发现、Debug Bundle、显式信任扩展和脱敏日志检索。
-- v0.4.1 起每日库存链路固定为本机直发，不再要求云端 ERP、SSH 或 WSL；企业应用机器人配置仍由 Windows DPAPI 保护。
+- AI Runtime 支持源码、CLI、本地 stdio MCP、便携 EXE 和安装版，并提供能力发现、Debug Bundle、显式信任扩展和脱敏日志检索。
+- 每日库存链路固定为本机直发，不要求云端 ERP、SSH 或 WSL；企业应用机器人配置仍由 Windows DPAPI 保护。
 - 登录过期、验证码/滑块、库存数据校验失败或发送失败时立即停止，不自动重试。
 - 数据、登录态、日志和 SQLite 数据库保存在当前 Windows 用户的应用数据目录，不写回安装目录。
 
 ## 使用
 
-1. 安装 `WuchengERP-V2-Setup-版本-x64.exe`，或直接启动 `WuchengERP-V2-Portable-版本-x64.exe`。
+1. 安装 `CloudWarehouseInventorySync-Setup-版本-x64.exe`，或直接启动 `CloudWarehouseInventorySync-Portable-版本-x64.exe`。
 2. 进入“设置”，在“菜鸟账号”中单独保存账号和密码。
 3. 在“钉钉机器人”中单独选择发送方式：
    - 企业应用机器人：填写 Client ID、Client Secret、Robot Code、群会话 ID；目标用户 ID 可选。

@@ -28,7 +28,7 @@ export async function sendInventoryDingTalkMarkdown({ title, text, shouldNotify 
     return { skipped: true, reason: "no_critical_stock_alert" };
   }
   if (process.env.DINGTALK_SKIP_SEND === "1") {
-    console.log("已设置 DINGTALK_SKIP_SEND=1，库存消息交由云端催办服务发送。");
+    console.log("已设置 DINGTALK_SKIP_SEND=1，本次跳过库存消息发送。");
     return { skipped: true };
   }
 

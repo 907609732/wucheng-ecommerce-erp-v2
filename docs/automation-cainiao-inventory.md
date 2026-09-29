@@ -1,7 +1,7 @@
 # 菜鸟库存每日本地直发流程
 
 > Windows 本机完成菜鸟库存采集、数据校验、本地导入和钉钉企业应用机器人发送。
-> 从 v0.4.1 起，日常库存流程不再依赖云端 ERP、SSH、WSL 或服务器目录。
+> V2 日常库存流程不依赖云端 ERP、SSH、WSL 或服务器目录。
 
 ## 推荐入口
 
@@ -16,7 +16,7 @@ V2 只保留 `sync:inventory:local`；旧的 `sync:inventory:full` 和 `sync:inv
 AI 或脚本可调用：
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\五成电子商务集团 ERP V2.exe" --cli sync --confirm-send
+& "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\云仓库存同步.exe" --cli sync --confirm-send
 ```
 
 该入口会依次完成：
@@ -55,7 +55,7 @@ AI 或脚本可调用：
 登录态文件结构有效不代表线上会话仍有效。登录态缺失或失效时：
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\五成电子商务集团 ERP V2.exe" --cli login --confirm-open-browser
+& "$env:LOCALAPPDATA\Programs\wucheng-ecommerce-erp-v2\云仓库存同步.exe" --cli login --confirm-open-browser
 ```
 
 程序会自动填写已保存的账号密码。出现验证码、滑块或短信验证时，必须由用户本人处理；超时或失败后停止，不自动循环重试。

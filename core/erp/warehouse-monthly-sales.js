@@ -292,7 +292,7 @@ export function getWarehouseMonthlySales({ from, to, warehouseId = "cainiao", sk
   };
 }
 
-export function buildWarehouseMonthlySalesMarkdown(month, { publicUrl = process.env.ERP_PUBLIC_URL || "https://erp.lttlt.top" } = {}) {
+export function buildWarehouseMonthlySalesMarkdown(month, { publicUrl = process.env.ERP_PUBLIC_URL || "" } = {}) {
   assertMonth(month);
   const report = getWarehouseMonthlySales({ from: previousMonth(month), to: month });
   if (report.summary.month !== month || report.summary.completeness !== "valid") {

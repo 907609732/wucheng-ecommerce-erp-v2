@@ -1,6 +1,6 @@
 module.exports = {
   appId: "com.wucheng.ecommerce.erp.v2",
-  productName: "五成电子商务集团 ERP V2",
+  productName: "云仓库存同步",
   publish: [{
     provider: "github",
     owner: "907609732",
@@ -8,7 +8,7 @@ module.exports = {
     private: true,
     releaseType: "release"
   }],
-  artifactName: "WuchengERP-V2-Setup-${version}-${arch}.${ext}",
+  artifactName: "CloudWarehouseInventorySync-Setup-${version}-${arch}.${ext}",
   directories: {
     output: "dist",
     buildResources: "build"
@@ -36,10 +36,10 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: "五成电子商务集团 ERP V2",
+    shortcutName: "云仓库存同步",
     deleteAppDataOnUninstall: false
   },
   portable: {
-    artifactName: "WuchengERP-V2-Portable-${version}-${arch}.${ext}"
+    artifactName: "CloudWarehouseInventorySync-Portable-${version}-${arch}.${ext}"
   }
 };

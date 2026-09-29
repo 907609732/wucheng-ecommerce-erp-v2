@@ -6,6 +6,7 @@ export function createUpdater({ app, getToken, onState, log }) {
   let state = {
     currentVersion: app.getVersion(),
     availableVersion: "",
+    credentialAvailable: app.isPackaged ? null : false,
     status: app.isPackaged ? "idle" : "development",
     message: app.isPackaged ? "尚未检查" : "开发模式不检查更新"
   };
@@ -44,13 +45,14 @@ export function createUpdater({ app, getToken, onState, log }) {
   });
 
   async function check({ automatic = false } = {}) {
-    if (!app.isPackaged) return updateState({ status: "development", message: "开发模式不检查更新" });
+    if (!app.isPackaged) return updateState({ credentialAvailable: false, status: "development", message: "开发模式不检查更新" });
     const token = String((await getToken()) || process.env.GH_TOKEN || "").trim();
     if (!token) {
-      const result = updateState({ status: "needs-token", message: "内置更新凭据不可用，请联系软件管理员" });
+      const result = updateState({ credentialAvailable: false, status: "needs-token", message: "当前安装包未配置在线更新凭据，请安装正式发布版" });
       if (!automatic) throw new Error(result.message);
       return result;
     }
+    updateState({ credentialAvailable: true });
     process.env.GH_TOKEN = token;
     autoUpdater.requestHeaders = { Authorization: `token ${token}` };
     await autoUpdater.checkForUpdates();
@@ -58,7 +60,12 @@ export function createUpdater({ app, getToken, onState, log }) {
   }
 
   function initialize() {
-    if (app.isPackaged) setTimeout(() => check({ automatic: true }).catch(() => {}), 12_000);
+    if (app.isPackaged) {
+      void getToken()
+        .then((token) => updateState({ credentialAvailable: Boolean(String(token || process.env.GH_TOKEN || "").trim()) }))
+        .catch(() => updateState({ credentialAvailable: false }));
+      setTimeout(() => check({ automatic: true }).catch(() => {}), 12_000);
+    }
     return state;
   }
 

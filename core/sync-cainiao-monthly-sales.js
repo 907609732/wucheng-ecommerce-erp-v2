@@ -21,7 +21,7 @@ export async function collectWarehouseMonthlySales({ month, file = "", warehouse
     sourceFile = await exportFromCainiao({ startDate: bounds.start, endDate: bounds.end });
   }
   if (!sourceFile || !fs.existsSync(sourceFile)) {
-    throw new Error("未获得月销量源文件，已停止导入、云端同步和月报发送。");
+    throw new Error("未获得月销量源文件，已停止本地导入。");
   }
   const result = importWarehouseMonthlySalesFile({ file: sourceFile, month, warehouseId });
   console.log(

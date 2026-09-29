@@ -8,6 +8,7 @@ import {
   DEFAULT_SETTINGS,
   EDITABLE_SECRET_FIELDS,
   SECRET_FIELDS,
+  nextMonthlyRunAt,
   nextRunAt,
   normalizeSettings,
   validateAutomationSettings,
@@ -22,7 +23,11 @@ import { createRuntimeCapabilities } from "./shared/runtime-contract.mjs";
 import { discoverExtensions, invokeTrustedExtension, normalizeTrustedExtensionIds } from "./shared/extensions.mjs";
 import { canonicalUserDataPath, requestedUserDataPath } from "./shared/user-data-path.mjs";
 import { readCainiaoInventory } from "./shared/inventory-store.mjs";
+import { readMonthlySalesDashboard } from "./shared/monthly-sales-store.mjs";
 import { createUpdater } from "./updater.mjs";
+import { terminateProcessTree } from "./shared/task-process.mjs";
+import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedule.mjs";
+import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 
 const stableUserDataPath = requestedUserDataPath(process.argv) || canonicalUserDataPath(app.getPath("appData"));
 fs.mkdirSync(stableUserDataPath, { recursive: true });
@@ -44,10 +49,13 @@ let runningChild = null;
 let runningKind = "";
 let scheduleTimer = null;
 let nextScheduledRun = null;
+let nextMonthlyScheduledRun = null;
+let scheduledTaskQueue = [];
 let recentLog = [];
 let quitting = false;
 let updater = null;
 let runningTaskPromise = null;
+let stopRequestedPid = null;
 let mcpBridgeChild = null;
 let cachedSettings = null;
 let cachedSecrets = null;
@@ -252,10 +260,20 @@ function appendLog(message, level = "info") {
 }
 
 function emitState(extra = {}) {
+  let monthlySalesDueMonth = "";
+  try {
+    monthlySalesDueMonth = readMonthlySalesDashboard(inventoryDatabasePath()).dueMonth;
+  } catch {
+    monthlySalesDueMonth = latestCompleteMonth();
+  }
   const payload = {
     running: Boolean(runningChild),
     runningKind,
+    stopRequested: stopRequestedPid !== null,
     nextScheduledRun: nextScheduledRun?.toISOString() || "",
+    nextMonthlyScheduledRun: nextMonthlyScheduledRun?.toISOString() || "",
+    monthlySalesDueMonth,
+    queuedTasks: scheduledTaskQueue.map((item) => item.kind),
     logPath: currentLogPath(),
     ...extra
   };
@@ -269,7 +287,7 @@ function createWindow() {
     height: 780,
     minWidth: 900,
     minHeight: 680,
-    title: "五成电子商务集团 ERP V2",
+    title: "云仓库存同步",
     backgroundColor: "#f4f1ec",
     show: !process.argv.includes("--hidden"),
     webPreferences: {
@@ -284,7 +302,8 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("close", (event) => {
-    if (!quitting && readSettings().scheduleEnabled) {
+    const settings = readSettings();
+    if (!quitting && (settings.scheduleEnabled || settings.monthlySalesEnabled)) {
       event.preventDefault();
       mainWindow.hide();
       appendLog("窗口已隐藏，定时任务继续运行。再次启动软件可恢复窗口。");
@@ -293,7 +312,8 @@ function createWindow() {
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
-function buildEnvironment(settings, secrets) {
+function buildEnvironment(settings, secrets, kind = "sync") {
+  const inventoryTask = kind === "sync";
   return {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
@@ -304,8 +324,8 @@ function buildEnvironment(settings, secrets) {
     CAINIAO_PASSWORD: secrets.cainiaoPassword || "",
     BUSINESS_TIME_ZONE: "Asia/Shanghai",
     LOW_STOCK_THRESHOLD: String(settings.lowStockThreshold),
-    DINGTALK_SKIP_SEND: "0",
-    DINGTALK_INVENTORY_REPORT_ENABLED: "true",
+    DINGTALK_SKIP_SEND: inventoryTask ? "0" : "1",
+    DINGTALK_INVENTORY_REPORT_ENABLED: inventoryTask ? "true" : "false",
     DINGTALK_REMINDER_ENABLED: "false",
     DINGTALK_DELIVERY_MODE: settings.deliveryMode,
     DINGTALK_CLIENT_ID: secrets.dingtalkClientId || "",
@@ -319,29 +339,44 @@ function buildEnvironment(settings, secrets) {
   };
 }
 
-async function startProcess(kind, trigger = "manual") {
+function taskDefinition(kind, options = {}) {
+  if (kind === "login") return { scriptName: "playwright-login.js", args: [], label: "菜鸟登录" };
+  if (kind === "sync") return { scriptName: "sync-cainiao-inventory.js", args: [], label: "库存同步" };
+  if (kind === "monthly-sales") return {
+    scriptName: "sync-cainiao-monthly-sales.js",
+    args: ["--month", assertMonthInput(options.month)],
+    label: `${options.month} 月销量同步`
+  };
+  if (kind === "monthly-backfill") return {
+    scriptName: "backfill-cainiao-monthly-sales.js",
+    args: ["--from", assertMonthInput(options.from), "--to", assertMonthInput(options.to)],
+    label: `${options.from} 至 ${options.to} 月销量补抓`
+  };
+  throw new Error(`未知任务类型：${kind}`);
+}
+
+async function startProcess(kind, trigger = "manual", options = {}) {
   if (runningChild || runningTaskPromise) throw new Error("已有任务正在运行，请等待完成");
+  const definition = taskDefinition(kind, options);
   const settings = readSettings();
   const secrets = await readSecrets();
   const flags = secretFlags(secrets);
-  const validation = kind === "login"
-    ? validateCainiaoSettings(settings, flags)
-    : validateSettings(settings, flags);
+  const validation = kind === "sync"
+    ? validateSettings(settings, flags)
+    : validateCainiaoSettings(settings, flags);
   if (!validation.ok) throw new Error(validation.errors.join("；"));
-  const scriptName = kind === "login" ? "playwright-login.js" : "sync-cainiao-inventory.js";
-  const scriptPath = path.join(app.getAppPath(), "core", scriptName);
+  const scriptPath = path.join(app.getAppPath(), "core", definition.scriptName);
   const releaseTaskLock = acquireTaskLock(kind);
   const startedAt = new Date().toISOString();
   const logStart = recentLog.length;
   runningKind = kind;
-  appendLog(kind === "login" ? "启动菜鸟登录窗口…" : `启动库存同步（${trigger === "schedule" ? "定时" : "手动"}）…`);
-  emitState();
+  appendLog(`启动${definition.label}（${trigger === "schedule" ? "定时" : "手动"}）…`);
 
   let child;
   try {
-    child = spawn(process.execPath, [scriptPath], {
+    child = spawn(process.execPath, [scriptPath, ...definition.args], {
       cwd: appDataDir(),
-      env: buildEnvironment(settings, secrets),
+      env: buildEnvironment(settings, secrets, kind),
       windowsHide: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -354,6 +389,7 @@ async function startProcess(kind, trigger = "manual") {
   let resolveTask;
   const completion = new Promise((resolve) => { resolveTask = resolve; });
   runningTaskPromise = completion;
+  emitState();
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   const consume = (chunk, level) => {
@@ -363,15 +399,22 @@ async function startProcess(kind, trigger = "manual") {
   child.stderr.on("data", (chunk) => consume(chunk, "error"));
   child.on("error", (error) => appendLog(`任务启动失败：${error.message}`, "error"));
   child.once("close", (code) => {
-    const success = code === 0;
-    appendLog(success ? "任务执行完成。" : `任务已停止，退出码 ${code ?? "未知"}。`, success ? "success" : "error");
+    const cancelled = stopRequestedPid === child.pid;
+    const success = code === 0 && !cancelled;
+    appendLog(
+      cancelled ? "当前任务已由用户强制中止。" : (success ? "任务执行完成。" : `任务已停止，退出码 ${code ?? "未知"}。`),
+      success ? "success" : (cancelled ? "info" : "error")
+    );
     releaseTaskLock();
     runningChild = null;
     runningKind = "";
-    emitState({ lastResult: success ? "success" : "failed", lastFinishedAt: new Date().toISOString() });
+    if (cancelled) stopRequestedPid = null;
+    emitState({ lastResult: cancelled ? "cancelled" : (success ? "success" : "failed"), lastFinishedAt: new Date().toISOString() });
     if (success && kind === "sync") mainWindow?.webContents.send("inventory:updated");
+    if (success && ["monthly-sales", "monthly-backfill"].includes(kind)) mainWindow?.webContents.send("monthly-sales:updated");
     resolveTask({
       success,
+      cancelled,
       exitCode: code,
       kind,
       startedAt,
@@ -379,8 +422,31 @@ async function startProcess(kind, trigger = "manual") {
       logs: recentLog.slice(logStart)
     });
     if (runningTaskPromise === completion) runningTaskPromise = null;
+    scheduledTaskQueue = queueAfterTaskResult(scheduledTaskQueue, { success, cancelled });
+    if (success && !cancelled) queueMicrotask(() => runNextScheduledTask());
   });
   return { started: true };
+}
+
+async function stopCurrentTask() {
+  const child = runningChild;
+  const completion = runningTaskPromise;
+  if (!child || !completion) return { stopped: false, message: "当前没有正在运行的任务" };
+
+  stopRequestedPid = child.pid;
+  scheduledTaskQueue = [];
+  appendLog("正在强制中止当前任务…");
+  emitState({ stopRequested: true });
+  try {
+    await terminateProcessTree(child);
+    const result = await completion;
+    return { stopped: true, kind: result.kind };
+  } catch (error) {
+    stopRequestedPid = null;
+    appendLog(`强制中止失败：${error.message}`, "error");
+    emitState();
+    throw error;
+  }
 }
 
 async function runProcessAndWait(kind, trigger) {
@@ -649,6 +715,8 @@ async function interfaceStatus() {
     schedule: {
       enabled: settings.scheduleEnabled,
       time: settings.scheduleTime,
+      monthlySalesEnabled: settings.monthlySalesEnabled,
+      monthlySalesTime: settings.monthlySalesTime,
       startAtLogin: settings.startAtLogin
     },
     paths: { workspace: appDataDir(), log: currentLogPath() }
@@ -668,24 +736,69 @@ function configureSchedule() {
   if (scheduleTimer) clearTimeout(scheduleTimer);
   scheduleTimer = null;
   nextScheduledRun = null;
+  nextMonthlyScheduledRun = null;
   const settings = readSettings();
   configureLoginItem(settings);
-  if (!settings.scheduleEnabled) {
+  if (settings.scheduleEnabled) nextScheduledRun = nextRunAt(settings.scheduleTime);
+  if (settings.monthlySalesEnabled) nextMonthlyScheduledRun = nextMonthlyRunAt(settings.monthlySalesTime);
+  const upcoming = [nextScheduledRun, nextMonthlyScheduledRun].filter(Boolean).sort((a, b) => a - b);
+  if (!upcoming.length) {
     emitState();
     return;
   }
-  nextScheduledRun = nextRunAt(settings.scheduleTime);
-  const delay = Math.max(1000, nextScheduledRun.getTime() - Date.now());
+  const wakeAt = upcoming[0];
+  const delay = Math.max(1000, wakeAt.getTime() - Date.now());
   scheduleTimer = setTimeout(async () => {
-    try {
-      await startProcess("sync", "schedule");
-    } catch (error) {
-      appendLog(`定时任务未启动：${error.message}`, "error");
-    } finally {
-      configureSchedule();
+    const now = Date.now() + 1500;
+    const due = [];
+    if (nextScheduledRun && nextScheduledRun.getTime() <= now) due.push({ kind: "sync", options: {} });
+    if (nextMonthlyScheduledRun && nextMonthlyScheduledRun.getTime() <= now) {
+      due.push({ kind: "monthly-sales", options: { month: latestCompleteMonth() } });
     }
+    configureSchedule();
+    enqueueScheduledTasks(due);
   }, Math.min(delay, 2_147_000_000));
   emitState();
+}
+
+function enqueueScheduledTasks(tasks) {
+  scheduledTaskQueue = mergeScheduledTasks(scheduledTaskQueue, tasks);
+  emitState();
+  void runNextScheduledTask();
+}
+
+async function runNextScheduledTask() {
+  if (runningChild || runningTaskPromise || !scheduledTaskQueue.length) return;
+  const task = scheduledTaskQueue.shift();
+  try {
+    await startProcess(task.kind, "schedule", task.options);
+  } catch (error) {
+    scheduledTaskQueue = [];
+    appendLog(`定时任务未启动：${error.message}`, "error");
+    emitState();
+  }
+}
+
+function assertMonthInput(value) {
+  const month = String(value || "").trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("月份必须是 YYYY-MM 格式");
+  if (month > latestCompleteMonth()) throw new Error("只能同步已经结束的完整自然月");
+  return month;
+}
+
+function validateBackfillRange(payload = {}) {
+  const defaults = defaultBackfillRange();
+  const from = assertMonthInput(payload.from || defaults.from);
+  const to = assertMonthInput(payload.to || defaults.to);
+  if (from > to) throw new Error("补抓起始月份不能晚于结束月份");
+  let cursor = from;
+  let count = 1;
+  while (cursor < to) {
+    cursor = shiftMonth(cursor, 1);
+    count += 1;
+    if (count > 24) throw new Error("一次最多补抓 24 个完整月份");
+  }
+  return { from, to };
 }
 
 ipcMain.handle("settings:get", async () => publicSettings());
@@ -744,9 +857,23 @@ ipcMain.handle("settings:save-section", async (_event, payload = {}) => {
 });
 ipcMain.handle("task:run", () => startProcess("sync", "manual"));
 ipcMain.handle("task:login", () => startProcess("login", "manual"));
+ipcMain.handle("task:stop", () => stopCurrentTask());
 ipcMain.handle("task:state", () => emitState());
 ipcMain.handle("logs:get", () => recentLog);
 ipcMain.handle("inventory:get", () => readCainiaoInventory(inventoryDatabasePath()));
+ipcMain.handle("monthly-sales:get", (_event, filters = {}) => readMonthlySalesDashboard(inventoryDatabasePath(), {
+  year: String(filters.year || ""),
+  selectedMonth: String(filters.selectedMonth || ""),
+  scope: ["overall", "sku", "top5"].includes(filters.scope) ? filters.scope : "overall",
+  sku: String(filters.sku || "").trim()
+}));
+ipcMain.handle("monthly-sales:sync", (_event, payload = {}) => startProcess("monthly-sales", "manual", {
+  month: assertMonthInput(payload.month || latestCompleteMonth())
+}));
+ipcMain.handle("monthly-sales:backfill", (_event, payload = {}) => {
+  const range = validateBackfillRange(payload);
+  return startProcess("monthly-backfill", "manual", range);
+});
 ipcMain.handle("logs:open", () => shell.openPath(logDir()));
 ipcMain.handle("data:open", () => shell.openPath(appDataDir()));
 ipcMain.handle("integration:get", () => ({
@@ -763,17 +890,17 @@ ipcMain.handle("update:install", () => updater?.install() || Promise.reject(new 
 function cliHelp() {
   return {
     usage: [
-      "五成电子商务集团 ERP V2.exe --cli status",
-      "五成电子商务集团 ERP V2.exe --cli capabilities",
-      "五成电子商务集团 ERP V2.exe --cli doctor",
-      "五成电子商务集团 ERP V2.exe --cli debug-logs --level=error --limit=50",
-      "五成电子商务集团 ERP V2.exe --cli debug-bundle",
-      "五成电子商务集团 ERP V2.exe --cli extensions",
-      "五成电子商务集团 ERP V2.exe --cli extension-trust --id=<extension-id> --confirm-trust-code",
-      "五成电子商务集团 ERP V2.exe --cli logs --limit=30",
-      "五成电子商务集团 ERP V2.exe --cli sync --confirm-send",
-      "五成电子商务集团 ERP V2.exe --cli login --confirm-open-browser",
-      "五成电子商务集团 ERP V2.exe --mcp-stdio"
+      "云仓库存同步.exe --cli status",
+      "云仓库存同步.exe --cli capabilities",
+      "云仓库存同步.exe --cli doctor",
+      "云仓库存同步.exe --cli debug-logs --level=error --limit=50",
+      "云仓库存同步.exe --cli debug-bundle",
+      "云仓库存同步.exe --cli extensions",
+      "云仓库存同步.exe --cli extension-trust --id=<extension-id> --confirm-trust-code",
+      "云仓库存同步.exe --cli logs --limit=30",
+      "云仓库存同步.exe --cli sync --confirm-send",
+      "云仓库存同步.exe --cli login --confirm-open-browser",
+      "云仓库存同步.exe --mcp-stdio"
     ],
     note: "sync 会发送一条钉钉库存报告，必须提供 --confirm-send"
   };
@@ -826,7 +953,8 @@ app.on("before-quit", () => {
   if (mcpBridgeChild && !mcpBridgeChild.killed) mcpBridgeChild.kill();
 });
 app.on("window-all-closed", () => {
-  if (!headlessMode && !readSettings().scheduleEnabled) app.quit();
+  const settings = readSettings();
+  if (!headlessMode && !settings.scheduleEnabled && !settings.monthlySalesEnabled) app.quit();
 });
 
 app.whenReady().then(async () => {
@@ -883,7 +1011,7 @@ app.whenReady().then(async () => {
   });
   updater.initialize();
   configureSchedule();
-  appendLog("五成电子商务集团 ERP V2 已启动。", "success");
+  appendLog("云仓库存同步已启动。", "success");
   if (configurationWarmError) appendLog(`配置自检失败：${configurationWarmError.message}`, "error");
   else appendLog("配置与 Windows 安全存储自检通过。", "success");
 });

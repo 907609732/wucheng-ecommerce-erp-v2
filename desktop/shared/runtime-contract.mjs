@@ -8,7 +8,7 @@ export function createRuntimeCapabilities({ version, packaged, executable, works
     schemaVersion: RUNTIME_API_VERSION,
     application: {
       name: "wucheng-ecommerce-erp-v2",
-      displayName: "五成电子商务集团 ERP V2",
+      displayName: "云仓库存同步",
       version,
       packaged: Boolean(packaged),
       executable,
@@ -25,10 +25,10 @@ export function createRuntimeCapabilities({ version, packaged, executable, works
     },
     modes: [
       { id: "source", entry: "npm.cmd run desktop", purpose: "开发、调试与修复源码" },
-      { id: "cli", entry: "五成电子商务集团 ERP V2.exe --cli <command>", purpose: "脚本和 CI 的稳定 JSON 接口" },
-      { id: "mcp-stdio", entry: "五成电子商务集团 ERP V2.exe --mcp-stdio", purpose: "AI 客户端标准调用" },
-      { id: "portable", entry: "WuchengERP-V2-Portable-<version>-x64.exe", purpose: "无需安装的便携运行" },
-      { id: "installed", entry: "五成电子商务集团 ERP V2.exe", purpose: "带设置界面和在线升级的桌面运行" }
+      { id: "cli", entry: "云仓库存同步.exe --cli <command>", purpose: "脚本和 CI 的稳定 JSON 接口" },
+      { id: "mcp-stdio", entry: "云仓库存同步.exe --mcp-stdio", purpose: "AI 客户端标准调用" },
+      { id: "portable", entry: "CloudWarehouseInventorySync-Portable-<version>-x64.exe", purpose: "无需安装的便携运行" },
+      { id: "installed", entry: "云仓库存同步.exe", purpose: "带设置界面和在线升级的桌面运行" }
     ],
     cliCommands: ["status", "capabilities", "doctor", "logs", "debug-logs", "debug-bundle", "extensions", "extension-trust", "extension-call", "sync", "login"],
     mcpTools: [...AI_TOOLS],

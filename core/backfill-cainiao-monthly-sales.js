@@ -1,8 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { getDb } from "./erp/db.js";
-import { latestCompleteMonth, previousMonth } from "./erp/warehouse-monthly-sales.js";
+import { latestCompleteMonth, monthBounds, previousMonth } from "./erp/warehouse-monthly-sales.js";
 import { collectWarehouseMonthlySales } from "./sync-cainiao-monthly-sales.js";
 
 function option(name) {
@@ -10,7 +9,10 @@ function option(name) {
   return index >= 0 ? String(process.argv[index + 1] || "").trim() : "";
 }
 
-function monthsBetween(from, to) {
+export function monthsBetween(from, to) {
+  monthBounds(from);
+  monthBounds(to);
+  if (from > to) throw new Error(`起始月份不能晚于结束月份：${from} > ${to}`);
   const months = [];
   let cursor = from;
   while (cursor <= to) {
@@ -22,43 +24,50 @@ function monthsBetween(from, to) {
   return months;
 }
 
-async function main() {
-  const to = option("--to") || latestCompleteMonth();
-  let from = option("--from");
+export async function backfillWarehouseMonthlySales({
+  from: requestedFrom = "",
+  to: requestedTo = "",
+  database = getDb(),
+  collect = collectWarehouseMonthlySales
+} = {}) {
+  const to = requestedTo || latestCompleteMonth();
+  let from = requestedFrom;
   if (!from) {
     from = to;
-    for (let index = 1; index < 12; index += 1) from = previousMonth(from);
+    for (let index = 1; index < 24; index += 1) from = previousMonth(from);
   }
-  const db = getDb();
   const months = monthsBetween(from, to);
+  const collected = [];
+  const skipped = [];
   for (const month of months) {
-    const valid = db.prepare(
+    const valid = database.prepare(
       `SELECT 1 FROM warehouse_monthly_sales_validations
         WHERE warehouse_id = 'cainiao' AND month = ? AND status = 'valid' ORDER BY id DESC LIMIT 1`
     ).get(month);
     if (valid) {
       console.log(`${month} 已有校验通过的数据，跳过。`);
+      skipped.push(month);
       continue;
     }
     // 每月只调用一次导出。任何登录、验证码、滑块、下载或校验问题都会抛错并立即终止循环。
-    await collectWarehouseMonthlySales({ month, warehouseId: "cainiao" });
+    await collect({ month, warehouseId: "cainiao" });
+    collected.push(month);
   }
-  const missing = months.filter((month) => !db.prepare(
+  const missing = months.filter((month) => !database.prepare(
     `SELECT 1 FROM warehouse_monthly_sales_validations
       WHERE warehouse_id = 'cainiao' AND month = ? AND status = 'valid' ORDER BY id DESC LIMIT 1`
   ).get(month));
   if (missing.length) throw new Error(`仍有月份未通过校验：${missing.join("、")}`);
 
-  console.log("全部月份已验证，开始上传一次一致性数据库快照；不会补发历史钉钉消息。");
-  const sync = spawnSync(process.execPath, [
-    path.join(process.cwd(), "core", "run-monthly-sales-cloud.js"),
-    "--month", to,
-    "--sync-only",
-    "--skip-report"
-  ], { cwd: process.cwd(), env: process.env, stdio: "inherit" });
-  if (sync.error) throw sync.error;
-  if (sync.status !== 0) throw new Error(`历史数据云端同步失败，退出码 ${sync.status}`);
-  console.log(`历史补抓及单次云端同步完成：${from} 至 ${to}。`);
+  console.log(`历史月销量本地补抓完成：${from} 至 ${to}；不会上传数据库或补发历史钉钉消息。`);
+  return { from, to, months, collected, skipped };
+}
+
+async function main() {
+  await backfillWarehouseMonthlySales({
+    from: option("--from"),
+    to: option("--to")
+  });
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";

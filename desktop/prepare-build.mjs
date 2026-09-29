@@ -6,9 +6,13 @@ const outputDir = path.resolve("build", "private");
 const outputPath = path.join(outputDir, "update-token.txt");
 const buildInfoPath = path.join(outputDir, "build-info.json");
 const token = String(process.env.CAINIAO_INTERNAL_UPDATE_TOKEN || "").trim();
+const allowMissingToken = process.argv.includes("--allow-missing-update-token");
 
-if (process.env.GITHUB_ACTIONS === "true" && !token) {
-  throw new Error("缺少 GitHub Actions Secret: CAINIAO_INTERNAL_UPDATE_TOKEN");
+if (!token && !allowMissingToken) {
+  throw new Error(
+    "缺少 CAINIAO_INTERNAL_UPDATE_TOKEN，已停止生成不可在线升级的安装包。" +
+    "仅开发目录打包可使用 --allow-missing-update-token。"
+  );
 }
 
 fs.mkdirSync(outputDir, { recursive: true });
@@ -24,7 +28,7 @@ if (!commit) {
 fs.writeFileSync(buildInfoPath, `${JSON.stringify({
   commit,
   builtAt: new Date().toISOString(),
-  channel: process.env.GITHUB_ACTIONS === "true" ? "release" : "development"
+  channel: token ? "release" : "development"
 }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-console.log(`内置更新凭据：${token ? "已注入" : "本地空占位"}`);
+console.log(`内置更新凭据：${token ? "已注入" : "开发目录空占位"}`);
 console.log(`构建信息：${commit.slice(0, 12) || "unknown"}`);

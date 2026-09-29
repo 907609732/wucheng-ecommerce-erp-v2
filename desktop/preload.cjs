@@ -7,9 +7,13 @@ contextBridge.exposeInMainWorld("inventoryApp", {
   saveSettingsSection: (payload) => ipcRenderer.invoke("settings:save-section", payload),
   runNow: () => ipcRenderer.invoke("task:run"),
   refreshLogin: () => ipcRenderer.invoke("task:login"),
+  stopTask: () => ipcRenderer.invoke("task:stop"),
   getState: () => ipcRenderer.invoke("task:state"),
   getLogs: () => ipcRenderer.invoke("logs:get"),
   getInventory: () => ipcRenderer.invoke("inventory:get"),
+  getMonthlySales: (filters) => ipcRenderer.invoke("monthly-sales:get", filters),
+  syncMonthlySales: (payload) => ipcRenderer.invoke("monthly-sales:sync", payload),
+  backfillMonthlySales: (payload) => ipcRenderer.invoke("monthly-sales:backfill", payload),
   openLogs: () => ipcRenderer.invoke("logs:open"),
   openData: () => ipcRenderer.invoke("data:open"),
   getIntegration: () => ipcRenderer.invoke("integration:get"),
@@ -40,5 +44,10 @@ contextBridge.exposeInMainWorld("inventoryApp", {
     const listener = () => callback();
     ipcRenderer.on("inventory:updated", listener);
     return () => ipcRenderer.removeListener("inventory:updated", listener);
+  },
+  onMonthlySalesUpdated: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("monthly-sales:updated", listener);
+    return () => ipcRenderer.removeListener("monthly-sales:updated", listener);
   }
 });

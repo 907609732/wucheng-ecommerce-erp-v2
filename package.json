@@ -1,7 +1,7 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.1.0",
-  "description": "五成电子商务集团本地优先、AI 可调用的 Windows ERP V2",
+  "version": "0.1.1",
+  "description": "本地优先、AI 可调用的云仓库存同步工具",
   "author": "五成电子商务集团",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "ai:mcp": "electron . --mcp-stdio",
     "ai:inspect": "mcp-inspector --web --config mcp-inspector.json",
     "ai:inspect:tools": "mcp-inspector --cli --config mcp-inspector.json --server wucheng-ecommerce-erp-v2 --method tools/list --format json --strict",
-    "desktop:pack": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --dir",
+    "desktop:pack": "node desktop/prepare-build.mjs --allow-missing-update-token && electron-builder --config build/electron-builder.config.cjs --dir",
     "desktop:build": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --win nsis portable",
     "desktop:publish": "node desktop/prepare-build.mjs && electron-builder --config build/electron-builder.config.cjs --win nsis portable --publish always",
     "setup": "playwright install chromium",
@@ -22,9 +22,9 @@
     "sync:sales:monthly": "node core/sync-cainiao-monthly-sales.js",
     "sync:sales:backfill": "node core/backfill-cainiao-monthly-sales.js --from 2025-08 --to 2026-07",
     "monthly:report": "node core/monthly-report.js",
-    "test:core": "node --test tests/dingtalk-auth.test.js tests/dingtalk-app-robot.test.js tests/dingtalk-inventory-reminder.test.js tests/inventory-validation.test.js",
-    "test:warehouse-sales": "node --test tests/warehouse-monthly-sales.test.js",
-    "test:desktop": "node --test tests/desktop-settings.test.js tests/desktop-ai-interface.test.js tests/desktop-inventory.test.js"
+    "test:core": "node --test tests/cainiao-export-controls.test.js tests/dingtalk-auth.test.js tests/dingtalk-app-robot.test.js tests/dingtalk-inventory-reminder.test.js tests/inventory-validation.test.js",
+    "test:warehouse-sales": "node --test tests/warehouse-monthly-sales.test.js tests/monthly-sales-dashboard.test.js",
+    "test:desktop": "node --test tests/desktop-settings.test.js tests/desktop-ai-interface.test.js tests/desktop-inventory.test.js tests/desktop-task-process.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.1.0",
@@ -32,6 +32,7 @@
     "axios": "^1.20.0",
     "dingtalk-stream": "^2.1.5",
     "dotenv": "^16.4.7",
+    "echarts": "^6.1.0",
     "electron-updater": "^6.8.9",
     "gridjs": "^6.2.0",
     "playwright": "^1.49.1",

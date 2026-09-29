@@ -1,6 +1,8 @@
 export const DEFAULT_SETTINGS = Object.freeze({
   scheduleEnabled: false,
   scheduleTime: "22:00",
+  monthlySalesEnabled: false,
+  monthlySalesTime: "22:00",
   startAtLogin: false,
   lowStockThreshold: 10,
   deliveryMode: "app",
@@ -32,9 +34,11 @@ export const EDITABLE_SECRET_FIELDS = Object.freeze([
 export function normalizeSettings(input = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...input };
   settings.scheduleEnabled = Boolean(settings.scheduleEnabled);
+  settings.monthlySalesEnabled = Boolean(settings.monthlySalesEnabled);
   settings.startAtLogin = Boolean(settings.startAtLogin);
   settings.deliveryMode = settings.deliveryMode === "webhook" ? "webhook" : "app";
   settings.scheduleTime = String(settings.scheduleTime || "").trim();
+  settings.monthlySalesTime = String(settings.monthlySalesTime || "").trim();
   settings.lowStockThreshold = Number(settings.lowStockThreshold);
   settings.trustedExtensionIds = Array.isArray(settings.trustedExtensionIds)
     ? [...new Set(settings.trustedExtensionIds.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean))].sort()
@@ -64,6 +68,9 @@ export function validateAutomationSettings(settings) {
   const errors = [];
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value.scheduleTime)) {
     errors.push("执行时间必须是 HH:mm 格式");
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value.monthlySalesTime)) {
+    errors.push("月销量执行时间必须是 HH:mm 格式");
   }
   if (!Number.isInteger(value.lowStockThreshold) || value.lowStockThreshold < 0 || value.lowStockThreshold > 999999) {
     errors.push("低库存阈值必须是 0 到 999999 的整数");
@@ -99,5 +106,15 @@ export function nextRunAt(scheduleTime, now = new Date()) {
   const result = new Date(now);
   result.setHours(Number(match[1]), Number(match[2]), 0, 0);
   if (result <= now) result.setDate(result.getDate() + 1);
+  return result;
+}
+
+export function nextMonthlyRunAt(scheduleTime, now = new Date()) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(scheduleTime || ""));
+  if (!match) throw new Error("无效的月销量执行时间");
+  const result = new Date(now);
+  result.setDate(1);
+  result.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  if (result <= now) result.setMonth(result.getMonth() + 1, 1);
   return result;
 }
