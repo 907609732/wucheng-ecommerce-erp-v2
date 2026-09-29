@@ -1,6 +1,6 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "本地优先、AI 可调用的云仓库存同步工具",
   "author": "五成电子商务集团",
   "private": true,
