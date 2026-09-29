@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("inventoryApp", {
+  getBranding: () => ipcRenderer.invoke("branding:get"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   getEditableSecrets: () => ipcRenderer.invoke("secrets:get-editable"),
   saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
@@ -16,6 +17,7 @@ contextBridge.exposeInMainWorld("inventoryApp", {
   backfillMonthlySales: (payload) => ipcRenderer.invoke("monthly-sales:backfill", payload),
   openLogs: () => ipcRenderer.invoke("logs:open"),
   openData: () => ipcRenderer.invoke("data:open"),
+  openRepository: () => ipcRenderer.invoke("repository:open"),
   getIntegration: () => ipcRenderer.invoke("integration:get"),
   getUpdateState: () => ipcRenderer.invoke("update:get"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),

@@ -29,6 +29,7 @@ export function buildMonthlySalesDashboard({
   year = "",
   selectedMonth = "",
   scope = "overall",
+  seriesMode = "top5",
   sku = "",
   now = new Date()
 } = {}) {
@@ -102,14 +103,38 @@ export function buildMonthlySalesDashboard({
   const selectedSku = String(sku || "").trim();
   const selectedItem = skuMap.get(selectedSku);
   const selectedSeries = selectedItem ? seriesFor(selectedItem.sku, selectedItem.productName || selectedItem.sku, selectedItem.productName) : null;
-  const topItems = [...skuMap.values()].map((item) => ({
+  const rankedItems = [...skuMap.values()].map((item) => ({
     ...item,
     yearTotal: months.reduce((sum, month) => sum + Number(item.byMonth.get(month)?.salesQuantity || 0), 0)
-  })).sort((a, b) => b.yearTotal - a.yearTotal || a.sku.localeCompare(b.sku, "zh-CN")).slice(0, 5);
-  const top5Series = topItems.map((item) => seriesFor(item.sku, item.productName || item.sku, item.productName));
+  })).sort((a, b) => b.yearTotal - a.yearTotal || a.sku.localeCompare(b.sku, "zh-CN"));
+  const top5Series = rankedItems.slice(0, 5).map((item) => seriesFor(item.sku, item.productName || item.sku, item.productName));
+  const top10Series = rankedItems.slice(0, 10).map((item) => seriesFor(item.sku, item.productName || item.sku, item.productName));
+  const allSeries = rankedItems.map((item) => seriesFor(item.sku, item.productName || item.sku, item.productName));
 
-  const chartSeries = scope === "top5"
-    ? top5Series
+  const previousMonth = shiftMonth(effectiveMonth, -1);
+  const canCompareDecline = validMonths.has(effectiveMonth) && validMonths.has(previousMonth);
+  const decliningItems = canCompareDecline
+    ? [...skuMap.values()].map((item) => {
+        const currentSales = Number(item.byMonth.get(effectiveMonth)?.salesQuantity || 0);
+        const previousSales = Number(item.byMonth.get(previousMonth)?.salesQuantity || 0);
+        return { ...item, currentSales, previousSales, decline: previousSales - currentSales };
+      }).filter((item) => item.decline > 0)
+        .sort((a, b) => b.decline - a.decline || b.previousSales - a.previousSales || a.sku.localeCompare(b.sku, "zh-CN"))
+        .slice(0, 10)
+    : [];
+  const decliningSeries = decliningItems.map((item) => seriesFor(item.sku, item.productName || item.sku, item.productName));
+  const normalizedSeriesMode = ["top5", "top10", "all", "decliners"].includes(seriesMode) ? seriesMode : "top5";
+  const multiSeries = normalizedSeriesMode === "top10"
+    ? top10Series
+    : normalizedSeriesMode === "all"
+      ? allSeries
+      : normalizedSeriesMode === "decliners"
+        ? decliningSeries
+        : top5Series;
+
+  const multiScope = scope === "multi" || scope === "top5";
+  const chartSeries = multiScope
+    ? (scope === "top5" ? top5Series : multiSeries)
     : scope === "sku" && selectedSeries
       ? [overallSeries, selectedSeries]
       : [overallSeries];
@@ -118,7 +143,6 @@ export function buildMonthlySalesDashboard({
   const totalSales = presentValues.reduce((sum, item) => sum + item.value, 0);
   const peak = [...presentValues].sort((a, b) => b.value - a.value)[0] || null;
 
-  const previousMonth = shiftMonth(effectiveMonth, -1);
   const ranking = [...skuMap.values()].map((item) => {
     const current = item.byMonth.get(effectiveMonth);
     const previous = item.byMonth.get(previousMonth);
@@ -146,7 +170,11 @@ export function buildMonthlySalesDashboard({
     selectedMonth: effectiveMonth,
     months,
     skuOptions,
-    scope: scope === "top5" ? "top5" : scope === "sku" ? "sku" : "overall",
+    scope: multiScope ? "multi" : scope === "sku" ? "sku" : "overall",
+    seriesMode: scope === "top5" ? "top5" : normalizedSeriesMode,
+    seriesContext: normalizedSeriesMode === "decliners"
+      ? { fromMonth: previousMonth, toMonth: effectiveMonth, comparable: canCompareDecline, itemCount: decliningSeries.length }
+      : { itemCount: multiSeries.length },
     selectedSku,
     summary: {
       label: primarySeries.name,
@@ -160,6 +188,9 @@ export function buildMonthlySalesDashboard({
     overallSeries,
     selectedSeries,
     top5Series,
+    top10Series,
+    allSeries,
+    decliningSeries,
     chartSeries,
     ranking,
     coverage: years.map((itemYear) => ({

@@ -40,6 +40,7 @@ jobs:
       - name: Build Windows release
         env:
           CAINIAO_INTERNAL_UPDATE_TOKEN: ${{ secrets.CAINIAO_INTERNAL_UPDATE_TOKEN }}
+          CAINIAO_BUILD_CHANNEL: release
         run: npm run desktop:build -- --publish never
       - name: Publish complete GitHub Release
         shell: pwsh

@@ -1,4 +1,5 @@
 import test from "node:test";
+import { EXTERNAL_LINKS, externalLink } from "../desktop/shared/external-links.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -101,4 +102,9 @@ test("CLI sync requires an explicit send confirmation", () => {
 test("CLI login requires an explicit browser confirmation", () => {
   assert.throws(() => parseCliRequest(["login"]), /--confirm-open-browser/);
   assert.deepEqual(parseCliRequest(["login", "--confirm-open-browser"]), { command: "login", confirmed: true });
+});
+test("desktop repository link is fixed to the official GitHub repository", () => {
+  assert.equal(EXTERNAL_LINKS.repository, "https://github.com/907609732/wucheng-ecommerce-erp-v2");
+  assert.equal(externalLink("repository"), EXTERNAL_LINKS.repository);
+  assert.throws(() => externalLink("unknown"), /不允许打开未知外部链接/);
 });

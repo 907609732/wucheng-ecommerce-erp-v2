@@ -27,7 +27,11 @@ import { readMonthlySalesDashboard } from "./shared/monthly-sales-store.mjs";
 import { createUpdater } from "./updater.mjs";
 import { terminateProcessTree } from "./shared/task-process.mjs";
 import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedule.mjs";
+import { externalLink } from "./shared/external-links.mjs";
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
+import brandingModule from "./shared/branding.cjs";
+
+const { buildBranding } = brandingModule;
 
 const stableUserDataPath = requestedUserDataPath(process.argv) || canonicalUserDataPath(app.getPath("appData"));
 fs.mkdirSync(stableUserDataPath, { recursive: true });
@@ -282,12 +286,13 @@ function emitState(extra = {}) {
 }
 
 function createWindow() {
+  const branding = currentBranding();
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 780,
     minWidth: 900,
     minHeight: 680,
-    title: "云仓库存同步",
+    title: branding.productName,
     backgroundColor: "#f4f1ec",
     show: !process.argv.includes("--hidden"),
     webPreferences: {
@@ -353,6 +358,10 @@ function taskDefinition(kind, options = {}) {
     label: `${options.from} 至 ${options.to} 月销量补抓`
   };
   throw new Error(`未知任务类型：${kind}`);
+}
+
+function currentBranding() {
+  return buildBranding(readBuildInfo().channel || (app.isPackaged ? "release" : "development"));
 }
 
 async function startProcess(kind, trigger = "manual", options = {}) {
@@ -635,6 +644,7 @@ function publicExtensions() {
 }
 
 function runtimeCapabilities() {
+  const branding = currentBranding();
   return createRuntimeCapabilities({
     version: app.getVersion(),
     packaged: app.isPackaged,
@@ -642,6 +652,7 @@ function runtimeCapabilities() {
     workspace: appDataDir(),
     sourceRoot: app.isPackaged ? "" : app.getAppPath(),
     buildInfo: readBuildInfo(),
+    displayName: branding.productName,
     extensions: publicExtensions()
   });
 }
@@ -802,6 +813,7 @@ function validateBackfillRange(payload = {}) {
 }
 
 ipcMain.handle("settings:get", async () => publicSettings());
+ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("secrets:get-editable", async (event) => {
   if (event.sender !== mainWindow?.webContents) throw new Error("无权读取敏感设置");
   const secrets = await readSecrets();
@@ -864,7 +876,8 @@ ipcMain.handle("inventory:get", () => readCainiaoInventory(inventoryDatabasePath
 ipcMain.handle("monthly-sales:get", (_event, filters = {}) => readMonthlySalesDashboard(inventoryDatabasePath(), {
   year: String(filters.year || ""),
   selectedMonth: String(filters.selectedMonth || ""),
-  scope: ["overall", "sku", "top5"].includes(filters.scope) ? filters.scope : "overall",
+  scope: ["overall", "sku", "multi", "top5"].includes(filters.scope) ? filters.scope : "overall",
+  seriesMode: ["top5", "top10", "all", "decliners"].includes(filters.seriesMode) ? filters.seriesMode : "top5",
   sku: String(filters.sku || "").trim()
 }));
 ipcMain.handle("monthly-sales:sync", (_event, payload = {}) => startProcess("monthly-sales", "manual", {
@@ -876,6 +889,12 @@ ipcMain.handle("monthly-sales:backfill", (_event, payload = {}) => {
 });
 ipcMain.handle("logs:open", () => shell.openPath(logDir()));
 ipcMain.handle("data:open", () => shell.openPath(appDataDir()));
+ipcMain.handle("repository:open", async (event) => {
+  if (event.sender !== mainWindow?.webContents) throw new Error("无权打开外部链接");
+  const url = externalLink("repository");
+  await shell.openExternal(url);
+  return { opened: true, url };
+});
 ipcMain.handle("integration:get", () => ({
   cli: { command: process.execPath, examples: ["--cli status", "--cli doctor", "--cli debug-bundle", "--cli capabilities", "--cli sync --confirm-send"] },
   mcp: { command: process.execPath, args: ["--mcp-stdio"] },
@@ -899,11 +918,87 @@ function cliHelp() {
       "云仓库存同步.exe --cli extension-trust --id=<extension-id> --confirm-trust-code",
       "云仓库存同步.exe --cli logs --limit=30",
       "云仓库存同步.exe --cli sync --confirm-send",
+      "云仓库存同步.exe --cli send-latest-valid --confirm-send",
       "云仓库存同步.exe --cli login --confirm-open-browser",
       "云仓库存同步.exe --mcp-stdio"
     ],
     note: "sync 会发送一条钉钉库存报告，必须提供 --confirm-send"
   };
+}
+
+async function sendLatestValidInventoryReport() {
+  const settings = readSettings();
+  const secrets = await readSecrets();
+  const validation = validateDingTalkSettings(settings, secretFlags(secrets));
+  if (!validation.ok) throw new Error(validation.errors.join("；"));
+
+  const releaseTaskLock = acquireTaskLock("send-latest-valid");
+  let database;
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    database = new DatabaseSync(inventoryDatabasePath(), { readOnly: true });
+    const validated = database.prepare(
+      `SELECT source_file AS sourceFile, source_date AS sourceDate,
+              row_count AS rowCount, total_quantity AS totalQuantity, created_at AS createdAt
+         FROM inventory_data_validations
+        WHERE warehouse_id = 'cainiao' AND status = 'valid'
+        ORDER BY id DESC LIMIT 1`
+    ).get();
+    if (!validated?.sourceDate) throw new Error("没有可发送的已校验库存快照");
+
+    const snapshot = database.prepare(
+      `SELECT snapshot_date AS snapshotDate, COUNT(*) AS rowCount,
+              COALESCE(SUM(quantity), 0) AS totalQuantity
+         FROM inventory_snapshots
+        WHERE warehouse_id = 'cainiao' AND snapshot_date = ?`
+    ).get(validated.sourceDate);
+    if (!snapshot || snapshot.snapshotDate !== validated.sourceDate
+      || Number(snapshot.rowCount) !== Number(validated.rowCount)
+      || Math.abs(Number(snapshot.totalQuantity) - Number(validated.totalQuantity)) > 0.001) {
+      throw new Error("最近有效库存快照与校验记录不一致，已停止发送");
+    }
+
+    process.env.ERP_DATA_DIR = path.join(appDataDir(), "data");
+    const [{ getInventoryReport, buildInventoryMarkdown }, { sendDingTalkAppRobotMessage }] = await Promise.all([
+      import("../core/erp/reports.js"),
+      import("../core/dingtalk-app-robot.js")
+    ]);
+    const report = getInventoryReport({ warehouseId: "cainiao" });
+    if (report.snapshotDate !== validated.sourceDate
+      || Number(report.skuCount) !== Number(validated.rowCount)
+      || Math.abs(Number(report.totalQuantity) - Number(validated.totalQuantity)) > 0.001) {
+      throw new Error("库存报告与最近有效校验记录不一致，已停止发送");
+    }
+
+    const markdown = buildInventoryMarkdown("table", report);
+    const notice = `> 今日新数据尚未发布，本次沿用最近已校验库存快照 **${validated.sourceDate}**。`;
+    const targetPrefix = settings.dingtalkTargetUserId && settings.dingtalkTargetName
+      ? `@${settings.dingtalkTargetName}\n\n`
+      : "";
+    const delivery = await sendDingTalkAppRobotMessage({
+      clientId: secrets.dingtalkClientId,
+      clientSecret: secrets.dingtalkClientSecret,
+      robotCode: settings.dingtalkRobotCode || secrets.dingtalkClientId,
+      conversationId: settings.dingtalkConversationId,
+      msgKey: "sampleMarkdown",
+      msgParam: {
+        title: `${markdown.title}（沿用上一版）`,
+        text: `${targetPrefix}${notice}\n\n${markdown.text}`
+      }
+    });
+    appendLog(`已发送最近有效库存快照：来源日期 ${validated.sourceDate}，${validated.rowCount} 个 SKU，库存合计 ${validated.totalQuantity}。`, "success");
+    return {
+      sent: true,
+      sourceDate: validated.sourceDate,
+      rowCount: Number(validated.rowCount),
+      totalQuantity: Number(validated.totalQuantity),
+      lowStockCount: report.lowStockItems?.length || 0,
+      delivery
+    };
+  } finally {
+    database?.close();
+    releaseTaskLock();
+  }
 }
 
 async function runCli() {
@@ -928,6 +1023,9 @@ async function runCli() {
   if (request.command === "sync") {
     const task = await runProcessAndWait("sync", "cli");
     return { ok: task.success, ...task, logs: task.logs.slice(-100) };
+  }
+  if (request.command === "send-latest-valid") {
+    return { ok: true, ...(await sendLatestValidInventoryReport()) };
   }
   if (request.command === "login") {
     const task = await runProcessAndWait("login", "cli");

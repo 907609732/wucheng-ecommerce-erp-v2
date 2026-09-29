@@ -7,12 +7,25 @@ const outputPath = path.join(outputDir, "update-token.txt");
 const buildInfoPath = path.join(outputDir, "build-info.json");
 const token = String(process.env.CAINIAO_INTERNAL_UPDATE_TOKEN || "").trim();
 const allowMissingToken = process.argv.includes("--allow-missing-update-token");
+const requestedChannel = String(
+  process.argv.find((value) => value.startsWith("--channel="))?.slice("--channel=".length)
+  || process.env.CAINIAO_BUILD_CHANNEL
+  || (token ? "release" : "development")
+).trim().toLowerCase();
+const supportedChannels = new Set(["release", "beta", "test", "development"]);
 
-if (!token && !allowMissingToken) {
+if (!supportedChannels.has(requestedChannel)) {
+  throw new Error(`不支持的构建渠道：${requestedChannel}`);
+}
+
+if (requestedChannel === "release" && !token) {
   throw new Error(
     "缺少 CAINIAO_INTERNAL_UPDATE_TOKEN，已停止生成不可在线升级的安装包。" +
-    "仅开发目录打包可使用 --allow-missing-update-token。"
+    "正式版必须注入更新凭据。"
   );
+}
+if (!token && !allowMissingToken) {
+  throw new Error("缺少 CAINIAO_INTERNAL_UPDATE_TOKEN；非正式构建需显式添加 --allow-missing-update-token。");
 }
 
 fs.mkdirSync(outputDir, { recursive: true });
@@ -28,7 +41,8 @@ if (!commit) {
 fs.writeFileSync(buildInfoPath, `${JSON.stringify({
   commit,
   builtAt: new Date().toISOString(),
-  channel: token ? "release" : "development"
+  channel: requestedChannel
 }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 console.log(`内置更新凭据：${token ? "已注入" : "开发目录空占位"}`);
+console.log(`构建渠道：${requestedChannel}`);
 console.log(`构建信息：${commit.slice(0, 12) || "unknown"}`);

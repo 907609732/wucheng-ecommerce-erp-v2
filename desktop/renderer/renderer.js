@@ -5,6 +5,7 @@ let inventoryReport = null;
 let inventoryFilter = "all";
 let monthlySalesReport = null;
 let monthlySalesScope = "overall";
+let monthlySalesSeriesMode = "top5";
 let monthlySalesChart = null;
 let annualSalesChart = null;
 let salesChartResizeObserver = null;
@@ -256,6 +257,9 @@ function renderSalesCharts(report) {
     salesChartResizeObserver.observe(byId("annualSalesChart"));
   }
   const colors = ["#d95f3b", "#2c7a58", "#4169a1", "#a0608c", "#c18a26", "#6556a8"];
+  const chartColors = report.chartSeries.length <= colors.length
+    ? colors
+    : report.chartSeries.map((_series, index) => `hsl(${Math.round((index * 137.508 + 12) % 360)} 58% 44%)`);
   const lineStyle = (series, index) => ({ width: index === 0 ? 3 : 2, type: report.scope === "sku" && series.sku === "__overall__" ? "dashed" : "solid" });
   const legendFor = (chart) => ({
     type: "scroll", top: 0, left: 8, right: 8, itemGap: 18,
@@ -265,7 +269,7 @@ function renderSalesCharts(report) {
   });
   monthlySalesChart.setOption({
     animationDuration: 350,
-    color: colors,
+    color: chartColors,
     tooltip: { trigger: "axis", valueFormatter: (value) => value == null ? "无数据" : `${formatQuantity(value)} 件` },
     legend: legendFor("monthly"),
     grid: { left: 55, right: 22, top: 54, bottom: 42 },
@@ -273,7 +277,7 @@ function renderSalesCharts(report) {
     yAxis: { type: "value", name: "件", minInterval: 1 },
     series: report.chartSeries.map((series, index) => ({
       name: series.name, type: "line", smooth: false, connectNulls: false, symbolSize: 8,
-      data: series.monthly, lineStyle: lineStyle(series, index), itemStyle: { color: colors[index % colors.length] }
+      data: series.monthly, lineStyle: lineStyle(series, index), itemStyle: { color: chartColors[index] }
     }))
   }, true);
   monthlySalesChart.off("click");
@@ -297,7 +301,7 @@ function renderSalesCharts(report) {
   const coverage = new Map(report.coverage.map((item) => [item.year, item.validMonthCount]));
   annualSalesChart.setOption({
     animationDuration: 350,
-    color: colors,
+    color: chartColors,
     tooltip: {
       trigger: "axis",
       formatter: (items) => {
@@ -313,7 +317,7 @@ function renderSalesCharts(report) {
     series: report.chartSeries.map((series, index) => ({
       name: series.name, type: "line", connectNulls: false, symbolSize: 9,
       data: series.annual.map((point) => ({ value: point.value, symbol: point.complete ? "circle" : "emptyCircle", itemStyle: { opacity: point.complete ? 1 : 0.55 } })),
-      lineStyle: lineStyle(series, index), itemStyle: { color: colors[index % colors.length] }
+      lineStyle: lineStyle(series, index), itemStyle: { color: chartColors[index] }
     }))
   }, true);
   annualSalesChart.off("legendselectchanged");
@@ -355,7 +359,14 @@ function applyMonthlySalesReport(report) {
   byId("salesMonthlyAverage").textContent = report.available ? `${formatQuantity(report.summary.averageSales)} 件` : "--";
   byId("salesPeakMonth").textContent = report.summary.peakMonth ? `${report.summary.peakMonth.slice(5)} 月 · ${formatQuantity(report.summary.peakSales)}` : "--";
   byId("salesValidMonths").textContent = `${report.summary.validMonthCount} / 12${report.summary.incomplete ? " · 不完整" : ""}`;
-  byId("monthlySalesMessage").textContent = report.available ? "销量口径：toC销售出 + toB销售出。缺失月份保持断点；不完整年度显示为年内累计。" : "尚无已校验的完整月销量数据。";
+  const trendNote = report.scope === "multi" && report.seriesMode === "decliners"
+    ? (report.seriesContext.comparable
+        ? `当前展示 ${report.seriesContext.fromMonth} → ${report.seriesContext.toMonth} 销量下降最多的 ${report.seriesContext.itemCount} 个商品（按下降件数排序）。`
+        : "所选排名月与上月没有连续的有效数据，暂时无法计算下滑商品。")
+    : report.scope === "multi"
+      ? `当前展示 ${report.seriesContext.itemCount} 个商品趋势。`
+      : "";
+  byId("monthlySalesMessage").textContent = report.available ? `${trendNote}${trendNote ? " " : ""}销量口径：toC销售出 + toB销售出。缺失月份保持断点；不完整年度显示为年内累计。` : "尚无已校验的完整月销量数据。";
   if (!report.available) {
     monthlySalesChart?.clear();
     annualSalesChart?.clear();
@@ -372,6 +383,7 @@ async function loadMonthlySales() {
       year: byId("salesYear").value,
       selectedMonth: byId("salesMonth").value,
       scope: monthlySalesScope,
+      seriesMode: monthlySalesSeriesMode,
       sku: selectedSalesSku || resolveSalesSku(byId("salesSku").value)?.sku || byId("salesSku").value.trim()
     }));
   } catch (error) {
@@ -451,7 +463,9 @@ async function saveSection(section, settings, secrets, messageId) {
 }
 
 async function load() {
-  const [settings, secrets, integration] = await Promise.all([api.getSettings(), api.getEditableSecrets(), api.getIntegration()]);
+  const [settings, secrets, integration, branding] = await Promise.all([api.getSettings(), api.getEditableSecrets(), api.getIntegration(), api.getBranding()]);
+  document.title = branding.productName;
+  document.querySelector("h1").textContent = branding.productName;
   hydrateSettings(settings);
   hydrateSecrets(secrets);
   hydrateIntegration(integration);
@@ -484,6 +498,7 @@ document.querySelectorAll(".view-tab").forEach((button) => button.addEventListen
 document.querySelectorAll("[data-sales-scope]").forEach((button) => button.addEventListener("click", () => {
   monthlySalesScope = button.dataset.salesScope;
   document.querySelectorAll("[data-sales-scope]").forEach((item) => item.classList.toggle("active", item === button));
+  byId("salesSeriesModeField").classList.toggle("hidden", monthlySalesScope !== "multi");
   loadMonthlySales();
 }));
 
@@ -544,10 +559,21 @@ byId("stopTask").addEventListener("click", async () => {
 });
 byId("openData").addEventListener("click", () => api.openData());
 byId("openLogs").addEventListener("click", () => api.openLogs());
+byId("openRepository").addEventListener("click", async () => {
+  try { await api.openRepository(); }
+  catch (error) { appendLog({ line: `无法打开 GitHub 仓库：${error.message}` }); }
+});
 byId("refreshInventory").addEventListener("click", loadInventory);
 byId("refreshMonthlySales").addEventListener("click", loadMonthlySales);
 byId("salesYear").addEventListener("change", () => { byId("salesMonth").value = ""; loadMonthlySales(); });
 byId("salesMonth").addEventListener("change", loadMonthlySales);
+byId("salesSeriesMode").addEventListener("change", () => {
+  monthlySalesSeriesMode = byId("salesSeriesMode").value;
+  monthlySalesScope = "multi";
+  document.querySelectorAll("[data-sales-scope]").forEach((item) => item.classList.toggle("active", item.dataset.salesScope === "multi"));
+  byId("salesSeriesModeField").classList.remove("hidden");
+  loadMonthlySales();
+});
 byId("salesSku").addEventListener("input", () => {
   const selected = monthlySalesReport?.skuOptions.find((item) => item.sku === selectedSalesSku);
   if (!selected || byId("salesSku").value !== salesSkuDisplay(selected)) selectedSalesSku = "";
@@ -559,6 +585,7 @@ byId("salesSku").addEventListener("change", () => {
     byId("salesSku").value = salesSkuDisplay(selected);
     monthlySalesScope = "sku";
     document.querySelectorAll("[data-sales-scope]").forEach((item) => item.classList.toggle("active", item.dataset.salesScope === "sku"));
+    byId("salesSeriesModeField").classList.add("hidden");
   } else if (byId("salesSku").value.trim()) {
     byId("monthlySalesMessage").textContent = "没有唯一匹配的商品，请从下拉候选中选择。";
     return;

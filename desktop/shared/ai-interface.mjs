@@ -59,6 +59,12 @@ export function parseCliRequest(args = []) {
     }
     return { command, confirmed: true };
   }
+  if (command === "send-latest-valid") {
+    if (!values.includes("--confirm-send")) {
+      throw new Error("发送最近有效库存快照会向钉钉群发送报告；请在用户明确确认后添加 --confirm-send");
+    }
+    return { command, confirmed: true };
+  }
   if (command === "login") {
     if (!values.includes("--confirm-open-browser")) {
       throw new Error("登录会打开菜鸟浏览器窗口；请确认后添加 --confirm-open-browser");

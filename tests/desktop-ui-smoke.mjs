@@ -4,12 +4,14 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron as electron } from "playwright";
 
-const appPath = path.resolve("dist", "win-unpacked", "云仓库存同步.exe");
+const appPath = path.resolve("dist", "win-unpacked", "云仓库存同步（测试版）.exe");
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cainiao-desktop-ui-"));
 const screenshotPath = path.resolve("dist", "desktop-ui-smoke.png");
 const inventoryScreenshotPath = path.resolve("dist", "desktop-inventory-smoke.png");
 const salesScreenshotPath = path.resolve("dist", "desktop-sales-smoke.png");
 const salesWideScreenshotPath = path.resolve("dist", "desktop-sales-wide-smoke.png");
+const salesAllProductsScreenshotPath = path.resolve("dist", "desktop-sales-all-products-smoke.png");
+const salesDeclinersScreenshotPath = path.resolve("dist", "desktop-sales-decliners-smoke.png");
 
 const dataDir = path.join(userDataDir, "workspace", "data");
 fs.mkdirSync(dataDir, { recursive: true });
@@ -84,6 +86,10 @@ for (let index = 0; index < 24; index += 1) {
   insertMonthlySale.run("SKU-A", month, "产品A", 10 + index, 2, 12 + index);
   insertMonthlySale.run("SKU-B", month, "产品B", 3 + index, 1, 4 + index);
   insertMonthlySale.run("SKU-C", month, "产品C", 2, 0, 2);
+  for (let skuIndex = 4; skuIndex <= 21; skuIndex += 1) {
+    const value = index === 23 && skuIndex % 2 === 0 ? skuIndex : 20 + skuIndex + index;
+    insertMonthlySale.run(`SKU-${skuIndex}`, month, `产品${skuIndex}`, value, 0, value);
+  }
 }
 database.close();
 
@@ -96,11 +102,14 @@ try {
   const page = await application.firstWindow();
   await page.waitForLoadState("domcontentloaded");
   await page.locator("h1").waitFor();
-  if ((await page.locator("h1").textContent())?.trim() !== "云仓库存同步") {
+  if ((await page.locator("h1").textContent())?.trim() !== "云仓库存同步（测试版）") {
     throw new Error("桌面窗口标题不正确");
   }
   if (!(await page.locator("#runNow").isVisible()) || !(await page.locator("#checkUpdate").isVisible())) {
     throw new Error("桌面核心控件不可见");
+  }
+  if (!(await page.locator("#openRepository").isVisible()) || !(await page.locator("#openRepository").innerText()).includes("GitHub 仓库")) {
+    throw new Error("顶部 GitHub 仓库入口不可见");
   }
   await page.locator('[data-view="inventory"]').click();
   await page.locator("#inventorySkuCount").getByText("3", { exact: true }).waitFor();
@@ -132,8 +141,16 @@ try {
   if (!(await page.locator("#salesValidMonths").textContent()).includes("不完整")) throw new Error("缺失月份未标记为不完整");
   const series = await page.evaluate(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart")).getOption().series);
   if (series[0].connectNulls !== false || series[0].data[1] !== null) throw new Error("缺失月份未保留为折线断点");
-  await page.locator('[data-sales-scope="top5"]').click();
-  await page.waitForFunction(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart"))?.getOption().series.length === 3);
+  await page.locator('[data-sales-scope="multi"]').click();
+  await page.waitForFunction(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart"))?.getOption().series.length === 5);
+  await page.locator("#salesSeriesMode").selectOption("all");
+  await page.waitForFunction(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart"))?.getOption().series.length === 21);
+  await page.screenshot({ path: salesAllProductsScreenshotPath, fullPage: true });
+  await page.locator("#salesSeriesMode").selectOption("decliners");
+  await page.waitForFunction(() => document.getElementById("monthlySalesMessage")?.textContent.includes("销量下降最多"));
+  const declinerCount = await page.evaluate(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart"))?.getOption().series.length);
+  if (declinerCount !== 9) throw new Error(`下滑商品曲线数量错误：${declinerCount}`);
+  await page.screenshot({ path: salesDeclinersScreenshotPath, fullPage: true });
   await page.locator("#salesSku").fill("SKU-A");
   await page.locator("#salesSku").dispatchEvent("change");
   await page.waitForFunction(() => echarts.getInstanceByDom(document.getElementById("monthlySalesChart"))?.getOption().series.length === 2);

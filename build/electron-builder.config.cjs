@@ -1,6 +1,20 @@
+const fs = require("node:fs");
+const path = require("node:path");
+const { buildBranding } = require("../desktop/shared/branding.cjs");
+
+function preparedChannel() {
+  try {
+    return JSON.parse(fs.readFileSync(path.resolve("build", "private", "build-info.json"), "utf8")).channel;
+  } catch {
+    return process.env.CAINIAO_INTERNAL_UPDATE_TOKEN ? "release" : "development";
+  }
+}
+
+const branding = buildBranding(preparedChannel());
+
 module.exports = {
   appId: "com.wucheng.ecommerce.erp.v2",
-  productName: "云仓库存同步",
+  productName: branding.productName,
   publish: [{
     provider: "github",
     owner: "907609732",
@@ -8,7 +22,7 @@ module.exports = {
     private: true,
     releaseType: "release"
   }],
-  artifactName: "CloudWarehouseInventorySync-Setup-${version}-${arch}.${ext}",
+  artifactName: `CloudWarehouseInventorySync${branding.artifactMarker}-Setup-\${version}-\${arch}.\${ext}`,
   directories: {
     output: "dist",
     buildResources: "build"
@@ -36,10 +50,10 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: "云仓库存同步",
+    shortcutName: branding.productName,
     deleteAppDataOnUninstall: false
   },
   portable: {
-    artifactName: "CloudWarehouseInventorySync-Portable-${version}-${arch}.${ext}"
+    artifactName: `CloudWarehouseInventorySync${branding.artifactMarker}-Portable-\${version}-\${arch}.\${ext}`
   }
 };

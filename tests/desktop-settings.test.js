@@ -12,6 +12,21 @@ import {
 } from "../desktop/shared/settings.mjs";
 import { decryptedText } from "../desktop/shared/secret-storage.mjs";
 import { canonicalUserDataPath, requestedUserDataPath } from "../desktop/shared/user-data-path.mjs";
+import brandingModule from "../desktop/shared/branding.cjs";
+
+const { buildBranding } = brandingModule;
+
+test("only formal release builds use the unmarked product name", () => {
+  assert.deepEqual(buildBranding("release"), {
+    channel: "release", official: true, productName: "云仓库存同步", artifactMarker: ""
+  });
+  for (const channel of ["test", "beta", "development", "unknown"]) {
+    const branding = buildBranding(channel);
+    assert.equal(branding.official, false);
+    assert.equal(branding.productName, "云仓库存同步（测试版）");
+    assert.equal(branding.artifactMarker, "-Test");
+  }
+});
 
 test("desktop, CLI and portable builds share one stable Windows user data directory", () => {
   assert.equal(
