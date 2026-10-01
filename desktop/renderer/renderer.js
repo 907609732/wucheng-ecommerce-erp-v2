@@ -10,9 +10,14 @@ let monthlySalesChart = null;
 let annualSalesChart = null;
 let salesChartResizeObserver = null;
 let selectedSalesSku = "";
+let activeRuntimeMode = "standalone";
+let firstRunMode = "";
 const salesLegendSelection = { monthly: {}, annual: {} };
 const byId = (id) => document.getElementById(id);
 const fields = {
+  runtimeMode: byId("runtimeMode"),
+  remoteServerUrl: byId("remoteServerUrl"),
+  remoteServerPort: byId("remoteServerPort"),
   cainiaoUsername: byId("cainiaoUsername"),
   scheduleTime: byId("scheduleTime"),
   monthlySalesTime: byId("monthlySalesTime"),
@@ -103,6 +108,36 @@ function formatInventoryUpdatedAt(value) {
     : new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
+function toggleRuntimeFields() {
+  const mode = fields.runtimeMode.value;
+  const client = mode === "client";
+  byId("runtimeConfigState").textContent = mode === "server" ? "主服务器" : (client ? "客户端" : "单机");
+  byId("runtimeConfigState").classList.toggle("ready", mode !== "standalone");
+  byId("remoteServerPortField").classList.toggle("hidden", client);
+  byId("remoteOperatorEmailsField").classList.toggle("hidden", client);
+  byId("remoteClientActions").classList.toggle("hidden", !client);
+  document.querySelectorAll(".server-only-settings").forEach((item) => item.classList.toggle("hidden", client));
+  byId("runNow").textContent = client ? "让主服务器同步并发送" : "立即同步并发送";
+  byId("refreshLogin").textContent = client ? "登录主服务器" : "登录 / 刷新菜鸟状态";
+}
+
+function selectFirstRunMode(mode) {
+  firstRunMode = mode;
+  document.querySelectorAll("[data-setup-mode]").forEach((button) => {
+    const selected = button.dataset.setupMode === mode;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-checked", String(selected));
+  });
+  const remote = mode === "client" || mode === "server";
+  byId("firstRunRemoteFields").classList.toggle("hidden", !remote);
+  byId("firstRunOperatorField").classList.toggle("hidden", mode !== "server");
+  byId("firstRunAutostartField").classList.toggle("hidden", mode !== "server");
+  byId("finishFirstRun").disabled = !mode;
+  byId("firstRunMessage").textContent = mode === "client"
+    ? "保存后会打开 Cloudflare Access 登录窗口。"
+    : (mode === "server" ? "主服务器只监听本机，公网访问必须经过 Cloudflare。" : "");
+}
+
 function formatQuantity(value) {
   if (value == null) return "--";
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(Number(value));
@@ -187,7 +222,7 @@ function applyInventoryReport(report) {
 
 async function loadInventory() {
   byId("refreshInventory").disabled = true;
-  byId("inventoryMessage").textContent = "正在读取本地已校验库存…";
+  byId("inventoryMessage").textContent = activeRuntimeMode === "client" ? "正在读取主服务器库存…" : "正在读取本地已校验库存…";
   try {
     applyInventoryReport(await api.getInventory());
   } catch (error) {
@@ -428,19 +463,31 @@ function applyUpdateState(state) {
   }
 }
 
+function applyRemoteConnection(state) {
+  if (activeRuntimeMode !== "client") return;
+  const connected = Boolean(state?.connected);
+  byId("loginState").textContent = connected ? "主服务器已连接" : "主服务器未登录";
+  byId("statusBadge").textContent = connected ? "已连接" : "未连接";
+  byId("statusBadge").className = `status ${connected ? "ready" : ""}`;
+  if (state?.message) showSaveResult("remoteTestMessage", state.message, !connected);
+}
+
 function hydrateSettings(settings) {
-  configured = hasAccount(settings) && hasRobot(settings);
+  activeRuntimeMode = settings.runtimeMode;
+  configured = settings.runtimeMode === "client" || (hasAccount(settings) && hasRobot(settings));
   for (const [key, input] of Object.entries(fields)) input[input.type === "checkbox" ? "checked" : "value"] = settings[key];
+  byId("remoteOperatorEmails").value = (settings.remoteOperatorEmails || []).join(", ");
   document.querySelector(`input[name="deliveryMode"][value="${settings.deliveryMode}"]`).checked = true;
   byId("cainiaoPassword").placeholder = settings.secretFlags.cainiaoPassword ? "密码已加密保存" : "请输入密码";
   byId("dingtalkClientId").placeholder = settings.secretFlags.dingtalkClientId ? "Client ID 已加密保存" : "请输入 Client ID";
   byId("dingtalkClientSecret").placeholder = settings.secretFlags.dingtalkClientSecret ? "Client Secret 已加密保存" : "请输入 Client Secret";
   byId("dingtalkWebhook").placeholder = settings.secretFlags.dingtalkWebhook ? "Webhook 已加密保存" : "请输入 Webhook";
   byId("dingtalkWebhookSecret").placeholder = settings.secretFlags.dingtalkWebhookSecret ? "加签密钥已加密保存" : "可选";
-  byId("loginState").textContent = hasAccount(settings) ? "凭据已保存" : "待配置";
+  byId("loginState").textContent = settings.runtimeMode === "client" ? "正在检测主服务器" : (hasAccount(settings) ? "凭据已保存" : "待配置");
   setConfigState("accountConfigState", hasAccount(settings));
   setConfigState("robotConfigState", hasRobot(settings));
   toggleDeliveryFields();
+  toggleRuntimeFields();
 }
 
 function showSaveResult(id, message, error = false) {
@@ -455,7 +502,8 @@ async function saveSection(section, settings, secrets, messageId) {
     const saved = await api.saveSettingsSection({ section, settings, secrets });
     hydrateSettings(saved);
     hydrateSecrets(await api.getEditableSecrets());
-    applyState(await api.getState());
+    try { applyState(await api.getState()); }
+    catch (error) { appendLog({ line: `主服务器尚未连接：${error.message}` }); }
     showSaveResult(messageId, "保存成功");
   } catch (error) {
     showSaveResult(messageId, error.message, true);
@@ -469,16 +517,30 @@ async function load() {
   hydrateSettings(settings);
   hydrateSecrets(secrets);
   hydrateIntegration(integration);
-  applyState(await api.getState());
+  byId("firstRunSetup").classList.toggle("hidden", !settings.firstRun);
+  try {
+    applyState(await api.getState());
+    if (settings.runtimeMode === "client") applyRemoteConnection({ connected: true, message: "主服务器连接成功" });
+  } catch (error) {
+    appendLog({ line: `主服务器尚未连接：${error.message}` });
+    applyRemoteConnection({ connected: false, message: error.message });
+  }
   applyUpdateState(await api.getUpdateState());
   const logs = await api.getLogs();
   for (const item of logs) appendLog(item);
 }
 
 async function refreshSettings() {
-  hydrateSettings(await api.getSettings());
+  const settings = await api.getSettings();
+  hydrateSettings(settings);
   hydrateSecrets(await api.getEditableSecrets());
-  applyState(await api.getState());
+  try {
+    applyState(await api.getState());
+    if (settings.runtimeMode === "client") applyRemoteConnection({ connected: true, message: "主服务器连接成功" });
+  } catch (error) {
+    appendLog({ line: `主服务器尚未连接：${error.message}` });
+    applyRemoteConnection({ connected: false, message: error.message });
+  }
 }
 
 document.querySelectorAll(".view-tab").forEach((button) => button.addEventListener("click", () => {
@@ -515,6 +577,62 @@ document.querySelectorAll("[data-secret-target]").forEach((button) => button.add
 window.addEventListener("blur", hideAllSecrets);
 
 document.querySelectorAll('input[name="deliveryMode"]').forEach((input) => input.addEventListener("change", toggleDeliveryFields));
+fields.runtimeMode.addEventListener("change", toggleRuntimeFields);
+document.querySelectorAll("[data-setup-mode]").forEach((button) => button.addEventListener("click", () => selectFirstRunMode(button.dataset.setupMode)));
+byId("finishFirstRun").addEventListener("click", async () => {
+  if (!firstRunMode) return;
+  const button = byId("finishFirstRun");
+  const message = byId("firstRunMessage");
+  button.disabled = true;
+  message.classList.remove("error");
+  message.textContent = "正在保存…";
+  try {
+    const settings = await api.saveSettingsSection({
+      section: "runtime",
+      settings: {
+        runtimeMode: firstRunMode,
+        remoteServerUrl: byId("firstRunServerUrl").value,
+        remoteServerPort: 17320,
+        remoteOperatorEmails: byId("firstRunOperatorEmails").value.split(/[,;\n]/).map((value) => value.trim()).filter(Boolean),
+        startAtLogin: firstRunMode === "server" && byId("firstRunAutostart").checked
+      },
+      secrets: {}
+    });
+    hydrateSettings(settings);
+    byId("firstRunSetup").classList.add("hidden");
+    if (firstRunMode === "client") await api.loginRemoteServer();
+  } catch (error) {
+    message.textContent = error.message;
+    message.classList.add("error");
+    button.disabled = false;
+  }
+});
+byId("runtimeSettingsForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveSection("runtime", {
+    runtimeMode: fields.runtimeMode.value,
+    remoteServerUrl: fields.remoteServerUrl.value,
+    remoteServerPort: Number(fields.remoteServerPort.value),
+    remoteOperatorEmails: byId("remoteOperatorEmails").value.split(/[,;\n]/).map((value) => value.trim()).filter(Boolean)
+  }, {}, "runtimeSaveMessage");
+});
+byId("remoteLogin").addEventListener("click", async () => {
+  try {
+    await api.loginRemoteServer();
+    showSaveResult("remoteTestMessage", "请在新窗口完成 Cloudflare Access 登录");
+  } catch (error) {
+    showSaveResult("remoteTestMessage", error.message, true);
+  }
+});
+byId("testRemote").addEventListener("click", async () => {
+  showSaveResult("remoteTestMessage", "正在测试…");
+  try {
+    await api.testRemoteServer();
+    showSaveResult("remoteTestMessage", "连接成功");
+  } catch (error) {
+    showSaveResult("remoteTestMessage", error.message, true);
+  }
+});
 byId("accountSettingsForm").addEventListener("submit", (event) => {
   event.preventDefault();
   saveSection("account", { cainiaoUsername: fields.cainiaoUsername.value }, {
@@ -620,6 +738,12 @@ api.onSettingsRefresh(() => {
 });
 api.onInventoryUpdated(loadInventory);
 api.onMonthlySalesUpdated(loadMonthlySales);
+api.onRemoteConnection(async (state) => {
+  applyRemoteConnection(state);
+  if (!state?.connected) return;
+  try { applyState(await api.getState()); }
+  catch (error) { applyRemoteConnection({ connected: false, message: error.message }); }
+});
 window.addEventListener("resize", () => {
   monthlySalesChart?.resize();
   annualSalesChart?.resize();

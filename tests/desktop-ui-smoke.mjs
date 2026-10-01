@@ -7,6 +7,7 @@ import { _electron as electron } from "playwright";
 const appPath = path.resolve("dist", "win-unpacked", "云仓库存同步（测试版）.exe");
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cainiao-desktop-ui-"));
 const screenshotPath = path.resolve("dist", "desktop-ui-smoke.png");
+const firstRunScreenshotPath = path.resolve("dist", "desktop-first-run-smoke.png");
 const inventoryScreenshotPath = path.resolve("dist", "desktop-inventory-smoke.png");
 const salesScreenshotPath = path.resolve("dist", "desktop-sales-smoke.png");
 const salesWideScreenshotPath = path.resolve("dist", "desktop-sales-wide-smoke.png");
@@ -105,6 +106,22 @@ try {
   if ((await page.locator("h1").textContent())?.trim() !== "云仓库存同步（测试版）") {
     throw new Error("桌面窗口标题不正确");
   }
+  await page.locator("#firstRunSetup").waitFor({ state: "visible" });
+  if (!(await page.getByRole("heading", { name: "这台电脑怎么使用 ERP？" }).isVisible())) {
+    throw new Error("首次启动未显示角色选择向导");
+  }
+  await page.locator('[data-setup-mode="server"]').click();
+  if (!(await page.locator("#firstRunOperatorField").isVisible()) || !(await page.locator("#firstRunAutostartField").isVisible())) {
+    throw new Error("主服务器向导未显示操作员与自启动配置");
+  }
+  await page.locator('[data-setup-mode="client"]').click();
+  if (!(await page.locator("#firstRunServerUrl").isVisible()) || !(await page.locator("#firstRunOperatorField").isHidden())) {
+    throw new Error("客户端向导字段显示不正确");
+  }
+  await page.screenshot({ path: firstRunScreenshotPath, fullPage: true });
+  await page.locator('[data-setup-mode="standalone"]').click();
+  await page.locator("#finishFirstRun").click();
+  await page.locator("#firstRunSetup").waitFor({ state: "hidden" });
   if (!(await page.locator("#runNow").isVisible()) || !(await page.locator("#checkUpdate").isVisible())) {
     throw new Error("桌面核心控件不可见");
   }
@@ -250,7 +267,7 @@ try {
     throw new Error("菜鸟密码隐藏按钮未生效");
   }
   await page.screenshot({ path: screenshotPath, fullPage: true });
-  console.log(`DESKTOP_UI_SMOKE_OK ${screenshotPath} ${inventoryScreenshotPath} ${salesScreenshotPath} ${salesWideScreenshotPath}`);
+  console.log(`DESKTOP_UI_SMOKE_OK ${firstRunScreenshotPath} ${screenshotPath} ${inventoryScreenshotPath} ${salesScreenshotPath} ${salesWideScreenshotPath}`);
 } finally {
   await application.close();
   fs.rmSync(userDataDir, { recursive: true, force: true });

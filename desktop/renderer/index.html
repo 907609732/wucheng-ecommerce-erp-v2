@@ -9,6 +9,31 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <section id="firstRunSetup" class="first-run-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
+    <div class="first-run-dialog">
+      <p class="eyebrow">FIRST RUN SETUP</p>
+      <h2 id="firstRunTitle">这台电脑怎么使用 ERP？</h2>
+      <p class="first-run-intro">只需要选择一次，之后仍可在“设置 → 运行模式”中修改。</p>
+      <div class="role-choice-grid" role="radiogroup" aria-label="本机角色">
+        <button class="role-choice" type="button" data-setup-mode="server" role="radio" aria-checked="false">
+          <strong>主服务器</strong><span>以这台电脑的数据为准，业务脚本都在这里运行。</span>
+        </button>
+        <button class="role-choice" type="button" data-setup-mode="client" role="radio" aria-checked="false">
+          <strong>客户端</strong><span>查看主服务器数据，并让主服务器执行预置任务。</span>
+        </button>
+        <button class="role-choice" type="button" data-setup-mode="standalone" role="radio" aria-checked="false">
+          <strong>单机使用</strong><span>数据和脚本只在当前电脑运行，不连接远程服务器。</span>
+        </button>
+      </div>
+      <div id="firstRunRemoteFields" class="first-run-fields hidden">
+        <label>远程访问地址<input id="firstRunServerUrl" type="url" value="https://erp.4444520.xyz" required></label>
+        <label id="firstRunOperatorField" class="hidden">允许远程执行的邮箱<input id="firstRunOperatorEmails" placeholder="多个邮箱用逗号分隔"></label>
+        <label id="firstRunAutostartField" class="check hidden"><input id="firstRunAutostart" type="checkbox" checked>登录 Windows 后自动启动主服务器</label>
+      </div>
+      <p id="firstRunMessage" class="save-message"></p>
+      <div class="first-run-actions"><button id="finishFirstRun" class="primary" type="button" disabled>保存并继续</button></div>
+    </div>
+  </section>
   <main class="shell">
     <header class="hero">
       <div>
@@ -160,7 +185,35 @@
         <p class="section-intro">各分区可单独保存，未完成机器人配置也能先保存菜鸟账号。</p>
       </div>
 
-      <form id="accountSettingsForm" class="settings-card">
+      <form id="runtimeSettingsForm" class="settings-card">
+        <div class="settings-card-heading">
+          <div><h3>运行模式</h3><p>你的电脑作为主服务器；员工电脑作为客户端，所有业务脚本只在主服务器执行。</p></div>
+          <span id="runtimeConfigState" class="config-state">单机</span>
+        </div>
+        <div class="form-grid">
+          <label>本机角色
+            <select id="runtimeMode">
+              <option value="standalone">单机模式</option>
+              <option value="server">主服务器模式</option>
+              <option value="client">客户端模式</option>
+            </select>
+          </label>
+          <label>远程访问地址<input id="remoteServerUrl" type="url" value="https://erp.4444520.xyz" required></label>
+          <label id="remoteServerPortField">本地 API 端口<input id="remoteServerPort" type="number" min="1024" max="65535" value="17320" required></label>
+          <label id="remoteOperatorEmailsField">允许远程执行的邮箱<input id="remoteOperatorEmails" placeholder="多个邮箱用逗号分隔"></label>
+        </div>
+        <p class="field-help">API 强制只监听 127.0.0.1；外部访问必须经过 Cloudflare Tunnel 和 Access。客户端只能调用预置任务，不能上传任意脚本。</p>
+        <div id="remoteClientActions" class="settings-actions hidden">
+          <div class="action-group"><button id="remoteLogin" type="button">登录主服务器</button><button id="testRemote" type="button">测试连接</button></div>
+          <p id="remoteTestMessage" class="save-message"></p>
+        </div>
+        <div class="settings-actions">
+          <p id="runtimeSaveMessage" class="save-message"></p>
+          <button class="primary" type="submit">保存运行模式</button>
+        </div>
+      </form>
+
+      <form id="accountSettingsForm" class="settings-card server-only-settings">
         <div class="settings-card-heading">
           <div><h3>菜鸟账号</h3><p>用于打开菜鸟云仓并获取库存文件。</p></div>
           <span id="accountConfigState" class="config-state">待配置</span>
@@ -178,7 +231,7 @@
         </div>
       </form>
 
-      <form id="robotSettingsForm" class="settings-card">
+      <form id="robotSettingsForm" class="settings-card server-only-settings">
         <div class="settings-card-heading">
           <div><h3>钉钉机器人</h3><p>单独配置库存报告的发送机器人和目标群。</p></div>
           <span id="robotConfigState" class="config-state">待配置</span>
@@ -220,7 +273,7 @@
         </div>
       </form>
 
-      <form id="automationSettingsForm" class="settings-card">
+      <form id="automationSettingsForm" class="settings-card server-only-settings">
         <div class="settings-card-heading"><div><h3>自动任务</h3><p>本机每日直发，不依赖服务器、SSH 或 WSL。</p></div></div>
         <div class="form-grid">
           <label>每天执行时间<input id="scheduleTime" type="time" required></label>

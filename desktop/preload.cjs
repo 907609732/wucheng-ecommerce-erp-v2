@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("inventoryApp", {
   getEditableSecrets: () => ipcRenderer.invoke("secrets:get-editable"),
   saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
   saveSettingsSection: (payload) => ipcRenderer.invoke("settings:save-section", payload),
+  loginRemoteServer: () => ipcRenderer.invoke("remote:login"),
+  testRemoteServer: () => ipcRenderer.invoke("remote:test"),
   runNow: () => ipcRenderer.invoke("task:run"),
   refreshLogin: () => ipcRenderer.invoke("task:login"),
   stopTask: () => ipcRenderer.invoke("task:stop"),
@@ -51,5 +53,10 @@ contextBridge.exposeInMainWorld("inventoryApp", {
     const listener = () => callback();
     ipcRenderer.on("monthly-sales:updated", listener);
     return () => ipcRenderer.removeListener("monthly-sales:updated", listener);
+  },
+  onRemoteConnection: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("remote:connection", listener);
+    return () => ipcRenderer.removeListener("remote:connection", listener);
   }
 });

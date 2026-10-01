@@ -1,4 +1,8 @@
 export const DEFAULT_SETTINGS = Object.freeze({
+  runtimeMode: "standalone",
+  remoteServerUrl: "https://erp.4444520.xyz",
+  remoteServerPort: 17320,
+  remoteOperatorEmails: [],
   scheduleEnabled: false,
   scheduleTime: "22:00",
   monthlySalesEnabled: false,
@@ -33,6 +37,14 @@ export const EDITABLE_SECRET_FIELDS = Object.freeze([
 
 export function normalizeSettings(input = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...input };
+  settings.runtimeMode = ["standalone", "server", "client"].includes(settings.runtimeMode)
+    ? settings.runtimeMode
+    : "standalone";
+  settings.remoteServerUrl = String(settings.remoteServerUrl || "").trim().replace(/\/+$/, "");
+  settings.remoteServerPort = Number(settings.remoteServerPort);
+  settings.remoteOperatorEmails = Array.isArray(settings.remoteOperatorEmails)
+    ? [...new Set(settings.remoteOperatorEmails.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean))].sort()
+    : [];
   settings.scheduleEnabled = Boolean(settings.scheduleEnabled);
   settings.monthlySalesEnabled = Boolean(settings.monthlySalesEnabled);
   settings.startAtLogin = Boolean(settings.startAtLogin);
@@ -56,6 +68,7 @@ export function normalizeSettings(input = {}) {
 export function validateSettings(settings, secretFlags = {}) {
   const value = normalizeSettings(settings);
   const errors = [
+    ...validateRuntimeSettings(value).errors,
     ...validateAutomationSettings(value).errors,
     ...validateCainiaoSettings(value, secretFlags).errors,
     ...validateDingTalkSettings(value, secretFlags).errors
@@ -107,6 +120,26 @@ export function nextRunAt(scheduleTime, now = new Date()) {
   result.setHours(Number(match[1]), Number(match[2]), 0, 0);
   if (result <= now) result.setDate(result.getDate() + 1);
   return result;
+}
+
+export function validateRuntimeSettings(settings) {
+  const value = normalizeSettings(settings);
+  const errors = [];
+  if (value.runtimeMode === "client") {
+    try {
+      const url = new URL(value.remoteServerUrl);
+      if (url.protocol !== "https:") errors.push("客户端服务地址必须使用 HTTPS");
+    } catch {
+      errors.push("客户端服务地址无效");
+    }
+  }
+  if (!Number.isInteger(value.remoteServerPort) || value.remoteServerPort < 1024 || value.remoteServerPort > 65535) {
+    errors.push("本地服务端口必须是 1024 到 65535 的整数");
+  }
+  if (value.remoteOperatorEmails.some((email) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))) {
+    errors.push("远程操作员邮箱格式无效");
+  }
+  return { ok: errors.length === 0, errors, value };
 }
 
 export function nextMonthlyRunAt(scheduleTime, now = new Date()) {

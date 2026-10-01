@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -14,6 +14,7 @@ import {
   validateAutomationSettings,
   validateCainiaoSettings,
   validateDingTalkSettings,
+  validateRuntimeSettings,
   validateSettings
 } from "./shared/settings.mjs";
 import { decryptedText } from "./shared/secret-storage.mjs";
@@ -28,6 +29,7 @@ import { createUpdater } from "./updater.mjs";
 import { terminateProcessTree } from "./shared/task-process.mjs";
 import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedule.mjs";
 import { externalLink } from "./shared/external-links.mjs";
+import { createRemoteService } from "./shared/remote-service.mjs";
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 import brandingModule from "./shared/branding.cjs";
 
@@ -63,6 +65,8 @@ let stopRequestedPid = null;
 let mcpBridgeChild = null;
 let cachedSettings = null;
 let cachedSecrets = null;
+let remoteService = null;
+let remoteLoginWindow = null;
 
 function appDataDir() {
   return path.join(app.getPath("userData"), "workspace");
@@ -78,6 +82,40 @@ function secretsPath() {
 
 function inventoryDatabasePath() {
   return path.join(appDataDir(), "data", "erp.sqlite");
+}
+
+function runtimeMode() {
+  return readSettings().runtimeMode;
+}
+
+function remoteServerBaseUrl() {
+  const value = readSettings().remoteServerUrl;
+  if (!value) throw new Error("尚未配置主服务器地址");
+  return value;
+}
+
+async function remoteRequest(pathname, options = {}) {
+  const url = new URL(pathname, `${remoteServerBaseUrl()}/`).toString();
+  const response = await session.defaultSession.fetch(url, {
+    method: options.method || "GET",
+    headers: { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}) },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    credentials: "include",
+    redirect: "follow"
+  });
+  const contentType = String(response.headers.get("content-type") || "");
+  if (!contentType.includes("application/json")) {
+    throw new Error("需要先登录主服务器");
+  }
+  const payload = await response.json();
+  if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `主服务器返回 HTTP ${response.status}`);
+  return payload.data ?? payload;
+}
+
+function notifyRemoteConnection(connected, message, health = null) {
+  const payload = { connected: Boolean(connected), message: String(message || ""), health };
+  mainWindow?.webContents.send("remote:connection", payload);
+  return payload;
 }
 
 function bundledUpdateTokenPath() {
@@ -249,9 +287,10 @@ function secretFlags(secrets) {
 }
 
 async function publicSettings() {
+  const firstRun = !fs.existsSync(settingsPath());
   const settings = readSettings();
   const secrets = await readSecrets();
-  return { ...settings, secretFlags: secretFlags(secrets) };
+  return { ...settings, firstRun, secretFlags: secretFlags(secrets) };
 }
 
 function appendLog(message, level = "info") {
@@ -308,7 +347,7 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("close", (event) => {
     const settings = readSettings();
-    if (!quitting && (settings.scheduleEnabled || settings.monthlySalesEnabled)) {
+    if (!quitting && (settings.runtimeMode === "server" || settings.scheduleEnabled || settings.monthlySalesEnabled)) {
       event.preventDefault();
       mainWindow.hide();
       appendLog("窗口已隐藏，定时任务继续运行。再次启动软件可恢复窗口。");
@@ -364,7 +403,7 @@ function currentBranding() {
   return buildBranding(readBuildInfo().channel || (app.isPackaged ? "release" : "development"));
 }
 
-async function startProcess(kind, trigger = "manual", options = {}) {
+async function startProcess(kind, trigger = "manual", options = {}, context = {}) {
   if (runningChild || runningTaskPromise) throw new Error("已有任务正在运行，请等待完成");
   const definition = taskDefinition(kind, options);
   const settings = readSettings();
@@ -379,7 +418,9 @@ async function startProcess(kind, trigger = "manual", options = {}) {
   const startedAt = new Date().toISOString();
   const logStart = recentLog.length;
   runningKind = kind;
-  appendLog(`启动${definition.label}（${trigger === "schedule" ? "定时" : "手动"}）…`);
+  const triggerLabel = trigger === "schedule" ? "定时" : (trigger === "remote" ? "远程" : "手动");
+  const actorLabel = context.requestedBy ? `，发起人 ${context.requestedBy}` : "";
+  appendLog(`启动${definition.label}（${triggerLabel}${actorLabel}）…`);
 
   let child;
   try {
@@ -736,8 +777,11 @@ async function interfaceStatus() {
 
 function configureLoginItem(settings) {
   if (!app.isPackaged) return;
+  const openAtLogin = Boolean(settings.startAtLogin);
   app.setLoginItemSettings({
-    openAtLogin: Boolean(settings.startAtLogin),
+    openAtLogin,
+    enabled: openAtLogin,
+    name: "云仓库存同步",
     path: process.execPath,
     args: ["--hidden"]
   });
@@ -750,6 +794,10 @@ function configureSchedule() {
   nextMonthlyScheduledRun = null;
   const settings = readSettings();
   configureLoginItem(settings);
+  if (settings.runtimeMode === "client") {
+    emitState();
+    return;
+  }
   if (settings.scheduleEnabled) nextScheduledRun = nextRunAt(settings.scheduleTime);
   if (settings.monthlySalesEnabled) nextMonthlyScheduledRun = nextMonthlyRunAt(settings.monthlySalesTime);
   const upcoming = [nextScheduledRun, nextMonthlyScheduledRun].filter(Boolean).sort((a, b) => a - b);
@@ -812,10 +860,95 @@ function validateBackfillRange(payload = {}) {
   return { from, to };
 }
 
+function localMonthlySales(filters = {}) {
+  return readMonthlySalesDashboard(inventoryDatabasePath(), {
+    year: String(filters.year || ""),
+    selectedMonth: String(filters.selectedMonth || ""),
+    scope: ["overall", "sku", "multi", "top5"].includes(filters.scope) ? filters.scope : "overall",
+    seriesMode: ["top5", "top10", "all", "decliners"].includes(filters.seriesMode) ? filters.seriesMode : "top5",
+    sku: String(filters.sku || "").trim()
+  });
+}
+
+async function stopRemoteService() {
+  const current = remoteService;
+  remoteService = null;
+  if (current) await current.stop();
+}
+
+async function configureRemoteService() {
+  await stopRemoteService();
+  const settings = readSettings();
+  if (settings.runtimeMode !== "server") return;
+  remoteService = createRemoteService({
+    host: "127.0.0.1",
+    port: settings.remoteServerPort,
+    requireAccessIdentity: true,
+    operatorEmails: settings.remoteOperatorEmails,
+    getHealth: async () => ({ version: app.getVersion(), running: Boolean(runningChild || runningTaskPromise) }),
+    getInventory: async () => readCainiaoInventory(inventoryDatabasePath()),
+    getMonthlySales: async (filters) => localMonthlySales(filters),
+    getTaskState: async () => {
+      const { logPath: _logPath, ...state } = emitState();
+      return state;
+    },
+    startTask: async (kind, trigger, options, actor) => startProcess(kind, trigger, options, actor),
+    stopTask: async () => stopCurrentTask()
+  });
+  try {
+    const address = await remoteService.start();
+    appendLog(`主服务器 API 已启动：${address}（仅本机回环）`, "success");
+  } catch (error) {
+    remoteService = null;
+    appendLog(`主服务器 API 启动失败：${error.message}`, "error");
+    throw error;
+  }
+}
+
+function openRemoteLogin() {
+  if (runtimeMode() !== "client") throw new Error("只有客户端模式需要登录主服务器");
+  if (remoteLoginWindow && !remoteLoginWindow.isDestroyed()) {
+    remoteLoginWindow.show();
+    remoteLoginWindow.focus();
+    return { opened: true };
+  }
+  remoteLoginWindow = new BrowserWindow({
+    width: 860,
+    height: 720,
+    parent: mainWindow || undefined,
+    title: "登录主服务器",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  remoteLoginWindow.setMenuBarVisibility(false);
+  remoteLoginWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const expectedOrigin = new URL(remoteServerBaseUrl()).origin;
+  let loginCompleted = false;
+  remoteLoginWindow.webContents.on("did-finish-load", async () => {
+    if (loginCompleted || !remoteLoginWindow || remoteLoginWindow.isDestroyed()) return;
+    try {
+      if (new URL(remoteLoginWindow.webContents.getURL()).origin !== expectedOrigin) return;
+      const health = await remoteRequest("/api/v1/health");
+      loginCompleted = true;
+      notifyRemoteConnection(true, "主服务器登录成功", health);
+      setTimeout(() => {
+        if (remoteLoginWindow && !remoteLoginWindow.isDestroyed()) remoteLoginWindow.close();
+      }, 500);
+    } catch {
+      // The target page can finish before Access has written the application cookie.
+    }
+  });
+  remoteLoginWindow.loadURL(remoteServerBaseUrl()).catch((error) => {
+    notifyRemoteConnection(false, `登录页面打开失败：${error.message}`);
+  });
+  remoteLoginWindow.on("closed", () => { remoteLoginWindow = null; });
+  return { opened: true };
+}
+
 ipcMain.handle("settings:get", async () => publicSettings());
 ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("secrets:get-editable", async (event) => {
   if (event.sender !== mainWindow?.webContents) throw new Error("无权读取敏感设置");
+  if (runtimeMode() === "client") return {};
   const secrets = await readSecrets();
   return Object.fromEntries(EDITABLE_SECRET_FIELDS.map((key) => [key, String(secrets[key] || "")]));
 });
@@ -839,6 +972,7 @@ ipcMain.handle("settings:save", async (_event, payload = {}) => {
 ipcMain.handle("settings:save-section", async (_event, payload = {}) => {
   const section = String(payload.section || "");
   const validators = {
+    runtime: validateRuntimeSettings,
     account: validateCainiaoSettings,
     robot: validateDingTalkSettings,
     automation: validateAutomationSettings,
@@ -863,29 +997,46 @@ ipcMain.handle("settings:save-section", async (_event, payload = {}) => {
   fs.writeFileSync(settingsPath(), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
   await encryptSecrets(mergedSecrets);
   configureSchedule();
-  const sectionNames = { account: "菜鸟账号", robot: "钉钉机器人", automation: "自动任务", updates: "在线升级" };
+  if (section === "runtime") await configureRemoteService();
+  const sectionNames = { runtime: "运行模式", account: "菜鸟账号", robot: "钉钉机器人", automation: "自动任务", updates: "在线升级" };
   appendLog(`${sectionNames[section]}设置已保存。`, "success");
   return publicSettings();
 });
-ipcMain.handle("task:run", () => startProcess("sync", "manual"));
-ipcMain.handle("task:login", () => startProcess("login", "manual"));
-ipcMain.handle("task:stop", () => stopCurrentTask());
-ipcMain.handle("task:state", () => emitState());
-ipcMain.handle("logs:get", () => recentLog);
-ipcMain.handle("inventory:get", () => readCainiaoInventory(inventoryDatabasePath()));
-ipcMain.handle("monthly-sales:get", (_event, filters = {}) => readMonthlySalesDashboard(inventoryDatabasePath(), {
-  year: String(filters.year || ""),
-  selectedMonth: String(filters.selectedMonth || ""),
-  scope: ["overall", "sku", "multi", "top5"].includes(filters.scope) ? filters.scope : "overall",
-  seriesMode: ["top5", "top10", "all", "decliners"].includes(filters.seriesMode) ? filters.seriesMode : "top5",
-  sku: String(filters.sku || "").trim()
-}));
-ipcMain.handle("monthly-sales:sync", (_event, payload = {}) => startProcess("monthly-sales", "manual", {
-  month: assertMonthInput(payload.month || latestCompleteMonth())
-}));
+ipcMain.handle("task:run", () => runtimeMode() === "client"
+  ? remoteRequest("/api/v1/jobs", { method: "POST", body: { type: "sync" } })
+  : startProcess("sync", "manual"));
+ipcMain.handle("task:login", () => runtimeMode() === "client" ? openRemoteLogin() : startProcess("login", "manual"));
+ipcMain.handle("task:stop", () => runtimeMode() === "client"
+  ? remoteRequest("/api/v1/jobs/stop", { method: "POST", body: {} })
+  : stopCurrentTask());
+ipcMain.handle("task:state", () => runtimeMode() === "client" ? remoteRequest("/api/v1/task") : emitState());
+ipcMain.handle("logs:get", () => runtimeMode() === "client" ? [] : recentLog);
+ipcMain.handle("inventory:get", () => runtimeMode() === "client" ? remoteRequest("/api/v1/inventory") : readCainiaoInventory(inventoryDatabasePath()));
+ipcMain.handle("monthly-sales:get", (_event, filters = {}) => runtimeMode() === "client"
+  ? remoteRequest(`/api/v1/monthly-sales?${new URLSearchParams(filters).toString()}`)
+  : localMonthlySales(filters));
+ipcMain.handle("monthly-sales:sync", (_event, payload = {}) => {
+  const month = assertMonthInput(payload.month || latestCompleteMonth());
+  return runtimeMode() === "client"
+    ? remoteRequest("/api/v1/jobs", { method: "POST", body: { type: "monthly-sales", month } })
+    : startProcess("monthly-sales", "manual", { month });
+});
 ipcMain.handle("monthly-sales:backfill", (_event, payload = {}) => {
   const range = validateBackfillRange(payload);
-  return startProcess("monthly-backfill", "manual", range);
+  return runtimeMode() === "client"
+    ? remoteRequest("/api/v1/jobs", { method: "POST", body: { type: "monthly-backfill", ...range } })
+    : startProcess("monthly-backfill", "manual", range);
+});
+ipcMain.handle("remote:login", () => openRemoteLogin());
+ipcMain.handle("remote:test", async () => {
+  try {
+    const health = await remoteRequest("/api/v1/health");
+    notifyRemoteConnection(true, "主服务器连接成功", health);
+    return { ok: true, health };
+  } catch (error) {
+    notifyRemoteConnection(false, error.message);
+    throw error;
+  }
 });
 ipcMain.handle("logs:open", () => shell.openPath(logDir()));
 ipcMain.handle("data:open", () => shell.openPath(appDataDir()));
@@ -1049,10 +1200,11 @@ app.on("second-instance", () => {
 app.on("before-quit", () => {
   quitting = true;
   if (mcpBridgeChild && !mcpBridgeChild.killed) mcpBridgeChild.kill();
+  void stopRemoteService();
 });
 app.on("window-all-closed", () => {
   const settings = readSettings();
-  if (!headlessMode && !settings.scheduleEnabled && !settings.monthlySalesEnabled) app.quit();
+  if (!headlessMode && settings.runtimeMode !== "server" && !settings.scheduleEnabled && !settings.monthlySalesEnabled) app.quit();
 });
 
 app.whenReady().then(async () => {
@@ -1109,6 +1261,11 @@ app.whenReady().then(async () => {
   });
   updater.initialize();
   configureSchedule();
+  try {
+    await configureRemoteService();
+  } catch {
+    // The startup error is already recorded and the settings UI remains available for repair.
+  }
   appendLog("云仓库存同步已启动。", "success");
   if (configurationWarmError) appendLog(`配置自检失败：${configurationWarmError.message}`, "error");
   else appendLog("配置与 Windows 安全存储自检通过。", "success");

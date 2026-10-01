@@ -8,6 +8,7 @@ import {
   validateAutomationSettings,
   validateCainiaoSettings,
   validateDingTalkSettings,
+  validateRuntimeSettings,
   validateSettings
 } from "../desktop/shared/settings.mjs";
 import { decryptedText } from "../desktop/shared/secret-storage.mjs";
@@ -43,6 +44,8 @@ test("an explicit user data directory remains available to isolated UI and MCP r
 });
 
 test("desktop automation is opt-in before the first valid save", () => {
+  assert.equal(DEFAULT_SETTINGS.runtimeMode, "standalone");
+  assert.equal(DEFAULT_SETTINGS.remoteServerUrl, "https://erp.4444520.xyz");
   assert.equal(DEFAULT_SETTINGS.scheduleEnabled, false);
   assert.equal(DEFAULT_SETTINGS.startAtLogin, false);
 });
@@ -125,6 +128,12 @@ test("nextRunAt schedules tomorrow after today's time passed", () => {
   assert.equal(result.getDate(), 27);
   assert.equal(result.getHours(), 22);
   assert.equal(result.getMinutes(), 0);
+});
+
+test("runtime modes keep the remote origin HTTPS-only and the API loopback port valid", () => {
+  assert.equal(validateRuntimeSettings({ runtimeMode: "client", remoteServerUrl: "https://erp.4444520.xyz", remoteServerPort: 17320 }).ok, true);
+  assert.equal(validateRuntimeSettings({ runtimeMode: "client", remoteServerUrl: "http://erp.4444520.xyz", remoteServerPort: 17320 }).ok, false);
+  assert.equal(validateRuntimeSettings({ runtimeMode: "server", remoteServerPort: 80 }).ok, false);
 });
 
 test("nextMonthlyRunAt uses this month's first day before the cutoff and next month after it", () => {
