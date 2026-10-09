@@ -458,7 +458,7 @@ function applyUpdateState(state) {
   const credentialState = byId("updateCredentialState");
   if (credentialState) {
     const available = state?.credentialAvailable;
-    credentialState.textContent = available === true ? "已配置" : (available === false ? "不可用" : "检测中");
+    credentialState.textContent = available === true ? "可用" : (available === false ? "不可用" : "检测中");
     credentialState.classList.toggle("ready", available === true);
   }
 }

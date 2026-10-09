@@ -534,7 +534,8 @@ function refreshCainiaoLogin() {
     cwd: rootDir,
     env: {
       ...process.env,
-      CAINIAO_LOGIN_TIMEOUT_MS: process.env.CAINIAO_LOGIN_TIMEOUT_MS || '180000'
+      CAINIAO_LOGIN_RECOVERY: '1',
+      CAINIAO_LOGIN_TIMEOUT_MS: process.env.CAINIAO_LOGIN_TIMEOUT_MS || '45000'
     },
     stdio: 'inherit'
   });

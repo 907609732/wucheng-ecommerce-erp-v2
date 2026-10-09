@@ -41,10 +41,6 @@
         <h1>云仓库存同步</h1>
         <p class="subtitle">完全在本机采集、校验并通过企业应用机器人发送到钉钉。</p>
       </div>
-      <div class="hero-actions">
-        <button class="repository-link" id="openRepository" type="button" title="在默认浏览器中打开 GitHub 仓库">GitHub 仓库 <span aria-hidden="true">↗</span></button>
-        <div class="status" id="statusBadge">待配置</div>
-      </div>
     </header>
 
     <nav class="view-tabs" aria-label="页面导航">
@@ -58,18 +54,11 @@
     <section class="summary-grid">
       <article class="summary-card"><span>运行状态</span><strong id="runState">空闲</strong></article>
       <article class="summary-card"><span>下次执行</span><strong id="nextRun">未启用</strong></article>
-      <article class="summary-card"><span>登录状态</span><strong id="loginState">待刷新</strong></article>
-      <article class="summary-card"><span>软件更新</span><strong id="updateState">未检查</strong></article>
     </section>
 
     <section class="actions panel">
       <button class="primary" id="runNow">立即同步并发送</button>
-      <button id="refreshLogin">登录 / 刷新菜鸟状态</button>
       <button class="danger hidden" id="stopTask">强制中止当前任务</button>
-      <button id="openData">打开数据目录</button>
-      <button id="openLogs">打开日志目录</button>
-      <button id="checkUpdate">检查更新</button>
-      <button class="primary hidden" id="installUpdate">重启并安装更新</button>
     </section>
 
     <section class="panel logs-panel">
@@ -182,8 +171,9 @@
     <section class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
-        <p class="section-intro">各分区可单独保存，未完成机器人配置也能先保存菜鸟账号。</p>
+        <div class="status" id="statusBadge">待配置</div>
       </div>
+      <p class="field-help">各分区可单独保存，未完成机器人配置也能先保存菜鸟账号。</p>
 
       <form id="runtimeSettingsForm" class="settings-card">
         <div class="settings-card-heading">
@@ -291,6 +281,24 @@
         </div>
       </form>
 
+      <section class="settings-card" id="maintenanceCard">
+        <div class="settings-card-heading">
+          <div><h3>维护与状态</h3><p>登录状态、数据与日志目录、GitHub 仓库和软件更新。</p></div>
+        </div>
+        <div class="maintenance-grid">
+          <article class="summary-card"><span>登录状态</span><strong id="loginState">待刷新</strong></article>
+          <article class="summary-card"><span>软件更新</span><strong id="updateState">未检查</strong></article>
+        </div>
+        <div class="actions">
+          <button id="refreshLogin" type="button">登录 / 刷新菜鸟状态</button>
+          <button id="openData" type="button">打开数据目录</button>
+          <button id="openLogs" type="button">打开日志目录</button>
+          <button class="repository-link" id="openRepository" type="button" title="在默认浏览器中打开 GitHub 仓库">GitHub 仓库 <span aria-hidden="true">↗</span></button>
+          <button id="checkUpdate" type="button">检查更新</button>
+          <button class="primary hidden" id="installUpdate">重启并安装更新</button>
+        </div>
+      </section>
+
       <section class="settings-card">
         <div class="settings-card-heading">
           <div><h3>AI Runtime</h3><p>同一核心支持源码、CLI、本地 stdio MCP、便携版与安装版，可供脚本和 AI 客户端调用。</p></div>
@@ -308,10 +316,10 @@
 
       <section class="settings-card">
         <div class="settings-card-heading">
-          <div><h3>在线升级</h3><p>正式发布版会内置企业更新凭据，并在首次启动后转存到 Windows 安全存储。</p></div>
+          <div><h3>在线升级</h3><p>正式发布版从公开 GitHub Release 下载更新，无需内置访问凭据。</p></div>
           <span class="config-state" id="updateCredentialState">检测中</span>
         </div>
-        <p class="field-help">软件会自动检查私有发布版本；下载完成后仍由用户点击“重启并安装更新”。</p>
+        <p class="field-help">软件会自动检查正式发布版本；下载完成后仍由用户点击“重启并安装更新”。</p>
       </section>
 
       <p class="security-note">密码、Secret 与 Webhook 使用 Windows DPAPI 加密；内置更新凭据首次启动后也会转存 DPAPI。</p>

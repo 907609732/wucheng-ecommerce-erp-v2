@@ -7,54 +7,28 @@ import { rootDir } from './config.js';
 
 const authFile = path.join(rootDir, 'tests', '.auth', 'cainiao.json');
 const targetUrl = 'https://b.cainiao.com/business/dsc/oms/erp/osmain/ordermanage';
-const requestedTimeout = Number(process.env.CAINIAO_LOGIN_TIMEOUT_MS || 180_000);
+const recoveryMode = process.env.CAINIAO_LOGIN_RECOVERY === '1';
+const requestedTimeout = Number(process.env.CAINIAO_LOGIN_TIMEOUT_MS || (recoveryMode ? 45_000 : 180_000));
 const loginTimeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
   ? requestedTimeout
   : 180_000;
 
-function getChromeUserDataDir() {
-  const platform = os.platform();
-  const home = os.homedir();
-  if (platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'Google', 'Chrome');
-  }
-  if (platform === 'win32') {
-    return path.join(home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data');
-  }
-  return path.join(home, '.config', 'google-chrome');
-}
-
-function copyDirSync(src, dest) {
-  if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyDirSync(srcPath, destPath);
-    } else {
-      try {
-        fs.copyFileSync(srcPath, destPath);
-      } catch {
-        // 跳过被锁定的文件
-      }
-    }
+async function waitForAuthenticatedPage(page, timeoutMs) {
+  if (!page.url().includes('login')) return true;
+  try {
+    await page.waitForURL((url) => !url.href.includes('login'), { timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
   }
 }
 
 async function main() {
-  console.log('🚀 准备启动 Chrome（复制用户数据避免冲突）...');
+  console.log('🚀 准备启动菜鸟登录浏览器…');
 
-  const realUserDataDir = getChromeUserDataDir();
   const tempUserDataDir = path.join(os.tmpdir(), `cainiao-chrome-${Date.now()}`);
-
-  if (fs.existsSync(realUserDataDir)) {
-    console.log('📂 复制用户数据到临时目录...');
-    copyDirSync(realUserDataDir, tempUserDataDir);
-  } else {
-    console.log('⚠️ 未找到现有 Chrome 数据，使用全新环境');
-    fs.mkdirSync(tempUserDataDir, { recursive: true });
-  }
+  console.log('⚡ 使用已保存登录态，不复制 Chrome 用户数据');
+  fs.mkdirSync(tempUserDataDir, { recursive: true });
 
   let browser;
   try {
@@ -77,13 +51,22 @@ async function main() {
       console.log('📝 加载已有登录态...');
       const storage = JSON.parse(fs.readFileSync(authFile, 'utf-8'));
       await browser.addCookies(storage.cookies || []);
+      const targetOrigin = new URL(targetUrl).origin;
+      const localStorageEntries = storage.origins
+        ?.find((origin) => origin.origin === targetOrigin)
+        ?.localStorage || [];
+      if (localStorageEntries.length) {
+        await page.addInitScript((entries) => {
+          for (const { name, value } of entries) localStorage.setItem(name, value);
+        }, localStorageEntries);
+      }
     }
 
-    await page.goto(targetUrl, { waitUntil: 'networkidle' });
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     console.log('📍 当前页面:', page.url());
 
-    if (!page.url().includes('login')) {
-      console.log('✅ 已经处于登录状态');
+    if (await waitForAuthenticatedPage(page, 5_000)) {
+      console.log('✅ 已复用保存的登录态');
     } else {
 
   // 自动填写账号密码
@@ -117,17 +100,12 @@ async function main() {
 
       console.log(`⏳ 等待登录成功（最多 ${Math.ceil(loginTimeoutMs / 1000)} 秒）...`);
 
-      try {
-        await page.waitForURL(
-          (url) => !url.href.includes('login'),
-          { timeout: loginTimeoutMs }
-        );
-      } catch (e) {
+      if (!await waitForAuthenticatedPage(page, loginTimeoutMs)) {
         throw new Error('登录未完成；如出现验证码、滑块或短信验证，请人工完成后重试');
       }
 
       console.log('✅ 登录成功:', page.url());
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
     }
 
   // 保存登录态

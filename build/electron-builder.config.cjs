@@ -19,7 +19,7 @@ module.exports = {
     provider: "github",
     owner: "907609732",
     repo: "wucheng-ecommerce-erp-v2",
-    private: true,
+    private: false,
     releaseType: "release"
   }],
   artifactName: `CloudWarehouseInventorySync${branding.artifactMarker}-Setup-\${version}-\${arch}.\${ext}`,

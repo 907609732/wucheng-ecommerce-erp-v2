@@ -363,7 +363,7 @@ function buildEnvironment(settings, secrets, kind = "sync") {
     ELECTRON_RUN_AS_NODE: "1",
     CAINIAO_APP_DATA_DIR: appDataDir(),
     ERP_DATA_DIR: path.join(appDataDir(), "data"),
-    CAINIAO_AUTO_LOGIN_RECOVERY: "0",
+    CAINIAO_AUTO_LOGIN_RECOVERY: "1",
     CAINIAO_USERNAME: settings.cainiaoUsername,
     CAINIAO_PASSWORD: secrets.cainiaoPassword || "",
     BUSINESS_TIME_ZONE: "Asia/Shanghai",

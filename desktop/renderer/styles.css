@@ -41,7 +41,8 @@ h2 { margin: 0; font-size: 24px; }
 .view-tabs { display: inline-flex; gap: 4px; margin: 0 0 18px; padding: 4px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,253,250,.78); }
 .view-tab { border: 0; background: transparent; color: var(--muted); }
 .view-tab.active { color: white; background: var(--ink); }
-.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+.summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px; }
+.maintenance-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px; }
 .inventory-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
 .sales-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
 .summary-card, .panel { background: rgba(255,253,250,.92); border: 1px solid var(--line); box-shadow: 0 16px 44px rgba(48,35,19,.06); }
@@ -155,4 +156,4 @@ legend { padding: 0 8px; font-weight: 700; color: var(--ink); }
   .sales-table td:nth-child(3) { min-width: 190px; }
 }
 @media (max-width: 900px) { .sales-chart-grid { grid-template-columns: 1fr; } .sales-controls { grid-template-columns: 1fr 1fr; } .sales-sku-field { grid-column: span 2; } .sales-backfill-panel { align-items: stretch; flex-direction: column; } }
-@media (max-width: 760px) { .summary-grid, .inventory-summary-grid, .sales-summary-grid, .form-grid, .role-choice-grid, .first-run-fields { grid-template-columns: 1fr; } .hero, .form-footer, .section-heading { align-items: stretch; flex-direction: column; } .hero-actions { justify-content: flex-start; } .section-intro { text-align: left; } .shell { width: calc(100% - 24px); padding-top: 24px; } .sales-controls { grid-template-columns: 1fr; } .sales-sku-field { grid-column: auto; } .backfill-controls { align-items: stretch; flex-direction: column; } .sales-due-banner { align-items: stretch; flex-direction: column; } .first-run-overlay { padding: 12px; } .first-run-dialog { padding: 22px; } }
+@media (max-width: 760px) { .summary-grid, .maintenance-grid, .inventory-summary-grid, .sales-summary-grid, .form-grid, .role-choice-grid, .first-run-fields { grid-template-columns: 1fr; } .hero, .form-footer, .section-heading { align-items: stretch; flex-direction: column; } .section-intro { text-align: left; } .shell { width: calc(100% - 24px); padding-top: 24px; } .sales-controls { grid-template-columns: 1fr; } .sales-sku-field { grid-column: auto; } .backfill-controls { align-items: stretch; flex-direction: column; } .sales-due-banner { align-items: stretch; flex-direction: column; } .first-run-overlay { padding: 12px; } .first-run-dialog { padding: 22px; } }
