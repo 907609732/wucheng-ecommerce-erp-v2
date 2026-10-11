@@ -73,6 +73,18 @@ export function createRemoteService(options = {}) {
     data: await options.getMonthlySales(monthlyFilters(request.query))
   }));
   app.get("/api/v1/task", async () => ({ ok: true, data: await options.getTaskState() }));
+  app.get('/api/v1/business', async (request) => ({ ok: true, data: await options.getBusiness(request.query) }));
+  app.get('/api/v1/business/sheets', async (request) => ({ ok: true, data: await options.getBusinessSheets(String(request.query.year || '')) }));
+  app.get('/api/v1/business/images/:id', async (request, reply) => {
+    if (!/^[a-f0-9]{64}$/.test(request.params.id)) return reply.code(400).send({ ok: false, error: '图片编号无效' });
+    try { return { ok: true, data: await options.getBusinessImage(request.params.id) }; }
+    catch { return reply.code(404).send({ ok: false, error: '图片不存在' }); }
+  });
+  app.get('/api/v1/business/original/:id', async (request, reply) => {
+    if (!/^[a-f0-9-]{36}$/.test(request.params.id)) return reply.code(400).send({ ok: false, error: '版本编号无效' });
+    try { return { ok: true, data: await options.getBusinessOriginal(request.params.id) }; }
+    catch { return reply.code(404).send({ ok: false, error: '原文件不存在' }); }
+  });
 
   app.post("/api/v1/jobs", async (request, reply) => {
     const email = accessIdentity(request);

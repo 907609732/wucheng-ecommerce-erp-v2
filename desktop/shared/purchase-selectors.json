@@ -1,0 +1,492 @@
+{
+  "taobao": {
+    "name": "淘宝",
+    "home_url": "https://www.taobao.com/",
+    "login_url": "https://login.taobao.com/member/login.jhtml",
+    "order_url": "https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm",
+    "logged_in_cookies": [
+      "unb",
+      "lgc",
+      "_nk_",
+      "cookie17",
+      "tracknick",
+      "uc1"
+    ],
+    "need_login_url_contains": [
+      "login.taobao.com",
+      "login.tmall.com",
+      "/member/login"
+    ],
+    "need_login_selectors": [
+      "#login-form",
+      ".login-blocks",
+      "#J_QRCodeImg",
+      ".login-switch"
+    ],
+    "ready_selector": ".trade-bought-list-order-container",
+    "card_selector": ".trade-bought-list-order-container",
+    "item_split": {
+      "item_selector": "[class^='itemInfo--']",
+      "css_fields": {
+        "商品名称": {
+          "selector": "[class*='titleContainer--']"
+        }
+      }
+    },
+    "order_css_fields": {
+      "订单号": "[class*='shopInfoOrderId--']",
+      "下单时间": "[class*='shopInfoOrderTime--']"
+    },
+    "text_patterns": {
+      "order_id": [
+        "订单号[：: ]\\s*([0-9]{12,})",
+        "订单编号[：: ]\\s*([0-9]{12,})",
+        "([0-9]{16,})"
+      ],
+      "order_time": [
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})",
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2})"
+      ],
+      "pay_amount": [
+        "实付款[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "实付[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "付款金额[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "total_amount": [
+        "总价[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "商品总价[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "freight": [
+        "运费[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "含运费[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "discount": [
+        "优惠[（(]?[^0-9¥￥]{0,6}[)）]?[：: ]*[-−]?[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "店铺优惠[：: ]*[-−]?[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "平台优惠[：: ]*[-−]?[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "quantity": [
+        "(?m)^\\s*[×xX]\\s*([0-9]{1,4})\\s*$",
+        "共\\s*([0-9]+)\\s*件",
+        "数量[：: ]*([0-9]+)"
+      ],
+      "shop": [
+        "订单号[：:]\\s*[0-9]+\\r?\\n\\s*([^\\r\\n]+)",
+        "卖家[：: ]\\s*(.+)",
+        "店铺[：: ]\\s*(.+)"
+      ],
+      "unit_price": [
+        "[¥￥]\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ]
+    },
+    "title_strategy": "first_line",
+    "pagination": {
+      "next_text": "下一页",
+      "next": [
+        ".next-pagination-next",
+        ".pagination-next",
+        "a.next",
+        "[class*='pg-next']"
+      ],
+      "disabled_class": [
+        "disabled",
+        "pg-disabled",
+        "is-disabled"
+      ],
+      "max_pages": 30
+    },
+    "status_map": {
+      "退款": [
+        "退款成功",
+        "已退款",
+        "退款中",
+        "等待卖家同意退款"
+      ],
+      "已完成": [
+        "交易成功",
+        "成交",
+        "已完成",
+        "确认收货"
+      ],
+      "已发货": [
+        "卖家已发货",
+        "已发货",
+        "运输中",
+        "待收货"
+      ],
+      "待发货": [
+        "买家已付款",
+        "等待卖家发货",
+        "待发货",
+        "已付款"
+      ],
+      "已关闭": [
+        "交易关闭",
+        "已取消",
+        "订单关闭"
+      ]
+    },
+    "export": {
+      "enabled": true,
+      "url": "",
+      "date_format": "%Y-%m-%d",
+      "entry_texts": [
+        "批量导出",
+        "导出订单",
+        "导出记录",
+        "导出"
+      ],
+      "preset_texts": [],
+      "confirm_texts": [
+        "确定",
+        "确认导出",
+        "生成报表",
+        "立即导出"
+      ],
+      "date_start_selector": "",
+      "date_end_selector": "",
+      "columns": {
+        "订单号": [
+          "订单号",
+          "订单编号",
+          "主订单号"
+        ],
+        "下单时间": [
+          "下单时间",
+          "订单创建时间",
+          "创建时间",
+          "成交时间"
+        ],
+        "商品名称": [
+          "商品名称",
+          "宝贝名称",
+          "宝贝标题"
+        ],
+        "规格": [
+          "规格",
+          "sku",
+          "型号"
+        ],
+        "单价": [
+          "单价",
+          "价格"
+        ],
+        "数量": [
+          "数量",
+          "购买数量"
+        ],
+        "商品金额": [
+          "商品金额",
+          "货款"
+        ],
+        "运费": [
+          "运费",
+          "快递费"
+        ],
+        "优惠金额": [
+          "优惠金额",
+          "优惠",
+          "折扣"
+        ],
+        "实付款": [
+          "实付款",
+          "实付金额",
+          "订单金额",
+          "应付金额"
+        ],
+        "卖家店铺": [
+          "店铺名称",
+          "卖家",
+          "供应商"
+        ],
+        "状态": [
+          "订单状态",
+          "交易状态",
+          "状态"
+        ]
+      }
+    }
+  },
+  "alibaba_1688": {
+    "name": "1688",
+    "home_url": "https://www.1688.com/",
+    "login_url": "https://login.1688.com/member/signin.htm",
+    "order_url": "https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html?page=1&pageSize=20",
+    "logged_in_cookies": [
+      "__cn_logon__",
+      "_w_app_lg_",
+      "loginId"
+    ],
+    "need_login_url_contains": [
+      "login.1688.com",
+      "/member/signin"
+    ],
+    "need_login_selectors": [
+      "#login-form",
+      ".login-box",
+      "#J_QRCodeImg",
+      ".login-content"
+    ],
+    "shadow_dom": true,
+    "session_expired_keywords": [
+      "Session 过期",
+      "刷新试试",
+      "session 过期"
+    ],
+    "dismiss_guide": true,
+    "ready_selector": "order-item",
+    "card_selector": "order-item",
+    "item_split": {
+      "item_selector": ".order-item-entry",
+      "css_fields": {
+        "商品名称": {
+          "selector": ".product-name"
+        },
+        "单价": {
+          "selector": "order-item-entry-unit-price"
+        },
+        "数量": {
+          "selector": "order-item-entry-quantity-service-status"
+        }
+      }
+    },
+    "order_css_fields": {
+      "订单号": {
+        "selector": "copy-to-clipboard",
+        "attr": "text",
+        "index": 0
+      },
+      "下单账号": {
+        "selector": "copy-to-clipboard",
+        "attr": "text",
+        "index": 1
+      },
+      "下单时间": {
+        "selector": ".order-time"
+      },
+      "实付款": {
+        "selector": ".total-price"
+      },
+      "运费": {
+        "selector": ".carriage"
+      },
+      "卖家账号": {
+        "selector": "wang-wang",
+        "attr": "nick",
+        "index": 0
+      }
+    },
+    "seller_map": {
+      "enabled": true,
+      "item_selector": ".seller-menu-item",
+      "id_attr": "data-tracker-args",
+      "id_json_key": "sellerLoginId",
+      "nick_selector": "wang-wang",
+      "nick_attr": "nick",
+      "name_pattern": "^(.+?)\\s*共\\s*\\d+\\s*种"
+    },
+    "text_patterns": {
+      "order_id": [
+        "订单号[：: ]\\s*([0-9]{12,})",
+        "订单编号[：: ]\\s*([0-9]{12,})",
+        "([0-9]{16,})"
+      ],
+      "order_time": [
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2}:[0-9]{2})",
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2}\\s+[0-9]{2}:[0-9]{2})",
+        "(20[0-9]{2}-[0-9]{2}-[0-9]{2})"
+      ],
+      "pay_amount": [
+        "实付款[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "实付金额[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "总计[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "total_amount": [
+        "总金额[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "商品金额[：: ]*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "freight": [
+        "含运费\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "运费[：: ]*\\s*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "物流费[：: ]*\\s*[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "discount": [
+        "优惠[（(]?[^0-9¥￥]{0,6}[)）]?[：: ]*[-−]?[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)",
+        "折扣[：: ]*[-−]?[¥￥]?\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ],
+      "quantity": [
+        "数量[：: ]*([0-9]+)",
+        "共\\s*([0-9]+)\\s*件"
+      ],
+      "shop": [
+        "供应商[：: ]\\s*(.+)",
+        "卖家[：: ]\\s*(.+)",
+        "店铺[：: ]\\s*(.+)"
+      ],
+      "unit_price": [
+        "[¥￥]\\s*([0-9]+(?:\\.[0-9]{1,2})?)"
+      ]
+    },
+    "title_strategy": "first_line",
+    "pagination": {
+      "next_text": "下一页",
+      "next": [
+        ".fui-next",
+        ".pagination-next",
+        "a[class*='next']",
+        "[class*='pagination'] a:has-text('下一页')"
+      ],
+      "disabled_class": [
+        "disabled",
+        "fui-next-disabled",
+        "is-disabled"
+      ],
+      "max_pages": 30
+    },
+    "status_map": {
+      "退款": [
+        "退款成功",
+        "已退款",
+        "退款中",
+        "退款申请"
+      ],
+      "已完成": [
+        "交易成功",
+        "已完成",
+        "确认收货",
+        "已收货"
+      ],
+      "已发货": [
+        "已发货",
+        "运输中",
+        "待收货",
+        "卖家已发货"
+      ],
+      "待发货": [
+        "等待发货",
+        "待发货",
+        "已付款"
+      ],
+      "已关闭": [
+        "交易关闭",
+        "已取消",
+        "订单关闭"
+      ]
+    },
+    "extra_flags": {
+      "运费到付": [
+        "到付",
+        "运费到付",
+        "货到付款"
+      ]
+    },
+    "export": {
+      "enabled": true,
+      "url": "",
+      "date_format": "%Y-%m-%d",
+      "entry_texts": [
+        "批量导出",
+        "导出订单",
+        "生成新报表",
+        "导出"
+      ],
+      "preset_texts": [],
+      "confirm_texts": [
+        "确定",
+        "确认",
+        "生成报表",
+        "立即导出",
+        "导出"
+      ],
+      "date_start_selector": "",
+      "date_end_selector": "",
+      "columns": {
+        "订单号": [
+          "订单号",
+          "订单编号",
+          "主订单号"
+        ],
+        "下单时间": [
+          "下单时间",
+          "订单创建时间",
+          "创建时间",
+          "成交时间"
+        ],
+        "商品名称": [
+          "商品名称",
+          "货品名称",
+          "产品名称"
+        ],
+        "规格": [
+          "规格",
+          "规格属性",
+          "sku属性",
+          "型号"
+        ],
+        "单价": [
+          "单价",
+          "商品单价",
+          "价格"
+        ],
+        "数量": [
+          "数量",
+          "购买数量",
+          "件数"
+        ],
+        "商品金额": [
+          "商品金额",
+          "货品金额",
+          "货款"
+        ],
+        "运费": [
+          "运费",
+          "快递费",
+          "物流费用"
+        ],
+        "优惠金额": [
+          "优惠金额",
+          "优惠",
+          "折扣金额"
+        ],
+        "实付款": [
+          "实付款",
+          "实付金额",
+          "订单金额",
+          "应付金额"
+        ],
+        "卖家店铺": [
+          "供应商",
+          "卖家",
+          "供应商公司",
+          "店铺名称"
+        ],
+        "状态": [
+          "订单状态",
+          "交易状态",
+          "状态"
+        ]
+      }
+    }
+  },
+  "goofish": {
+    "name": "闲鱼",
+    "home_url": "https://www.goofish.com/",
+    "login_url": "https://passport.taobao.com/",
+    "order_url": "https://www.goofish.com/bought",
+    "logged_in_cookies": ["tracknick", "_m_h5_tk"],
+    "need_login_url_contains": ["passport", "/login"],
+    "need_login_selectors": [],
+    "shadow_dom": true
+  },
+  "pdd": {
+    "name": "拼多多",
+    "home_url": "https://mobile.yangkeduo.com/",
+    "login_url": "https://mobile.yangkeduo.com/login.html",
+    "order_url": "https://mobile.yangkeduo.com/orders.html?type=0",
+    "logged_in_cookies": ["pdd_user_id", "PDDAccessToken"],
+    "need_login_url_contains": ["login"],
+    "need_login_selectors": [],
+    "shadow_dom": true
+  }
+}

@@ -11,6 +11,9 @@
 - Windows 桌面设置、计划任务和在线升级
 - 面向 AI 的只读诊断、CLI、MCP 和受信扩展接口
 - 敏感配置使用 Electron `safeStorage` 保存，不写入 Git
+- [运营看板](docs/business-dashboard.md)：原经营表格、图片凭证与钉钉手动同步
+- [店铺销售额采集](docs/taobao-sales-collection.md)：千牛收入账单月汇总 Excel 下载与导入核对；[独立账本技术说明](docs/finance-ledger.md)保留原财务功能边界（真实千牛自动下载尚未完成验收）
+- [各功能说明书与技术原理](docs/feature-manual.md)：各页右上角可离线阅读，含操作步骤、数据来源、核对口径、常见问题及未接通能力
 
 ## V2 边界
 

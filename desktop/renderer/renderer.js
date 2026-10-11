@@ -68,6 +68,43 @@ function hydrateIntegration(integration) {
   byId("mcpCommand").textContent = JSON.stringify({ command: mcp.command || "云仓库存同步.exe", args: mcp.args || ["--mcp-stdio"] }, null, 2);
 }
 
+function hydrateAbout(about) {
+  const version = about?.version || "—";
+  const build = about?.build || {};
+  byId("aboutVersion").textContent = `v${version}`;
+  byId("aboutVersionState").textContent = `v${version}`;
+  byId("aboutChannel").textContent = build.channel || "—";
+  const commitText = build.commit && build.commit !== "development" ? `${String(build.commit).slice(0, 12)} · ` : "";
+  const builtText = build.builtAt ? new Date(build.builtAt).toLocaleString("zh-CN", { hour12: false }) : "—";
+  byId("aboutBuild").textContent = commitText + builtText;
+  const list = byId("changelogList");
+  list.replaceChildren();
+  const entries = about?.changelog || [];
+  if (!entries.length) { list.append(Object.assign(document.createElement("p"), { textContent: "暂无迭代记录。" })); return; }
+  for (const entry of entries) {
+    const item = document.createElement("div");
+    item.className = "changelog-entry";
+    const head = document.createElement("div");
+    head.className = "changelog-head";
+    const title = document.createElement("strong");
+    title.textContent = `v${entry.version} · ${entry.title}`;
+    const date = document.createElement("span");
+    date.textContent = entry.date || "";
+    head.append(title, date);
+    item.append(head);
+    if (entry.changes?.length) {
+      const ul = document.createElement("ul");
+      for (const change of entry.changes) {
+        const li = document.createElement("li");
+        li.textContent = change;
+        ul.append(li);
+      }
+      item.append(ul);
+    }
+    list.append(item);
+  }
+}
+
 function deliveryMode() {
   return document.querySelector('input[name="deliveryMode"]:checked')?.value || "app";
 }
@@ -511,12 +548,12 @@ async function saveSection(section, settings, secrets, messageId) {
 }
 
 async function load() {
-  const [settings, secrets, integration, branding] = await Promise.all([api.getSettings(), api.getEditableSecrets(), api.getIntegration(), api.getBranding()]);
+  const [settings, secrets, integration, branding, about] = await Promise.all([api.getSettings(), api.getEditableSecrets(), api.getIntegration(), api.getBranding(), api.getAbout()]);
   document.title = branding.productName;
-  document.querySelector("h1").textContent = branding.productName;
   hydrateSettings(settings);
   hydrateSecrets(secrets);
   hydrateIntegration(integration);
+  hydrateAbout(about);
   byId("firstRunSetup").classList.toggle("hidden", !settings.firstRun);
   try {
     applyState(await api.getState());
@@ -543,19 +580,121 @@ async function refreshSettings() {
   }
 }
 
-document.querySelectorAll(".view-tab").forEach((button) => button.addEventListener("click", () => {
-  document.querySelectorAll(".view-tab").forEach((item) => item.classList.toggle("active", item === button));
-  document.querySelectorAll("[data-view-panel]").forEach((panel) => panel.classList.toggle("hidden", panel.dataset.viewPanel !== button.dataset.view));
-  if (button.dataset.view !== "settings") hideAllSecrets();
-  if (button.dataset.view === "inventory") loadInventory();
-  if (button.dataset.view === "sales") {
+function navigateView(view) {
+  const titles = { home: '功能主页', dashboard: '云仓库存同步', inventory: '云仓库存同步', sales: '云仓库存同步', settings: '公共设置', business: '运营看板', finance: '店铺销售额采集', purchase: '采购数据采集', invoice: '自动开发票' };
+  if (!titles[view]) return;
+  if (view !== 'business' && window.businessSheetEditor?.dirty() && !window.confirm('表格有未保存修改。返回后仍保留草稿，是否离开当前页面？')) return;
+  if (view !== 'purchase' && window.purchaseSheetEditor?.dirty() && !window.confirm('采购表格有未保存修改。返回后仍保留草稿，是否离开当前页面？')) return;
+  document.body.classList.toggle('business-open', view === 'business');
+  document.body.classList.toggle('finance-open', view === 'finance');
+  document.body.classList.toggle('purchase-open', view === 'purchase');
+  document.querySelectorAll('.view-tab').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+  document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));
+  document.querySelector('.view-tabs').classList.toggle('hidden', !['dashboard', 'inventory', 'sales'].includes(view));
+  byId('backHome').classList.toggle('hidden', view === 'home');
+  document.querySelector('h1').textContent = titles[view];
+  document.querySelector('.subtitle').textContent = view === 'home' ? '选择需要使用的功能。' : view === 'business' ? '运营看板 · 销售、采购、人力与凭证' : view === 'finance' ? '店铺销售额采集 · 按店铺取账、归集与核对销售金额' : view === 'purchase' ? '淘宝与1688采购订单 · 按月收集、归集与核对' : view === 'invoice' ? '开票申请采集、核对、模板准备与每日巡检' : view === 'settings' ? '管理运行模式、账号、同步计划与软件更新。' : '采集、校验并通过企业应用机器人发送到钉钉。';
+  if (view !== 'settings') hideAllSecrets();
+  if (view === 'inventory') loadInventory();
+  if (view === 'sales') {
     loadMonthlySales();
     requestAnimationFrame(() => {
       monthlySalesChart?.resize();
       annualSalesChart?.resize();
     });
   }
-}));
+  window.dispatchEvent(new CustomEvent('erp:view', { detail: view }));
+}
+document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.view)));
+document.querySelectorAll('[data-open-view]').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.openView)));
+byId('backHome').addEventListener('click', () => navigateView('home'));
+
+// 自动开发票：启动本机「电商自动开票助手」独立程序。
+function setInvoiceStatus(message, isError = false) {
+  const el = byId('invoiceStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('invoice-status-error', isError);
+}
+async function launchInvoice(kind, buttonId) {
+  const button = byId(buttonId);
+  if (!button) return;
+  const label = kind === 'assistant' ? '自动开票助手' : '每日开票巡检';
+  button.disabled = true;
+  setInvoiceStatus(`正在启动${label}…`);
+  try {
+    const result = kind === 'assistant' ? await api.launchInvoiceAssistant() : await api.launchInvoiceWatch();
+    setInvoiceStatus(`${result.label}已启动，请在独立窗口继续操作。`);
+  } catch (error) {
+    setInvoiceStatus(`启动失败：${error.message}`, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+byId('invoiceLaunchAssistant')?.addEventListener('click', () => launchInvoice('assistant', 'invoiceLaunchAssistant'));
+byId('invoiceLaunchWatch')?.addEventListener('click', () => launchInvoice('watch', 'invoiceLaunchWatch'));
+byId('invoiceOpenFolder')?.addEventListener('click', async () => {
+  try { await api.openInvoiceFolder(); } catch (error) { setInvoiceStatus(`打开目录失败：${error.message}`, true); }
+});
+
+// 每日开票巡检：汇总表、立即巡检、定时设置。
+const invoiceStateLabels = { attention: '有待核对申请', clear: '范围内无申请', partial: '仅部分范围', error: '检查失败', needs_login: '需要登录' };
+function escHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function formatCheckedAt(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('zh-CN', { hour12: false }); }
+function setInvoiceInspectStatus(message, isError = false) {
+  const el = byId('invoiceInspectStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('invoice-status-error', isError);
+}
+function renderInvoiceInspectionTable(summary) {
+  const el = byId('invoiceInspectTable');
+  if (!el) return;
+  const shops = summary?.shops || [];
+  if (!shops.length) { el.innerHTML = '<p class="business-note">尚无巡检记录，不能视为没有待开票申请。</p>'; return; }
+  const rows = shops.map(s => {
+    const known = s.state === 'attention' || s.state === 'clear' || s.state === 'partial';
+    const bad = s.state === 'error' || s.state === 'needs_login';
+    return `<tr><td>${escHtml(s.shop)}</td><td>${known ? s.pending_count : '未知'}</td><td>${known ? s.unrecorded_count : '未知'}</td><td class="${bad ? 'bad' : ''}">${invoiceStateLabels[s.state] || s.state}</td><td>${escHtml(formatCheckedAt(s.checked_at))}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<table class="invoice-inspect-table"><thead><tr><th>店铺</th><th>待处理申请</th><th>待录入开票</th><th>状态</th><th>检查时间</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>合计（已核实店铺）</td><td>${summary.total_pending}</td><td>${summary.total_unrecorded}</td><td colspan="2">共 ${shops.length} 家店铺</td></tr></tfoot></table>`;
+}
+async function loadInvoiceInspection() {
+  try {
+    const summary = await api.getInvoiceInspectionSummary();
+    renderInvoiceInspectionTable(summary);
+  } catch (error) { setInvoiceInspectStatus(`读取巡检记录失败：${error.message}`, true); }
+  try {
+    const schedule = await api.getInvoiceInspectionSchedule();
+    if (schedule) {
+      byId('invoiceInspectTime').value = schedule.time || '20:00';
+      byId('invoiceInspectEnabled').checked = schedule.enabled !== false;
+      setInvoiceInspectStatus(schedule.enabled === false ? '每日巡检已暂停。' : `每天 ${schedule.time} 自动巡检（北京时间），需保持本软件运行、千牛已登录、电脑联网且桌面解锁。`);
+    }
+  } catch (error) { setInvoiceInspectStatus(`读取定时设置失败：${error.message}`, true); }
+}
+byId('invoiceInspectNow')?.addEventListener('click', async () => {
+  const button = byId('invoiceInspectNow');
+  button.disabled = true;
+  setInvoiceInspectStatus('正在逐店打开千牛开票页并读取数量，请稍候（不要切换店铺）…');
+  try {
+    const summary = await api.scanInvoiceInspectionNow();
+    renderInvoiceInspectionTable(summary);
+    setInvoiceInspectStatus(`巡检完成：待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}。`);
+  } catch (error) {
+    setInvoiceInspectStatus(`巡检失败：${error.message}`, true);
+  } finally { button.disabled = false; }
+});
+byId('invoiceInspectSave')?.addEventListener('click', async () => {
+  const value = { enabled: byId('invoiceInspectEnabled')?.checked, time: byId('invoiceInspectTime')?.value };
+  try {
+    const schedule = await api.saveInvoiceInspectionSchedule(value);
+    setInvoiceInspectStatus(schedule.enabled === false ? '已保存：每日巡检已暂停。' : `已保存：每天 ${schedule.time} 自动巡检（北京时间）。`);
+  } catch (error) { setInvoiceInspectStatus(`保存失败：${error.message}`, true); }
+});
+byId('invoiceInspectRefresh')?.addEventListener('click', () => void loadInvoiceInspection());
+api.onInvoiceInspectionChanged?.(summary => renderInvoiceInspectionTable(summary));
+window.addEventListener('erp:view', event => { if (event.detail === 'invoice') void loadInvoiceInspection(); });
 
 document.querySelectorAll("[data-sales-scope]").forEach((button) => button.addEventListener("click", () => {
   monthlySalesScope = button.dataset.salesScope;

@@ -1,12 +1,17 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.1.5",
+  "version": "0.4.0",
   "description": "本地优先、AI 可调用的云仓库存同步工具",
   "author": "五成电子商务集团",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
+    "build:purchase-sheet": "node scripts/build-purchase-sheet.mjs",
+    "predesktop": "npm run build:purchase-sheet",
+    "predesktop:pack": "npm run build:purchase-sheet",
+    "predesktop:build": "npm run build:purchase-sheet",
+    "predesktop:publish": "npm run build:purchase-sheet",
     "desktop": "electron .",
     "ai:status": "electron . --cli status",
     "ai:doctor": "electron . --cli doctor",
@@ -25,6 +30,19 @@
     "monthly:report": "node core/monthly-report.js",
     "test:core": "node --test tests/cainiao-export-controls.test.js tests/dingtalk-auth.test.js tests/dingtalk-app-robot.test.js tests/dingtalk-inventory-reminder.test.js tests/inventory-validation.test.js",
     "test:warehouse-sales": "node --test tests/warehouse-monthly-sales.test.js tests/monthly-sales-dashboard.test.js",
+    "test:business": "node --test tests/business-dashboard.test.js tests/business-dingtalk.test.mjs",
+    "test:business-ui": "node tests/business-ui-smoke.mjs",
+    "test:purchase": "node --test tests/purchase-collector.test.mjs tests/purchase-auto.test.mjs tests/purchase-workbook.test.mjs",
+    "test:purchase-sheet-ui": "npm run build:purchase-sheet && node tests/purchase-sheet-ui.mjs",
+    "test:purchase-window": "node --test tests/purchase-window.test.mjs",
+    "docs:features": "node scripts/export-feature-help.mjs",
+    "test:feature-help": "node --test tests/feature-help-content.test.mjs && node tests/feature-help-ui.mjs",
+    "finance:receive-local": "node scripts/finance-receive-local.mjs",
+    "test:finance": "node --test tests/finance-ledger.test.mjs tests/finance-jobs.test.mjs tests/finance-page.test.mjs tests/finance-local-receipt.test.mjs tests/finance-rpa-state.test.mjs tests/finance-identity.test.mjs tests/finance-onboarding.test.mjs tests/finance-snapshot-privacy.test.mjs tests/finance-browser-identity.test.mjs tests/finance-browser-lifecycle.test.mjs",
+    "test:finance-login": "node tests/finance-login-ui.mjs",
+    "test:finance-safety": "node --test tests/finance-browser-identity.test.mjs tests/finance-snapshot-privacy.test.mjs tests/finance-onboarding-safety.mjs",
+    "test:finance-rpa": "node tests/finance-rpa-smoke.mjs",
+    "test:finance-ui": "node tests/finance-ui-smoke.mjs",
     "test:desktop": "node --test tests/desktop-settings.test.js tests/desktop-ai-interface.test.js tests/desktop-inventory.test.js tests/desktop-task-process.test.js tests/desktop-remote-service.test.js"
   },
   "dependencies": {
@@ -35,9 +53,13 @@
     "dotenv": "^16.4.7",
     "echarts": "^6.1.0",
     "electron-updater": "^6.8.9",
+    "exceljs": "^4.4.0",
+    "fast-formula-parser": "^1.0.19",
+    "fast-xml-parser": "^5.11.2",
     "fastify": "^5.12.5",
     "gridjs": "^6.2.0",
     "playwright": "^1.49.1",
+    "tabulator-tables": "^6.6.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.5"
   },
@@ -45,7 +67,16 @@
     "@modelcontextprotocol/client": "^2.1.0",
     "@modelcontextprotocol/inspector": "^2.8.0",
     "@playwright/test": "^1.61.0",
+    "@univerjs/preset-sheets-core": "1.0.4",
+    "@univerjs/preset-sheets-filter": "1.0.4",
+    "@univerjs/presets": "1.0.4",
     "electron": "44.4.5",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
   }
 }
