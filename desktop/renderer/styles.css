@@ -407,3 +407,4 @@ body.purchase-open.purchase-data-open #purchaseDataPage > p { flex: none; margin
 .purchase-manual-dialog label { display: grid; gap: 6px; font-size: 13px; }
 .purchase-manual-dialog input, .purchase-manual-dialog select { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid #d8dfdb; border-radius: 6px; }
 .purchase-manual-dialog .purchase-collection-actions { margin-top: 20px; justify-content: flex-end; }
+.changelog-heading { margin-top: 24px; }
