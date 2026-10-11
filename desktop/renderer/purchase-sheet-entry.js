@@ -9,6 +9,9 @@ import '@univerjs/preset-sheets-filter/lib/index.css';
 const channel = 'erp-purchase-sheet', pending = new Map(), el = id => document.getElementById(id);
 let requestId = 0, workbook, state, subscription, busy = false, dirty = false, changes = 0, mounting = false;
 let active = true, refreshVersion = 0, loadedVersion = 0;
+// Facade events can arrive after mounting ends; consume only the mutations
+// scheduled by our default filter, while keeping later user filter edits dirty.
+const defaultFilterMutations = new Map();
 const { univerAPI } = createUniver({ locale: LocaleType.ZH_CN, locales: { [LocaleType.ZH_CN]: mergeLocales(coreZhCN, filterZhCN) }, presets: [UniverSheetsCorePreset({ container: 'sheet', header: true, toolbar: true, formulaBar: true }), UniverSheetsFilterPreset()] });
 const message = (text, error = false) => { el('status').textContent = text; el('status').classList.toggle('error', error); };
 function controls() {
@@ -54,6 +57,7 @@ function applyDefaultFilter() {
     const data = workbook.save().sheets[sheet.getSheetId()];
     const rows = Math.max(1, ...Object.keys(data.cellData).map(Number)) + 1;
     const columns = Object.values(data.cellData).reduce((maximum, row) => Math.max(maximum, ...Object.keys(row || {}).map(Number)), 0) + 1;
+    defaultFilterMutations.set('sheet.mutation.set-filter-range', (defaultFilterMutations.get('sheet.mutation.set-filter-range') || 0) + 1);
     const filter = sheet.getRange(0, 0, rows, columns).createFilter();
     if (!filter) return;
     const headerRow = data.cellData[0] || {};
@@ -69,6 +73,7 @@ function applyDefaultFilter() {
     // 默认只保留成功/进行中的订单状态，排除关闭、取消、退款、失败等。
     const keep = [...values].filter(value => !/关闭|取消|退款|失败|作废/.test(value));
     if (!keep.length) return;
+    defaultFilterMutations.set('sheet.mutation.set-filter-criteria', (defaultFilterMutations.get('sheet.mutation.set-filter-criteria') || 0) + 1);
     filter.setColumnFilterCriteria(statusCol, { colId: statusCol, filters: { filters: keep } });
   } catch { /* 自动筛选失败不阻塞表格加载 */ }
 }
@@ -98,7 +103,9 @@ async function load({ automatic = false } = {}) {
     // Use the public global event so formula-engine cache updates are not user edits.
     subscription = univerAPI.addEvent(univerAPI.Event.CommandExecuted, command => {
       if (command.params?.unitId !== workbook.getId() || command.options?.applyFormulaCalculationResult || command.options?.fromFormula) return;
-      if (command.id.startsWith('formula.mutation.')) return;
+      const expected = defaultFilterMutations.get(command.id) || 0;
+      if (expected) { defaultFilterMutations.set(command.id, expected - 1); return; }
+      if (command.id.startsWith('formula.mutation.') || ['sheet.mutation.re-calc-filter', 'sheet.mutation.mark-dirty-filter-change'].includes(command.id)) return;
       if (command.id.includes('.mutation.') && !/set-permission/.test(command.id)) changed();
     });
     // Snapshots can contain cached formula values from before source rows were

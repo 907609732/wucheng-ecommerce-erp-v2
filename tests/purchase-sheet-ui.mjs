@@ -49,6 +49,9 @@ try {
   await sheet.waitForFunction(() => window.purchaseSheet.snapshot().sheets['purchase-details'].cellData[1][12].v === 25);
   await frame.locator('#save').click(); await frame.locator('#status').filter({ hasText: '已保存' }).waitFor();
   assert.equal(await page.evaluate(() => window.purchaseSheetEditor.dirty()), false);
+  assert.equal(await sheet.evaluate(() => Boolean(window.purchaseSheet.api.getActiveWorkbook().getActiveSheet().getFilter())), true);
+  await frame.locator('#filter').click();
+  assert.equal(await sheet.evaluate(() => Boolean(window.purchaseSheet.api.getActiveWorkbook().getActiveSheet().getFilter())), false);
   await frame.locator('#filter').click();
   assert.equal(await sheet.evaluate(() => Boolean(window.purchaseSheet.api.getActiveWorkbook().getActiveSheet().getFilter())), true);
   await frame.locator('#save').click(); await frame.locator('#status').filter({ hasText: '已保存' }).waitFor();
