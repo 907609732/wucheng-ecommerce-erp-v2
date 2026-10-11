@@ -2,6 +2,12 @@
 // 发布新版本时在数组头部追加一条，并在 package.json 更新 version。
 export const CHANGELOG = [
   {
+    version: '0.4.1',
+    date: '2026-10-12',
+    title: '采购采集与财务工作台',
+    changes: ['包含 0.4.0 的采购采集、财务账本和经营看板更新', '修复默认筛选被误记为人工编辑，确保新采集记录自动显示'],
+  },
+  {
     version: '0.4.0',
     date: '2026-10-11',
     title: '采购采集',

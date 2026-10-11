@@ -98,13 +98,14 @@ async function load({ automatic = false } = {}) {
     // Use the public global event so formula-engine cache updates are not user edits.
     subscription = univerAPI.addEvent(univerAPI.Event.CommandExecuted, command => {
       if (command.params?.unitId !== workbook.getId() || command.options?.applyFormulaCalculationResult || command.options?.fromFormula) return;
-      if (command.id.includes('.mutation.') && !/formula.*(result|calculation)|set-formula.*result|set-permission/.test(command.id)) changed();
+      if (command.id.startsWith('formula.mutation.')) return;
+      if (command.id.includes('.mutation.') && !/set-permission/.test(command.id)) changed();
     });
     // Snapshots can contain cached formula values from before source rows were
     // appended. Recalculate through the public facade after replacing the unit.
     univerAPI.getFormula().executeCalculation();
-    changes = 0; setDirty(false); mounting = false;
     applyDefaultFilter();
+    changes = 0; setDirty(false); mounting = false;
     if (next.added && !next.readOnly) { setDirty(true); message(`已补入 ${next.added} 条新采集记录，共 ${next.sourceCount} 条来源记录；请保存表格。`); }
     else message(next.readOnly ? '客户端只读 · 请在主服务器编辑保存' : `已载入 · 来源记录 ${next.sourceCount} 条 · ${next.savedAt ? `版本 ${next.revision}` : '尚未保存'}`);
   } catch (error) { message(`载入失败：${error.message}`, true); }
