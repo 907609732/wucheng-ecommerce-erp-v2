@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../node_modules/gridjs/dist/theme/mermaid.min.css">
   <link rel="stylesheet" href="../../node_modules/tabulator-tables/dist/css/tabulator_simple.min.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="pdd-monthly.css">
 </head>
 <body>
   <section id="firstRunSetup" class="first-run-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
@@ -52,50 +53,33 @@
     <section data-view-panel="home" id="featureHome">
       <div class="feature-grid">
         <button class="feature-card" data-open-view="dashboard"><span class="feature-number">01</span><strong>云仓库存同步</strong><span>库存采集、补货预警与云仓销售趋势</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-view="business"><span class="feature-number">02</span><strong>运营看板</strong><span>店铺销售、采购、人力费用与凭证核对</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-view="finance"><span class="feature-number">03</span><strong>店铺销售额采集</strong><span>按店铺采集销售额 · 月度账单归集与金额核对</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-view="purchase"><span class="feature-number">04</span><strong>采购数据采集</strong><span>淘宝与1688采购订单、按月归集与明细核对</span><span class="feature-enter">进入功能 →</span></button>
         <button class="feature-card" data-open-view="invoice"><span class="feature-number">05</span><strong>自动开发票</strong><span>开票申请采集、核对、模板准备与每日巡检</span><span class="feature-enter">进入功能 →</span></button>
+        <button class="feature-card" data-open-view="pdd-monthly"><span class="feature-number">06</span><strong>拼多多采购订单导出</strong><span>独立选择月份读取买家订单 · 预览并导出 Excel，不写采购账本</span><span class="feature-enter">进入功能 →</span></button>
       </div>
       <button class="home-settings" data-open-view="settings">公共设置</button>
     </section>
 
-    <section data-view-panel="finance" class="hidden" id="financePanel">
-      <div class="finance-toolbar"><label>店铺<select id="financeShop"><option value="">请添加店铺</option></select></label><label>账期<input type="month" id="financeMonth"></label><button id="financeSettings">店铺设置</button><button id="financeAdd">添加店铺</button><span class="finance-spacer"></span><button id="financeHelpButton">使用方法</button></div>
-      <p id="financeStatus" role="status" aria-live="polite">每家店铺单独设置，从空账本开始。</p>
-      <div id="financeEmpty" class="panel finance-empty"><strong>登录淘宝，添加第一家店铺</strong><p>点击添加即可打开千牛登录。登录后读取店铺信息，不需要先填写税务资料。</p><button id="financeFirstShop" class="primary">添加店铺并登录</button></div>
-      <div id="financeContent" class="hidden">
-        <nav class="finance-tabs"><button data-finance-tab="bills" class="active">月度账单</button><button data-finance-tab="draft">填表草稿</button><button data-finance-tab="history">取账记录</button></nav>
-        <section data-finance-section="bills">
-          <div class="finance-actions"><button id="financeCollect" class="primary">立即取账</button><button id="financeRetry">重试失败项</button><button id="financeImport">导入账单</button><button id="financeExport">导出填表资料</button><details><summary>更多</summary><button id="financeOpen">打开店铺后台</button><button id="financeProbe">页面结构采集</button><button id="financeFolder">打开财务资料目录</button><button id="financeRefresh">刷新</button></details></div>
-          <p class="finance-note" id="financeSchedule"></p>
-          <div id="financeRun" class="finance-run hidden"></div>
-          <div id="financePending"></div><div id="financeBillSummary" class="finance-bill-summary"></div>
-          <div class="finance-search"><input id="financeSearch" placeholder="搜索原文件、单元格或单号…"><select id="financeKind"><option value="">全部账单</option><option value="income">收入账单</option><option value="expense">支出账单</option><option value="tax">涉税信息报送账单</option></select></div>
-          <div id="financeGrid"></div><details class="finance-checks" open><summary>待核对事项</summary><ul id="financeIssues"></ul></details>
-        </section>
-        <section data-finance-section="draft" class="hidden"><p id="financeDraftPeriod"></p><p class="finance-note">按本店设置的月度/季度汇集来源。申报项目需根据发票、收入确认和本店适用口径填写，金额为空表示待确认。</p><ul id="financeDraftIssues"></ul><div id="financePlatformReference"></div><div id="financeDraftFields"></div><label>核对说明<textarea id="financeDraftNote" rows="3" placeholder="说明账单与申报金额差异、发票或其他资料来源"></textarea></label><div class="finance-actions"><button id="financeSaveDraft" class="primary">保存草稿</button><button id="financeDraftExport">导出填表资料</button></div></section>
-        <section data-finance-section="history" class="hidden"><p class="finance-note">取账日为每月 15 日 09:00（北京时间）。电脑和本软件需运行；错过后下次启动补做最近一期，历史月份可手动选择补取。登录或下载失败会保留记录，等待处理。</p><div id="financeJobs"></div><h3>当前账期版本</h3><div id="financeVersions"></div></section>
+    <section data-view-panel="pdd-monthly" class="hidden" id="pddMonthlyPanel" aria-label="拼多多采购订单导出">
+      <div class="panel">
+        <h2>按月份读取拼多多买家订单</h2>
+        <p>这是独立采集与导出模块，不写入或修改 ERP 采购账本。选择自然月，本人完成登录后点击读取。</p>
+        <div class="pdd-monthly-actions">
+          <label>订单月份<input type="month" id="pddMonthlyMonth" required aria-label="拼多多订单月份"></label>
+          <button id="pddMonthlyLogin" type="button">打开拼多多登录</button>
+          <button id="pddMonthlyStart" type="button" class="primary">读取所选月份订单</button>
+          <button id="pddMonthlyStop" type="button" disabled>停止读取</button>
+          <button id="pddMonthlyExport" type="button" disabled>导出 Excel 表格</button>
+        </div>
+        <p id="pddMonthlyStatus" role="status" aria-live="polite">请选择订单月份。首次使用需在独立浏览器窗口登录拼多多买家账号。</p>
+        <p id="pddMonthlySummary">尚未读取订单；没有结果不代表该月份为零订单。</p>
+        <p class="pdd-monthly-note">按北京时间下单月份筛选，保留平台返回的全部订单状态；金额按整单只计一次。待支付、关闭或退款订单请结合状态核对，平台金额合计不等于成功采购额或净支出。</p>
       </div>
-      <dialog id="financeShopLoginDialog" class="finance-dialog finance-login-dialog" aria-labelledby="financeShopLoginTitle">
-        <form id="financeShopLoginForm">
-          <h2 id="financeShopLoginTitle">登录并添加店铺</h2>
-          <p id="financeShopLoginStatus" role="status" aria-live="polite">请在新打开的千牛窗口完成登录。</p>
-          <div id="financeShopLoginInfo" class="hidden">
-            <label class="finance-login-name">店铺名称<input id="finLoginName" maxlength="200" placeholder="后台未显示名称时，仅需在这里补充"></label>
-            <p>登录账号：<strong id="finLoginAccount">尚未读取</strong></p>
-            <p>店铺 ID：<span id="finLoginPlatformId">后台未提供</span></p>
-            <details><summary>主体信息（可稍后补充）</summary><p id="finLoginEntity"></p><p id="finLoginTaxId"></p></details>
-          </div>
-          <p class="finance-note">自动读取后台明确显示的信息，未提供的主体、税号、纳税类型保持待确认。添加不会下载账单，也不会自动启用定时任务。</p>
-          <p id="financeShopLoginError" class="finance-error" role="alert"></p>
-          <div class="finance-actions"><button type="button" id="financeShopLoginCancel">取消</button><button type="button" id="financeShopLoginRefresh">重新读取</button><button type="submit" id="financeShopLoginConfirm" class="primary" disabled>确认添加</button></div>
-        </form>
-      </dialog>
-      <dialog id="financeShopDialog" class="finance-dialog"><form id="financeShopForm"><h2 id="financeShopDialogTitle">店铺设置</h2><input type="hidden" id="financeShopId"><div class="finance-form-grid"><label>店铺名称<input id="finName" required maxlength="200"></label><label>后台可见账号<input id="finAccount" placeholder="用于取账时核对店铺"></label><label>纳税主体名称<input id="finEntity" placeholder="可稍后设置"></label><label>统一社会信用代码 / 税号<input id="finTaxId" maxlength="40"></label><label>主体类型<select id="finEntityType"><option value="">待确认</option><option value="enterprise">企业</option><option value="individual">个体工商户</option></select></label><label>纳税人类型<select id="finTaxpayer"><option value="">待确认</option><option value="general">一般纳税人</option><option value="small">小规模纳税人</option></select></label><label>本草稿申报周期<select id="finCycle"><option value="">待确认</option><option value="monthly">按月</option><option value="quarterly">按季</option></select></label><label>开始取账月份<input id="finStart" type="month" required></label></div><details><summary>高级：账单页面与分类映射（首次联调时使用）</summary><div class="finance-form-grid"><label>账单页面地址<input id="finBillUrl" placeholder="留空使用千牛收支账单默认地址"></label><label>排除的子类型<input id="finExclude" placeholder="逗号分隔，例如：全部"></label><label class="finance-wide">分类映射（每行：页面文字=income|expense|tax）<textarea id="finCategoryMap" rows="3" placeholder="例如：技术服务费账单=expense"></textarea></label></div><p class="finance-note">自动发现无法唯一确认分类时，在这里人工指定页面文字对应的账本口径；留空则只使用自动发现结果。</p></details><label class="check"><input id="finSchedule" type="checkbox">每月 15 日 09:00 定时取上月账单</label><p class="finance-note">首次需登录并验证下载流程。遇到账号、月份、导出入口无法确认时转为待处理；定时取账不代表已完成纳税申报。</p><p id="financeShopError" class="finance-error"></p><div class="finance-actions"><button type="button" data-finance-close="financeShopDialog">取消</button><button type="submit" class="primary">保存店铺</button></div></form></dialog>
-      <dialog id="financeImportDialog" class="finance-dialog finance-dialog-wide"><h2>核对原始账单</h2><p id="financeImportName"></p><div class="finance-form-grid"><label>工作表<select id="finImportSheet"></select></label><label>账单类型<select id="finImportKind"><option value="income">收入账单</option><option value="expense">支出账单</option><option value="tax">涉税信息报送账单</option></select></label><label id="finLedgerViewField" hidden>入账口径<select id="finLedgerView"><option value="">自动识别</option></select></label><label>账期<input id="finImportMonth" type="month"></label><label>首条数据行<input id="finFirstRow" type="number" min="2" value="2"></label><label>最后数据行<input id="finLastRow" type="number" min="2"></label></div><details><summary>查看文件前 8 行（选择数据范围时排除表头、合计行）</summary><div id="finSample" class="finance-sample"></div></details><div id="finMapping" class="finance-form-grid"></div><label class="check"><input id="finScope" type="checkbox">确认这是当前店铺该月份的完整账单，选定范围未混合明细与合计</label><p class="finance-note">月汇总、日汇总和明细视图选一种计入金额，其余保留为核对凭证；货款、补贴等独立业务分片经核对后合并入账。</p><div id="finPreviewResult"></div><p id="financeImportError" class="finance-error"></p><div class="finance-actions"><button data-finance-close="financeImportDialog">稍后处理</button><button id="financePreview">预览核对</button><button id="financeCommit" class="primary" disabled>确认并入账</button></div></dialog>
-      <dialog id="financeProbeDialog" class="finance-dialog finance-dialog-wide"><h2>页面结构采集（只读）</h2><p class="finance-note">只读取当前店铺窗口已经渲染出来的页面元素，不点击导出、不提交、不改设置。用于首次联调时确认真实页面上的账单类型、账期控件和导出入口。</p><pre id="financeProbeResult" class="finance-probe"></pre><p id="financeProbeError" class="finance-error"></p><div class="finance-actions"><button type="button" data-finance-close="financeProbeDialog">关闭</button><button type="button" id="financeProbeRun">重新采集</button></div></dialog>
-
+      <section class="panel pdd-monthly-results" aria-label="采集结果表格">
+        <h2>所选月份的数据表格</h2>
+        <p id="pddMonthlyResultInfo">采集成功后显示订单号、商品规格、数量、单价、整单金额、供应商和状态。</p>
+        <div id="pddMonthlyGrid"></div>
+      </section>
+      <details class="panel"><summary>采集进度与日志</summary><pre id="pddMonthlyLogs">等待操作…</pre></details>
     </section>
     <nav class="view-tabs hidden" aria-label="页面导航">
       <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
@@ -103,7 +87,6 @@
       <button class="view-tab" type="button" data-view="sales">销售趋势</button>
       <button class="view-tab" type="button" data-view="settings">设置</button>
     </nav>
-
     <div data-view-panel="dashboard" class="hidden">
     <section class="summary-grid">
       <article class="summary-card"><span>运行状态</span><strong id="runState">空闲</strong></article>
@@ -221,111 +204,6 @@
       </section>
     </div>
 
-    <section data-view-panel="business" class="hidden" id="businessPanel">
-      <div class="business-mode-bar hidden"><div><button id="businessTableMode" class="active">表格</button><button id="businessAnalysisMode">经营分析</button></div></div>
-      <div class="panel business-toolbar">
-        <div class="business-filters">
-          <label>年份<select id="businessYear"></select></label>
-          <label>月份<select id="businessMonth"><option value="">全年</option></select></label>
-          <label>店铺<select id="businessShop"><option value="">全部店铺</option><option>店口五金淘宝</option><option>店口五金拼多多</option><option>西施五金淘宝</option></select></label>
-        </div>
-        <div class="business-file-actions">
-          <button id="businessDingTalkSync">同步钉钉</button><button id="businessExport">导出 Excel</button>
-          <details class="business-export-menu"><summary>数据管理</summary><div><button id="businessOpenDingTalk">打开钉钉原表</button><button id="businessImport">导入 Excel</button><button id="businessTemplate">下载导入模板</button><button id="businessHistory">历史版本</button><button id="businessOriginal">下载原文件</button><button id="businessExportAll">导出全部数据</button><button id="businessAllImages">查看全部凭证</button><button id="businessRefresh">刷新数据</button></div></details>
-        </div>
-      </div>
-      <p id="businessStatus" role="status" aria-live="polite">正在读取经营数据…</p>
-      <section id="businessEmpty" class="panel hidden"><h2>导入第一份经营数据</h2><p>支持原始五表工作簿和本软件提供的标准 Excel 模板，图片和凭证一并保留。</p><p id="businessEmptyHelp">点击上方“导入数据”选择工作簿，预览后保存。</p></section>
-      <div id="businessContent" class="hidden">
-        <nav id="businessWorkspaceNav" class="business-workspace-nav" aria-label="经营业务"><button data-business-page="overview" class="active">经营总览</button><button data-business-page="sales">销售月报</button><button data-business-page="purchases">采购管理</button><button data-business-page="labor">人力费用</button><button data-business-page="expenses">邮费与代发</button><button data-business-page="checks">数据核对</button></nav>
-        <div id="businessPageHeading" class="business-page-heading"><h2 id="businessPageTitle">经营总览</h2><span id="businessPageHint"></span></div>
-        <section id="businessSheetView" class="workbook-view">
-          <nav id="businessSheetTabs" class="sheet-tabs hidden" aria-label="工作表"></nav>
-          <div class="sheet-edit-toolbar"><details class="sheet-formula-details"><summary>单元格内容 / 公式</summary><div><span id="businessCellAddress">请选择单元格</span><input id="businessFormulaBar" aria-label="单元格内容或公式" placeholder="选中单元格后查看或修改"><button id="businessApplyCell">应用</button></div></details><div id="businessDraftActions" class="hidden"><button id="businessSaveCells" class="primary" disabled>保存修改</button><button id="businessDiscardCells" disabled>撤销修改</button></div><span id="businessDirtyState">已保存</span></div>
-          <div class="sheet-search-bar"><input id="businessSheetSearch" aria-label="搜索当前表格" placeholder="搜索当前表格…"><button id="businessSheetReset">清除筛选</button><label class="hidden">缩放 <select id="businessSheetZoom"><option value="85">85%</option><option value="100" selected>100%</option><option value="115">115%</option></select></label><button id="businessExportSheet" class="hidden">导出表格与凭证</button><span id="businessSheetHelp">双击修改 · 点击凭证放大</span></div>
-          <div id="businessSheetTables" class="sheet-table-host"></div>
-        </section>
-        <div id="businessAnalysis" class="hidden">
-        <nav class="business-tabs hidden" aria-label="经营看板导航"><button data-business-tab="overview" class="active">经营总览</button><button data-business-tab="shops">店铺分析</button><button data-business-tab="purchases">采购明细</button><button data-business-tab="labor">人力费用</button><button data-business-tab="checks">数据核对</button><button data-business-tab="images">图片凭证</button></nav>
-        <section data-business-section="overview">
-          <p id="businessSourceInfo" class="business-note"></p>
-          <section id="businessSummary" class="business-summary"></section>
-          <details class="business-more-metrics"><summary>支付、退款与人力费用</summary><div id="businessSecondarySummary" class="business-summary"></div></details>
-          <div class="business-chart-grid"><article class="panel"><h2>月度经营趋势</h2><div id="businessTrend" class="business-chart"></div></article><article class="panel"><h2>店铺净支付对比</h2><div id="businessComparison" class="business-chart"></div></article></div>
-          <details class="business-stats-details"><summary>查看月度收支明细</summary><div class="business-stats-body"><p class="business-note">公共费用按原表月份展示；缺失值为未填报。</p><div id="businessFinanceGrid"></div></div></details>
-        </section>
-        <section data-business-section="shops" class="hidden"><article class="panel"><h2>店铺月报</h2><div id="businessShopGrid"></div></article></section>
-        <section data-business-section="purchases" class="hidden"><details id="businessPurchaseStats" class="business-stats-details"><summary>查看原表每月平台支出</summary><div class="business-stats-body"><div id="businessPurchaseChart" class="business-chart"></div><div id="businessPurchaseMonthlyGrid"></div><p class="business-note">原始经营工作簿中的采购明细；平台采购导入数据独立保存，避免未经确认地改写历史账。</p></div></details><div id="businessPurchaseEditorSlot"></div><div id="businessPurchaseGrid" class="hidden"></div></section>
-        <section data-business-section="labor" class="hidden"><article class="panel"><h2>人力费用明细</h2><p class="business-note">采用原表下方日期明细；上方重复展示区的截图保留在“图片凭证”。</p><div id="businessLaborGrid"></div></article></section>
-        <section data-business-section="checks" class="hidden"><article class="panel"><h2>来源核对</h2><p class="business-note">全年核对结果，不随店铺和月份分摊或改账。</p><div id="businessCheckGrid"></div><div id="businessNotices"></div></article></section>
-        <section data-business-section="images" class="hidden"><article class="panel"><h2>图片与凭证</h2><p class="business-note">点击缩略图查看原图。全年视图保留无法明确归属月份的凭证。</p><div id="businessImages" class="business-images"></div></article></section>
-        </div>
-      </div>
-    </section>
-    <dialog id="businessPreview" class="business-dialog"><h2>导入预览</h2><div id="businessPreviewBody"></div><div class="business-dialog-actions"><button id="businessCancelImport">取消</button><button id="businessCommitImport" class="primary">确认导入</button></div></dialog>
-    <dialog id="businessHistoryDialog" class="business-dialog"><h2>年度历史版本</h2><div id="businessVersionList"></div><button id="businessCloseHistory">关闭</button></dialog>
-    <dialog id="businessImageDialog" class="business-image-dialog"><div><span id="businessImageCaption"></span><button id="businessCloseImage">关闭</button></div><img id="businessFullImage" alt="原始凭证"></dialog>
-    <dialog id="purchasePreview" class="business-dialog"><h2>采购导入预览</h2><div id="purchasePreviewBody"></div><div class="business-dialog-actions"><button id="purchaseCancelImport">取消</button><button id="purchaseCommitImport" class="primary">确认入库</button></div></dialog>
-
-    <section data-view-panel="purchase" class="hidden" id="purchasePanel">
-      <nav class="purchase-tabs" role="tablist" aria-label="采购功能页面">
-        <button id="purchaseCollectTab" role="tab" aria-selected="true" aria-controls="purchaseCollection" class="primary">采购采集</button>
-        <button id="purchaseDataTab" role="tab" aria-selected="false" aria-controls="purchaseDataPage" tabindex="-1">数据查看 / 表格</button>
-      </nav>
-      <section id="purchaseCollection" class="purchase-collection" role="tabpanel" aria-labelledby="purchaseCollectTab">
-        <div><h2>平台采购采集</h2><p>1688 自动流程：选择时间 → 搜索 → 导出当前条件 → 下载校验 → 预览入库。首次使用请先打开采集窗口登录。</p></div>
-        <div class="purchase-collection-actions">
-          <label>采购平台<select id="purchasePlatform" aria-label="采购平台"><option value="alibaba_1688">1688</option><option value="taobao">淘宝</option><option value="goofish">闲鱼</option><option value="pdd">拼多多</option></select></label>
-          <label>当前账号ID（自动识别）<input id="purchaseAccount" aria-label="采购账号ID" readonly placeholder="登录后自动识别，无需填写"></label>
-          <label>快捷月份<input id="purchaseMonth" aria-label="采购月份" type="month"></label>
-          <label>开始日期<input id="purchaseStart" aria-label="采购开始日期" type="date"></label>
-          <label>结束日期<input id="purchaseEnd" aria-label="采购结束日期" type="date"></label>
-          <label>补齐年份<input id="purchaseBackfillYear" aria-label="补齐年份" type="number" min="2020" max="2030" value="2026"></label>
-        </div>
-        <div class="purchase-collection-actions"><button id="purchaseLogin">打开采集窗口 / 登录</button><button id="purchaseAuto" class="primary">自动采集</button><button id="purchaseBackfill">补齐缺失月份</button><button id="purchaseExportYearly">导出年度表</button><button id="purchaseRollback">撤回上次入库</button><button id="purchaseManualAdd">手动添加散单</button><button id="purchaseStop" disabled>停止采集</button><details><summary>已有导出文件</summary><div class="purchase-collection-actions"><button id="purchaseOpenPlatform">打开平台后台</button><button id="purchaseImport">导入导出文件</button></div></details></div>
-        <p id="purchaseStatus" class="business-note" role="status" aria-live="polite"></p><p id="purchaseAutoStatus" class="business-note" role="status" aria-live="polite">选择采购账号和时间后，点击自动采集。</p>
-        <section class="logs-panel" aria-label="采购采集运行日志">
-          <div class="section-heading"><h3>采集运行日志</h3><div class="purchase-collection-actions"><button id="purchaseCopyLogs">复制日志</button><button id="purchaseOpenLogs">打开日志目录</button></div></div>
-          <p class="business-note">显示最近300条后端日志；等待时每10秒提示进度。日志自动保存在本机，重启后仍可查看。</p>
-          <pre id="purchaseLogs" role="log" aria-live="polite">等待操作…</pre>
-        </section>
-        <section class="logs-panel" aria-label="采购操作历史">
-          <div class="section-heading"><h3>操作历史 / 撤回记录</h3><div class="purchase-collection-actions"><button id="purchaseRefreshOps">刷新</button></div></div>
-          <p class="business-note">记录每次导入与撤回，用于追溯和撤销。撤回只影响最近一次入库批次。</p>
-          <pre id="purchaseOperations" role="log" aria-live="polite">暂无操作记录</pre>
-        </section>
-        <div id="purchaseCollectionSummary" class="business-note"></div>
-        <dialog id="purchaseManualDialog" class="purchase-manual-dialog">
-          <form id="purchaseManualForm" method="dialog">
-            <div class="section-heading"><div><p class="eyebrow">MANUAL</p><h3>手动添加散单</h3></div></div>
-            <p class="field-help">线下采购或其他账号买的散单在这里录入，走和平台采集一样的流程（预览→入库→撤回→历史→导出）。订单号自动生成，来源可自定义。</p>
-            <div class="form-grid">
-              <label>采购来源 / 平台<input id="manualPlatform" placeholder="如：线下五金店、朋友代买" required></label>
-              <label>采购人 / 账号ID<input id="manualAccount" placeholder="可填采购人姓名"></label>
-              <label>采购日期<input id="manualDate" type="date" required></label>
-              <label>供应商<input id="manualSupplier" placeholder="卖家 / 店铺"></label>
-              <label>商品名称<input id="manualItem" placeholder="必填" required></label>
-              <label>规格 / SKU<input id="manualSku" placeholder="可空"></label>
-              <label>数量<input id="manualQuantity" type="number" min="0" step="1" value="1"></label>
-              <label>单价（元）<input id="manualUnitPrice" type="number" min="0" step="0.01"></label>
-              <label>商品金额（元）<input id="manualItemAmount" type="number" min="0" step="0.01"></label>
-              <label>运费（元）<input id="manualFreight" type="number" min="0" step="0.01" value="0"></label>
-              <label>优惠（元）<input id="manualDiscount" type="number" min="0" step="0.01" value="0"></label>
-              <label>实付款（元）<input id="manualPaid" type="number" min="0" step="0.01"></label>
-              <label>订单状态<select id="manualStatus"><option>交易成功</option><option>待收货</option><option>待发货</option><option>待支付</option><option>交易取消</option><option>退款成功</option><option>其他</option></select></label>
-              <label>快递单号<input id="manualTracking" placeholder="可空"></label>
-              <label>备注<input id="manualRemark" placeholder="可空"></label>
-            </div>
-            <div class="purchase-collection-actions"><button type="button" id="manualCancel">取消</button><button type="submit" id="manualSubmit" class="primary">预览入库</button></div>
-          </form>
-        </dialog>
-      </section>
-      <section id="purchaseDataPage" class="hidden purchase-data-page" role="tabpanel" aria-labelledby="purchaseDataTab">
-        <p class="business-note">跨月份采购工作簿 · 可直接编辑、设置格式、编写公式及筛选。采集入库后自动显示新数据；如有未保存编辑，保存后自动补入。修改只保存到此表格，不改写原始采集记录。请保留采购明细第1行的字段名称。</p>
-        <iframe id="purchaseSheetFrame" title="采购数据可编辑表格" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads"></iframe>
-      </section>
-    </section>
-
     <section data-view-panel="invoice" class="hidden" id="invoicePanel">
       <div class="panel">
         <div class="section-heading">
@@ -333,29 +211,45 @@
         </div>
 
         <div class="section-heading">
-          <div><p class="eyebrow">每日开票巡检</p><h3>每日扫描店铺后台未开票订单，发送钉钉提醒</h3></div>
+          <div><p class="eyebrow">每日开票巡检</p><h3>扫描店铺开票申请，发送钉钉群提醒</h3></div>
         </div>
-        <p class="field-help">每天定时读取各家店铺千牛「给买家开票」页，统计待处理申请与待录入开票数量，汇总发送到钉钉机器人提醒。只读查询，不审批、不实际开票、不回传。登录失败或识别不到的店铺不记为 0。</p>
+        <p class="field-help">淘宝读取千牛「给买家开票」；拼多多读取「订单开票 → 开票列表 → 待开票」的当前列表，不采用首页“10日内未开票数”。按独立店铺和会话逐店巡检后复用公共设置中的云仓钉钉机器人发送同一群。登录失败或列表计数不一致记为未知；只读检查，不执行开票。</p>
+        <fieldset class="invoice-platform-picker" aria-label="选择开票平台">
+          <legend>第一步 · 选择开票平台</legend>
+          <div class="invoice-platform-options">
+            <label class="invoice-platform-option"><input type="radio" name="invoiceShopPlatform" value="taobao" checked><span class="invoice-platform-icon" data-platform="taobao" aria-hidden="true">淘</span><span><strong>淘宝 / 千牛</strong><small>给买家开票</small></span></label>
+            <label class="invoice-platform-option"><input type="radio" name="invoiceShopPlatform" value="pdd"><span class="invoice-platform-icon" data-platform="pdd" aria-hidden="true">拼</span><span><strong>拼多多</strong><small>商家后台订单开票</small></span></label>
+          </div>
+        </fieldset>
+        <div class="invoice-actions invoice-shop-add"><label>第二步 · 填写开票店铺名称<input id="invoiceShopName" placeholder="与平台页面右上角店铺名一致" maxlength="60"></label><button id="invoiceAddShop">添加所选平台店铺</button></div>
+        <p id="invoiceShopStatus" class="module-note" role="status" aria-live="polite">先添加店铺，再打开该店铺的独立平台窗口登录并确认身份。</p>
+        <div id="invoiceShopList"></div>
         <div class="invoice-actions">
-          <button id="invoiceInspectNow" class="primary">立即巡检</button>
+          <button id="invoiceInspectNow" class="primary">全部店铺巡检并通知</button>
           <label class="invoice-schedule">每天<input id="invoiceInspectTime" type="time" value="20:00">检查</label>
           <label class="check invoice-check"><input id="invoiceInspectEnabled" type="checkbox">启用每日巡检</label>
           <button id="invoiceInspectSave">保存定时设置</button>
           <button id="invoiceInspectRefresh">刷新记录</button>
         </div>
-        <p id="invoiceInspectStatus" class="business-note" role="status" aria-live="polite"></p>
+        <p id="invoiceInspectStatus" class="module-note" role="status" aria-live="polite"></p>
         <div id="invoiceInspectTable"></div>
 
         <div class="section-heading changelog-heading">
-          <div><p class="eyebrow">独立开票助手</p><h3>五步开票工作台与每日巡检（本机 Python 程序）</h3></div>
+          <div><p class="eyebrow">ERP 内独立模块</p><h3>五步开票工作台、旧版台账与独立巡检</h3></div>
         </div>
-        <p class="field-help">调用本机「电商自动开票助手」独立程序，做开票申请采集、核对、模板准备、执行任务、结果登记与附件归档，不做 ERP、库存和物流。</p>
+        <p class="field-help">从 ERP 内置的开票模块启动独立窗口，处理申请采集、核对、模板准备、执行任务、结果登记与附件归档；与库存、物流数据库隔离。</p>
         <div class="invoice-actions">
           <button id="invoiceLaunchAssistant" class="primary">启动自动开票助手</button>
           <button id="invoiceLaunchWatch">打开每日开票巡检</button>
+          <button id="invoiceLaunchLegacy">打开旧版开票台账</button>
           <button id="invoiceOpenFolder">打开本地数据目录</button>
         </div>
-        <p id="invoiceStatus" class="business-note" role="status" aria-live="polite">程序目录：C:\Users\90760\WorkBuddy\自动开发票。开票助手与每日巡检各自独立、单实例运行。</p>
+        <p id="invoiceStatus" class="module-note" role="status" aria-live="polite">开票代码和模板位于当前 ERP 工作区的独立模块；历史配置与数据保存在本机用户数据目录，不依赖旧工作区。</p>
+        <section class="logs-panel" aria-label="开票运行日志">
+          <div class="section-heading"><h3>开票运行日志</h3><div class="invoice-actions"><button id="invoiceRefreshLogs">刷新日志</button><button id="invoiceCopyLogs">复制日志</button><button id="invoiceOpenLogs">打开日志目录</button></div></div>
+          <p class="module-note">显示最近 300 条；记录工具启动与退出、子程序输出、逐店巡检结果、定时任务和钉钉发送状态。按天保存在本机，重启后可查；日志可能含店铺业务信息，分享前请检查。</p>
+          <pre id="invoiceLogs" role="log" aria-live="polite">暂无运行日志</pre>
+        </section>
       </div>
     </section>
 
@@ -549,12 +443,6 @@
   <script src="feature-help-content.js"></script>
   <script src="feature-help.js"></script>
   <script src="renderer.js"></script>
-  <script src="business-sheet.js"></script>
-  <script src="business.js"></script>
-  <script src="business-workspace.js"></script>
-  <script src="purchase-collection.js"></script>
-  <script src="purchase-data.js"></script>
-  <script src="finance-shop-login.js"></script>
-  <script src="finance.js"></script>
+  <script src="pdd-monthly.js"></script>
 </body>
 </html>

@@ -37,11 +37,15 @@ jobs:
       - run: npm run ai:inspect:tools
       - run: npm run test:core
       - run: npm run test:warehouse-sales
+      - run: node --test tests/removed-modules.test.mjs tests/invoice*.test.mjs tests/pdd-invoice.test.mjs
+      - run: npm run test:pdd-monthly
       - name: Build Windows release
         env:
           CAINIAO_INTERNAL_UPDATE_TOKEN: ${{ secrets.CAINIAO_INTERNAL_UPDATE_TOKEN }}
           CAINIAO_BUILD_CHANNEL: release
         run: npm run desktop:build -- --publish never
+      - name: Verify removed modules are absent from package
+        run: node --test tests/packaged-modules.test.mjs
       - name: Publish complete GitHub Release
         shell: pwsh
         env:

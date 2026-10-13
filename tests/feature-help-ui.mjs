@@ -30,8 +30,7 @@ try {
   const views = [
     ['home', '功能主页'], ['dashboard', '云仓库存同步'],
     ['inventory', '云仓库存同步 · 库存明细'], ['sales', '云仓库存同步 · 月度销量'],
-    ['business', '运营看板'], ['finance', '店铺销售额采集'],
-    ['purchase', '采购数据采集'], ['invoice', '自动开发票'], ['settings', '公共设置']
+    ['invoice', '自动开发票'], ['settings', '公共设置'], ['pdd-monthly', '拼多多采购订单导出']
   ];
   for (const [view, title] of views) {
     if (view !== 'home') {
@@ -51,23 +50,6 @@ try {
       assert.equal(await dialog.getAttribute('data-mode'), mode);
       assert.equal(await page.locator('#featureHelpTitle').textContent(), `${title} · ${label}`);
       assert.ok((await page.locator('#featureHelpBody').textContent()).length > 150, `${view} 应有具体内容`);
-      if (view === 'finance' && mode === 'manual') {
-        const onboarding = await page.locator('#featureHelpBody section').filter({ hasText: '添加店铺：先登录，再读取信息' }).locator('ol').textContent();
-        assert.match(onboarding, /添加店铺.*直接.*千牛.*登录/);
-        assert.match(onboarding, /登录后.*读取/);
-        const steps = await page.locator('#featureHelpBody section').filter({ hasText: '淘宝销售额下载流程（按框选位置）' }).locator('ol').textContent();
-        assert.match(steps, /财务[\s\S]*收支账单[\s\S]*收入账单[\s\S]*月汇总[\s\S]*月份[\s\S]*查询[\s\S]*导出 Excel/);
-        assert.match(steps, /货款收入/);
-        assert.match(await page.locator('#featureHelpBody').textContent(), /历史下载记录/);
-        assert.match(await page.locator('#featureHelpBody').textContent(), /不能.*成交额/);
-        await page.screenshot({ path: path.join(output, 'taobao-sales-manual.png'), fullPage: true });
-      }
-      if (view === 'finance' && mode === 'principle') {
-        const text = await page.locator('#featureHelpBody').textContent();
-        assert.match(text, /整数分/);
-        assert.match(text, /SHA-256/);
-        assert.match(text, /真实千牛.*未.*验证/);
-      }
       await page.locator('#featureHelpClose').click();
       assert.equal(await dialog.isVisible(), false);
       assert.equal(await page.locator(mode === 'manual' ? '#featureManualButton' : '#featurePrincipleButton').evaluate(el => el === document.activeElement), true);
@@ -80,11 +62,6 @@ try {
     assert.equal(await dialog.isVisible(), false);
   }
   await page.locator('#backHome').click();
-  await page.locator('[data-open-view="finance"]').click();
-  await page.locator('#financeHelpButton').click();
-  assert.equal(await dialog.getAttribute('data-view'), 'finance');
-  assert.equal(await dialog.getAttribute('data-mode'), 'manual');
-  await page.locator('#featureHelpClose').click();
   for (const width of [1280, 760]) {
     await page.setViewportSize({ width, height: 850 });
     assert.equal(await page.locator('#featureManualButton').isVisible(), true);
@@ -103,7 +80,7 @@ try {
     await page.locator('#featureHelpClose').click();
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, checked, legacyFinanceHelp: true, modeSwitch: true, escapeAndFocus: true, responsiveWidths: [1280, 760], screenshots: output }));
+  console.log(JSON.stringify({ ok: true, checked, modeSwitch: true, escapeAndFocus: true, responsiveWidths: [1280, 760], screenshots: output }));
 } finally {
   const pid = application?.process()?.pid;
   if (pid) try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch {}

@@ -43,7 +43,8 @@ export function validateInvoiceObservation(value) {
     result.state = result.outcome;
   } else {
     if (result.pending_count === null || result.pending_count === undefined) throw new Error('正常观察必须核实待处理数量');
-    if (result.unrecorded_count === null || result.unrecorded_count === undefined) throw new Error('正常观察必须核实待录入数量');
+    if ((result.unrecorded_count === null || result.unrecorded_count === undefined) && result.metric !== 'pending_only') throw new Error('正常观察必须核实待录入数量');
+    if (result.metric === 'pending_only' && result.unrecorded_count !== null) throw new Error('仅待开票口径不可填待录入数量');
     if (result.coverage === 'unknown') throw new Error('成功观察必须明确实际查询范围');
     const start = clean(result.scope_start, 10);
     const end = clean(result.scope_end, 10);
@@ -81,11 +82,14 @@ export function buildInvoiceInspectionText(summary, { date = chinaDateString(), 
   if (!shops.length) {
     lines.push('暂无店铺巡检记录，不能视为没有待开票申请。');
   } else {
-    lines.push(`共 ${shops.length} 家店铺，待处理申请 ${total_pending} 笔，待录入开票 ${total_unrecorded} 笔。`);
+    lines.push(shops.some(row => row.shop.startsWith('拼多多·'))
+      ? `共 ${shops.length} 家店铺，待处理/待开票 ${total_pending} 笔，淘宝待录入开票 ${total_unrecorded} 笔（拼多多不适用）。`
+      : `共 ${shops.length} 家店铺，待处理申请 ${total_pending} 笔，待录入开票 ${total_unrecorded} 笔。`);
     lines.push('');
     for (const row of shops) {
       if (row.state === 'needs_login') lines.push(`- ${row.shop}：需要登录（${row.message || '请打开目标店铺工作台'}）`);
       else if (row.state === 'error') lines.push(`- ${row.shop}：检查失败（${row.message || '请查看运行日志'}）`);
+      else if (row.unrecorded_count === null && row.shop.startsWith('拼多多·')) lines.push(`- ${row.shop}：待开票 ${row.pending_count ?? '未知'} · 待录入 不适用（订单开票列表）`);
       else lines.push(`- ${row.shop}：待处理 ${row.pending_count ?? '未知'} · 待录入 ${row.unrecorded_count ?? '未知'}`);
     }
   }

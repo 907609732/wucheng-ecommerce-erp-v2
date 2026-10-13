@@ -37,4 +37,6 @@ jobs:
       - run: npm run ai:inspect:tools
       - run: npm run test:core
       - run: npm run test:warehouse-sales
+      - run: node --test tests/removed-modules.test.mjs tests/invoice*.test.mjs tests/pdd-invoice.test.mjs
+      - run: npm run test:pdd-monthly
       - run: npm audit --omit=dev --audit-level=high

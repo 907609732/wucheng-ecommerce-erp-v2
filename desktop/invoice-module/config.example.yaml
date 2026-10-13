@@ -1,0 +1,6 @@
+# 示例不包含真实公司、账号或授权信息；生产设置通过GUI保存到用户数据目录。
+seller: {}
+tax:
+  default_rate: "0.01" # 仅兼容旧迁移；必须在GUI明确确认，不能推断适用税率。
+automatic_execution_enabled: false
+# API授权如后续经验证接入，仅在Windows凭据管理器保存，不填入此文件。

@@ -30,20 +30,13 @@ import { terminateProcessTree } from "./shared/task-process.mjs";
 import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedule.mjs";
 import { externalLink } from "./shared/external-links.mjs";
 import { createRemoteService } from "./shared/remote-service.mjs";
-import { businessJob } from "./shared/business-jobs.mjs";
-import { purchaseJob } from "./shared/purchase-jobs.mjs";
-import { PurchaseAutomation } from './shared/purchase-auto.mjs';
-import purchaseProfiles from './shared/purchase-selectors.json' with { type: 'json' };
 import { CHANGELOG } from './shared/changelog.mjs';
-import { financeJob } from './shared/finance-jobs.mjs';
 import { invoiceJob } from './shared/invoice-jobs.mjs';
-import { buildInvoiceInspectionText, chinaDateString } from './shared/invoice-inspection.mjs';
-import { sendDingTalkMarkdownMessage } from '../core/dingtalk.js';
-import { createFinanceBrowser } from './shared/finance-browser.mjs';
-import { FinanceRpa } from './shared/finance-rpa.mjs';
-import { FinanceShopOnboarding } from './shared/finance-onboarding.mjs';
-import { analyzeFinanceIdentity } from './shared/finance-identity.mjs';
-import { detectState, discoverCategories, discoverSubtypes, findExportCenterEntry, findExportEntry, findMonthControls, verifyShopIdentity } from './shared/finance-page.mjs';
+import { InvoiceShopStore, matchingInvoiceAccount, invoiceShopLedgerName } from './shared/invoice-shops.mjs';
+import { createInvoiceBrowser } from './shared/invoice-browser.mjs';
+import { appendInvoiceLog, readInvoiceLogs, invoiceLogDirectory } from './shared/invoice-runtime-log.mjs';
+import { buildInvoiceInspectionText, chinaDateString, summarizeChecks } from './shared/invoice-inspection.mjs';
+import { deliverInvoiceReminder } from './shared/invoice-delivery.mjs';
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 import brandingModule from "./shared/branding.cjs";
 
@@ -73,7 +66,6 @@ let nextMonthlyScheduledRun = null;
 let scheduledTaskQueue = [];
 let recentLog = [];
 let quitting = false;
-let purchaseWorkbookDirty = false, purchaseDiscardAuthorized = false;
 let updater = null;
 let runningTaskPromise = null;
 let stopRequestedPid = null;
@@ -99,149 +91,113 @@ function inventoryDatabasePath() {
   return path.join(appDataDir(), "data", "erp.sqlite");
 }
 
-function localBusiness(operation, ...args) {
-  return businessJob(inventoryDatabasePath(), path.join(appDataDir(), 'business'), operation, args);
+// 开票代码和模板位于独立模块；打包时作为 extraResources 放在 asar 外供 Python 运行。
+const invoiceModuleDir = app.isPackaged
+  ? path.join(process.resourcesPath, 'invoice-module')
+  : path.join(desktopDir, 'invoice-module');
+function invoiceLog(level, source, message) {
+  const entry = appendInvoiceLog(appDataDir(), { level, source, message });
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('invoice:log', entry);
+  return entry;
 }
-function localPurchase(operation, ...args) {
-  return purchaseJob(inventoryDatabasePath(), path.join(appDataDir(), 'purchase-exports'), operation, args);
+function captureInvoiceStream(stream, source) {
+  let pending = '';
+  stream.setEncoding('utf8');
+  stream.on('data', chunk => {
+    pending += chunk;
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop().slice(-1200);
+    for (const line of lines.slice(-100)) if (line.trim()) invoiceLog(source.endsWith('stderr') ? 'error' : 'info', source, line);
+  });
+  stream.on('end', () => { if (pending.trim()) invoiceLog(source.endsWith('stderr') ? 'error' : 'info', source, pending); });
 }
-
-// 自动开发票：调用本机「电商自动开票助手」独立 Python 程序（只做申请采集、核对、模板准备、执行任务、结果登记与附件归档，不碰 ERP/库存/物流）。
-const INVOICE_ASSISTANT_DIR = "C:\\Users\\90760\\WorkBuddy\\自动开发票";
 function invoiceToolTarget(kind) {
   const map = {
-    assistant: { label: "自动开票助手", script: "assistant.py", command: "python", args: [] },
-    watch: { label: "每日开票巡检", script: "invoice_watch.py", command: "pythonw", args: ["show"] }
+    assistant: { label: '自动开票助手', script: 'assistant.py', args: [] },
+    watch: { label: '每日开票巡检', script: 'invoice_watch.py', args: ['show'] },
+    legacy: { label: '旧版开票台账', script: 'run.py', args: ['--gui'] }
   };
   return map[kind] || null;
 }
 function launchInvoiceTool(kind) {
   const target = invoiceToolTarget(kind);
-  if (!target) throw new Error("未知的开票工具");
-  if (!fs.existsSync(INVOICE_ASSISTANT_DIR)) throw new Error(`未找到自动开发票程序目录：${INVOICE_ASSISTANT_DIR}`);
-  const script = path.join(INVOICE_ASSISTANT_DIR, target.script);
-  if (!fs.existsSync(script)) throw new Error(`未找到${target.label}脚本：${script}`);
+  if (!target) throw new Error('未知的开票工具');
+  invoiceLog('info', kind, `请求启动${target.label}`);
+  const script = path.join(invoiceModuleDir, target.script);
+  if (!fs.existsSync(script)) {
+    invoiceLog('error', kind, '开票模块脚本不存在');
+    throw new Error(`未找到${target.label}模块：${script}`);
+  }
+  // 指定 3.12，避免 Electron 或其他 Python 环境抢占 PATH；运行时数据仍隔离在用户目录。
+  const python = process.platform === 'win32'
+    ? path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'pythonw.exe')
+    : 'python3';
+  if (path.isAbsolute(python) && !fs.existsSync(python)) {
+    invoiceLog('error', kind, '未找到 Python 3.12 运行时');
+    throw new Error('未找到 Python 3.12，请安装开票模块依赖并确认 Python 安装位置。');
+  }
   return new Promise((resolve, reject) => {
+    const child = spawn(python, [script, ...target.args], {
+      cwd: invoiceModuleDir, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
+    });
+    captureInvoiceStream(child.stdout, `${kind}:stdout`);
+    captureInvoiceStream(child.stderr, `${kind}:stderr`);
     let settled = false;
-    let child;
-    try {
-      child = spawn(target.command, [target.script, ...target.args], {
-        cwd: INVOICE_ASSISTANT_DIR,
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true
-      });
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    child.once("spawn", () => { settled = true; child.unref(); resolve({ launched: true, label: target.label }); });
-    child.once("error", error => {
-      if (!settled) {
+    child.once('spawn', () => {
+      invoiceLog('info', kind, `${target.label}进程已创建 (PID ${child.pid})`);
+      // OS 创建进程不代表 Python GUI 启动成功；进程早退必须显示错误。
+      setTimeout(() => {
+        if (settled) return;
         settled = true;
-        reject(new Error(`无法启动${target.label}（${target.command}）：${error.message}。请确认已安装 Python 3.12 且已加入系统 PATH。`));
+        child.unref();
+        resolve({ launched: true, label: target.label });
+      }, 1200);
+    });
+    child.once('exit', (code, signal) => {
+      invoiceLog(code === 0 ? 'info' : 'error', kind, `${target.label}进程退出 (PID ${child.pid}, ${code ?? signal})`);
+      if (settled) return;
+      settled = true;
+      reject(new Error(`${target.label}启动后立即退出（${code ?? signal}），请检查开票运行日志。`));
+    });
+    child.once('error', error => {
+      invoiceLog('error', kind, `无法启动${target.label}：${error.message}`);
+      if (settled) return;
+      settled = true;
+      reject(new Error(`无法启动${target.label}：${error.message}`));
+    });
+  });
+}
+let pddMonthlyExporter, pddMonthlyModule;
+async function getPddMonthlyExporter() {
+  if (!pddMonthlyModule) {
+    pddMonthlyModule = (async () => {
+      const { PddMonthlyExport } = await import('./shared/pdd-monthly-export.mjs');
+      const options = {
+        directory: path.join(appDataDir(), 'pdd-monthly-export'), profile: { order_url: 'https://mobile.yangkeduo.com/orders.html', need_login_url_contains: ['/login'] },
+        notify: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pdd-monthly:progress', state); }
+      };
+      // Explicit development-only loopback fixture; never accepts a remote test origin.
+      if (!app.isPackaged && process.env.NODE_ENV === 'test' && process.env.PDD_MONTHLY_TEST_ORIGIN) {
+        const origin = new URL(process.env.PDD_MONTHLY_TEST_ORIGIN);
+        if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(origin.hostname) || !origin.port || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) throw new Error('拼多多测试接口必须是无参数的本机回环地址');
+        options.testOrigin = origin.origin;
+        options.launch = async (directory, config) => {
+          const { chromium } = await import('playwright');
+          return chromium.launchPersistentContext(directory, { ...config, channel: 'chrome', headless: true });
+        };
       }
-    });
-  });
-}
-let purchaseAutomation;
-function getPurchaseAutomation() {
-  if (!purchaseAutomation) {
-    purchaseAutomation = new PurchaseAutomation({
-      directory: path.join(appDataDir(), 'purchase-auto'), profiles: purchaseProfiles,
-      log: entry => appendLog(`采购采集：${entry.message}`, entry.level === 'error' ? 'error' : 'info'),
-      preview: (file, meta) => localPurchase('preview', file, { ...meta, automated: true }),
-      notify: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('purchase:progress', state); }
-    });
-    purchaseAutomation.cancelPreview = token => localPurchase('cancel', token);
-    purchaseAutomation.commitPreview = token => localPurchase('commit', token);
+      pddMonthlyExporter = new PddMonthlyExport(options);
+      return pddMonthlyExporter;
+    })().catch(error => { pddMonthlyModule = null; throw error; });
   }
-  return purchaseAutomation;
-}
-
-// 财务独立目录、SQLite 和店铺会话；运营数据不进入财务账本。
-const localFinance = (operation, ...args) => financeJob(path.join(appDataDir(), 'finance'), operation, ...args);
-let financeBrowser, financeOnboarding, financeRpa, financeTimer, financeTickRunning = false, financeScheduleEnabled = false;
-const financeNotify = message => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('finance:changed', message); };
-function financeSender(event) {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问财务数据');
-  if (runtimeMode() === 'client') throw new Error('店铺销售额采集请在主服务器使用，账单和店铺登录保存在主服务器');
-}
-async function financeStatus(id, state, message) { await localFinance('finishJob', id, state, message); financeNotify(message); }
-function getFinanceBrowser() {
-  return financeBrowser ||= createFinanceBrowser({
-    directory: path.join(appDataDir(), 'finance'),
-    allowTestOrigin: process.env.FINANCE_ALLOW_TEST_ORIGIN === '1',
-    onStatus: payload => { if (payload?.message) { appendLog(`财务取账：${payload.message}`, payload.type === 'download-invalid' ? 'error' : 'info'); financeNotify(payload.message); } }
-  });
-}
-function getFinanceOnboarding() {
-  if (!financeOnboarding) {
-    const candidate = process.env.FINANCE_TEST_ONBOARD_URL;
-    let onboardingUrl = '';
-    if (process.env.FINANCE_ALLOW_TEST_ORIGIN === '1' && candidate && process.env.FINANCE_TEST_ORIGIN) {
-      if (new URL(candidate).origin !== new URL(process.env.FINANCE_TEST_ORIGIN).origin) throw new Error('测试登录地址与测试来源不匹配');
-      onboardingUrl = candidate;
-    }
-    financeOnboarding = new FinanceShopOnboarding({ browser: getFinanceBrowser(), call: localFinance, analyze: analyzeFinanceIdentity, onboardingUrl });
-  }
-  return financeOnboarding;
-}
-function getFinanceRpa() {
-  return financeRpa ||= new FinanceRpa({
-    call: localFinance, browser: getFinanceBrowser(),
-    log: (message, level) => { appendLog(`财务取账：${message}`, level === 'error' ? 'error' : 'info'); financeNotify(message); }
-  });
-}
-/** 取账入口：立即取账、继续人工处理、重试失败项都走这里，同店同账期不会重复起任务。 */
-async function financeCollect(shopId, month, options = {}) {
-  const shop = await localFinance('shop', shopId);
-  const rpa = getFinanceRpa();
-  if (rpa.isRunning(shopId)) return { shopId, month, state: 'running', message: '该店铺已有取账任务在执行，请等待本次完成', kinds: [] };
-  if (options.retry) return rpa.retry({ shop, month, kinds: options.kinds });
-  return rpa.run({ shop, month, kinds: options.kinds, reuseJob: options.resume === true });
-}
-/** 页面结构采集：只读，用于首次联调时确认真实页面元素，不点击任何导出或提交。 */
-async function financeProbe(shopId, month) {
-  const shop = await localFinance('shop', shopId);
-  const result = await getFinanceRpa().serialize(async () => {
-    getFinanceBrowser().open(shop, month, '');
-    const snapshot = await getFinanceBrowser().snapshot(shop.id);
-    const detected = detectState(snapshot);
-    const categories = discoverCategories(snapshot, shop.categoryMap || {});
-    const subtypes = discoverSubtypes(snapshot, categories.discovered.map(item => item.label), shop.excludeSubtypes || []);
-    const exporter = findExportEntry(snapshot);
-    const center = findExportCenterEntry(snapshot);
-    const identity = verifyShopIdentity(snapshot, shop.account);
-    return {
-      url: snapshot.url, title: snapshot.title, state: detected.state, stateMessage: detected.message,
-      limits: detected.limits, recordCount: detected.recordCount,
-      shopMatched: identity.matched, shopReason: identity.reason,
-      months: findMonthControls(snapshot).map(item => ({ value: item.value, selector: item.entry.selector })),
-      categories: categories.discovered.map(item => ({ label: item.label, kind: item.kind, source: item.source })),
-      unmapped: categories.unmapped.map(item => item.label), ambiguous: categories.ambiguous.map(item => item.label),
-      subtypes: subtypes.map(item => item.label),
-      exporters: exporter.candidates.map(item => item.text), exportCenter: center.ok ? center.entry.text : '',
-      frames: snapshot.frames, entries: snapshot.entries.length
-    };
-  });
-  return { shopId, month, ...result };
-}
-async function tickFinance() {
-  if (financeTickRunning || quitting || runtimeMode() === 'client') return;
-  financeTickRunning = true;
-  try {
-    for (const { shop, month } of await localFinance('due')) {
-      const result = await financeCollect(shop.id, month);
-      if (result?.state === 'needs_review') appendLog(`财务取账：${shop.name} ${month} 需要人工处理后继续`, 'error');
-    }
-  } catch (e) { appendLog(`财务取账计划：${e.message}`, 'error'); }
-  finally { financeTickRunning = false; }
+  return pddMonthlyModule;
 }
 
 // ── 开票巡检：每日读取千牛「给买家开票」页的待处理/待录入数量，登记并发送钉钉提醒 ──
-const INVOICE_INSPECTION_URL = 'https://qn.taobao.com/home.htm/merchant-invoice/#/invoice/agreed';
 const localInvoiceInspection = (operation, ...args) => invoiceJob(path.join(appDataDir(), 'invoice-inspection'), operation, ...args);
+const invoiceShopStore = () => new InvoiceShopStore(path.join(appDataDir(), 'invoice-inspection'));
+let invoiceBrowser;
+const getInvoiceBrowser = () => invoiceBrowser ||= createInvoiceBrowser();
 let invoiceInspectionTimer = null;
 let invoiceInspectionTickRunning = false;
 
@@ -280,50 +236,98 @@ function labeledNumber(haystack, label) {
   return match ? Number(match[1]) : null;
 }
 
-async function sendInvoiceInspectionReminder(summary) {
-  const schedule = readInvoiceSchedule();
+async function currentInvoiceSummary() {
+  const shops = new Map(invoiceShopStore().list().map(shop => [invoiceShopLedgerName(shop), shop]));
+  const history = await localInvoiceInspection('summary');
+  return summarizeChecks(history.shops.filter(row => {
+    const shop = shops.get(row.shop);
+    return shop && shop.createdAt && row.checked_at >= shop.createdAt;
+  }));
+}
+async function sendInvoiceInspectionReminder(summary, scheduled = false) {
   const date = chinaDateString();
-  const text = buildInvoiceInspectionText(summary, { date, time: schedule.time });
+  const time = scheduled ? readInvoiceSchedule().time : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  const text = buildInvoiceInspectionText(summary, { date, time });
   try {
-    return await sendDingTalkMarkdownMessage({ title: `每日开票巡检 · ${date}`, text });
+    const result = await deliverInvoiceReminder({ settings: readSettings(), secrets: await readSecrets(), title: `每日开票巡检 · ${date}`, text });
+    invoiceLog('info', 'dingtalk', `开票巡检提醒已通过云仓${result.mode === 'app' ? '企业应用机器人' : 'Webhook'}发送到同一群`);
+    return result;
   } catch (error) {
-    appendLog(`开票巡检钉钉提醒失败：${error.message}`, 'error');
-    return { error: error.message };
+    const reason = sanitizeDiagnosticText(error?.message || error, await diagnosticSensitiveValues());
+    invoiceLog('error', 'dingtalk', `开票巡检提醒未发送：${reason}`);
+    appendLog(`开票巡检钉钉提醒未发送：${reason}`, 'error');
+    return { sent: false, error: reason };
   }
 }
 
-async function runInvoiceInspection({ scheduled = false } = {}) {
+async function runInvoiceInspection({ scheduled = false, selectedShopId = null } = {}) {
   if (quitting || runtimeMode() === 'client') throw new Error('开票巡检请在主服务器使用');
   if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后再试');
   invoiceInspectionTickRunning = true;
+  invoiceLog('info', 'inspection', `开始${selectedShopId ? '单店' : scheduled ? '定时' : '手动'}开票巡检`);
   try {
-    const shops = await localFinance('shops');
+    const shops = selectedShopId ? [invoiceShopStore().get(selectedShopId)] : invoiceShopStore().list();
     if (!shops.length) {
-      appendLog('开票巡检：尚未添加财务店铺，跳过', 'info');
-      return { shops: [], total_pending: 0, total_unrecorded: 0 };
+      invoiceLog('warning', 'inspection', '尚未添加开票店铺；请在本模块添加并登录，不读取销售额模块店铺');
+      throw new Error('请先在自动开发票模块添加开票店铺并完成登录确认');
     }
-    const month = chinaDateString().slice(0, 7);
+    let selectedResult = null;
+    const record = async observation => {
+      const row = await localInvoiceInspection('record', observation);
+      if (selectedShopId) selectedResult = row;
+      return row;
+    };
     for (const shop of shops) {
+      const shopName = invoiceShopLedgerName(shop);
       try {
-        getFinanceBrowser().open(shop, month, 'invoice-inspection');
-        getFinanceBrowser().navigate(shop.id, INVOICE_INSPECTION_URL);
-        await new Promise(resolve => setTimeout(resolve, 6000));
-        const snapshot = await getFinanceBrowser().snapshot(shop.id);
-        const parsed = parseInvoiceCounts(snapshot?.text);
-        if (parsed.ok) {
-          await localInvoiceInspection('record', { shop: shop.name, outcome: 'observed', pending_count: parsed.pending, unrecorded_count: parsed.unrecorded, coverage: 'visible_range' });
+        if (!shop.account && shop.identityMode !== 'header') {
+          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: '请先在开票模块确认登录账号' });
+          invoiceLog('warning', 'inspection', `${shopName}：尚未确认开票登录账号`);
+          continue;
+        }
+        const snapshot = await getInvoiceBrowser().inspect(shop);
+        if (!snapshot.status.ok) {
+          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: snapshot.status.reason });
+          invoiceLog('warning', 'inspection', `${shopName}：${snapshot.status.reason}`);
+          continue;
+        }
+        const identity = matchingInvoiceAccount(shop, snapshot.accounts, snapshot.headerNames);
+        if (!identity.ok) {
+          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: identity.reason });
+          invoiceLog('warning', 'inspection', `${shopName}：${identity.reason}`);
+          continue;
+        }
+        const parsed = shop.platform === 'pdd' ? snapshot.counts : parseInvoiceCounts(snapshot.text);
+        if (parsed?.ok) {
+          await record({ shop: shopName, outcome: 'observed', pending_count: parsed.pending, unrecorded_count: parsed.unrecorded,
+            ...(shop.platform === 'pdd' ? { metric: 'pending_only' } : {}), coverage: 'visible_range' });
+          invoiceLog('info', 'inspection', shop.platform === 'pdd'
+            ? `${shopName}：待开票 ${parsed.pending}（仅当前待开票列表）`
+            : `${shopName}：待处理 ${parsed.pending}，待录入 ${parsed.unrecorded}（仅当前可见范围）`);
         } else {
-          await localInvoiceInspection('record', { shop: shop.name, outcome: 'error', coverage: 'unknown', message: parsed.reason });
+          await record({ shop: shopName, outcome: 'error', coverage: 'unknown', message: parsed?.reason || '未获取到开票列表数量' });
+          invoiceLog('warning', 'inspection', `${shopName}：识别失败：${parsed?.reason || '未获取到开票列表数量'}`);
         }
       } catch (error) {
-        await localInvoiceInspection('record', { shop: shop.name, outcome: 'error', coverage: 'unknown', message: String(error?.message || error) });
+        invoiceLog('error', 'inspection', `${shopName}：巡检异常：${error?.message || error}`);
+        await record({ shop: shopName, outcome: 'error', coverage: 'unknown', message: String(error?.message || error) });
       }
     }
-    const summary = await localInvoiceInspection('summary');
-    await sendInvoiceInspectionReminder(summary);
+    const summary = await currentInvoiceSummary();
+    if (selectedShopId) {
+      if (!selectedResult) throw new Error('单店巡检未生成结果，请查看开票日志');
+      summary.selected = selectedResult;
+      summary.notification = { sent: false, skipped: true, reason: '单店查询不发送钉钉提醒' };
+    } else summary.notification = await sendInvoiceInspectionReminder(summary, scheduled);
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('invoice-inspection:changed', summary);
-    appendLog(`开票巡检${scheduled ? '（定时）' : ''}：检查 ${shops.length} 家店铺，待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}`, 'info');
+    invoiceLog('info', 'inspection', selectedShopId
+      ? `单店查询完成：${selectedResult.shop}，${selectedResult.state}（不发送钉钉）`
+      : `巡检完成：检查 ${shops.length} 家，待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}`);
+    if (!selectedShopId) appendLog(`开票巡检${scheduled ? '（定时）' : ''}：检查 ${shops.length} 家店铺，待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}`, 'info');
     return summary;
+  } catch (error) {
+    invoiceLog('error', 'inspection', `巡检失败：${error?.message || error}`);
+    throw error;
   } finally {
     invoiceInspectionTickRunning = false;
   }
@@ -342,25 +346,9 @@ async function tickInvoiceInspection() {
     await runInvoiceInspection({ scheduled: true });
     writeInvoiceSchedule({ ...schedule, lastRun: today });
   } catch (error) {
+    invoiceLog('error', 'schedule', `定时巡检失败：${error.message}`);
     appendLog(`开票巡检计划：${error.message}`, 'error');
   }
-}
-
-function businessFilters(payload = {}) {
-  return { year: String(payload.year || ''), month: String(payload.month || ''), shop: String(payload.shop || '') };
-}
-
-function readBusiness(filters = {}) {
-  const safe = businessFilters(filters);
-  return runtimeMode() === 'client'
-    ? remoteRequest(`/api/v1/business?${new URLSearchParams(safe)}`, { timeoutMs: 20000 })
-    : localBusiness('read', safe);
-}
-
-async function businessAsset(id) {
-  if (runtimeMode() === 'client') return remoteRequest(`/api/v1/business/images/${encodeURIComponent(id)}`, { timeoutMs: 30000 });
-  const a = await localBusiness('asset', id);
-  return { id, extension: a.extension, base64: Buffer.from(a.data).toString('base64') };
 }
 
 function runtimeMode() {
@@ -604,12 +592,6 @@ function emitState(extra = {}) {
   return payload;
 }
 
-function confirmPurchaseDiscard() {
-  const response = dialog.showMessageBoxSync(mainWindow, { type: 'warning', buttons: ['返回保存', '放弃未保存修改'], defaultId: 0, cancelId: 0, title: '采购表格尚未保存', message: '关闭或刷新会丢失采购表格的未保存修改。是否放弃？', noLink: true });
-  if (response !== 1) return false;
-  purchaseWorkbookDirty = false; purchaseDiscardAuthorized = true; return true;
-}
-
 function createWindow() {
   const branding = currentBranding();
   mainWindow = new BrowserWindow({
@@ -631,18 +613,15 @@ function createWindow() {
   mainWindow.loadFile(rendererPath);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
-  mainWindow.webContents.on('will-prevent-unload', event => {
-    if (purchaseDiscardAuthorized || confirmPurchaseDiscard()) event.preventDefault();
-  });
   mainWindow.on("close", (event) => {
     const settings = readSettings();
-    if (!quitting && (settings.runtimeMode === "server" || settings.scheduleEnabled || settings.monthlySalesEnabled || financeScheduleEnabled)) {
+    if (!quitting && (settings.runtimeMode === "server" || settings.scheduleEnabled || settings.monthlySalesEnabled)) {
       event.preventDefault();
       mainWindow.hide();
       appendLog("窗口已隐藏，定时任务继续运行。再次启动软件可恢复窗口。");
     }
   });
-  mainWindow.on("closed", () => { mainWindow = null; purchaseWorkbookDirty = false; });
+  mainWindow.on("closed", () => { mainWindow = null; });
 }
 
 function buildEnvironment(settings, secrets, kind = "sync") {
@@ -1177,16 +1156,6 @@ async function configureRemoteService() {
     getHealth: async () => ({ version: app.getVersion(), running: Boolean(runningChild || runningTaskPromise) }),
     getInventory: async () => readCainiaoInventory(inventoryDatabasePath()),
     getMonthlySales: async (filters) => localMonthlySales(filters),
-    getBusiness: async (filters) => localBusiness('read', businessFilters(filters)),
-    getBusinessSheets: async (year) => localBusiness('sheetSnapshot', year),
-    getBusinessImage: async (id) => {
-      const a = await localBusiness('asset', id);
-      return { id, extension: a.extension, base64: Buffer.from(a.data).toString('base64') };
-    },
-    getBusinessOriginal: async (id) => {
-      const file = await localBusiness('original', id);
-      return { filename: file.filename, base64: Buffer.from(file.data).toString('base64') };
-    },
     getTaskState: async () => {
       const { logPath: _logPath, ...state } = emitState();
       return state;
@@ -1243,144 +1212,32 @@ function openRemoteLogin() {
   return { opened: true };
 }
 
-ipcMain.handle('finance:report', async (event, shop, month) => { financeSender(event); return localFinance('report', shop, month); });
-ipcMain.handle('finance:shop-save', async (event, shop) => { financeSender(event); const saved=await localFinance('saveShop', shop); financeScheduleEnabled=(await localFinance('shops')).some(s=>s.schedule); return saved; });
-ipcMain.handle('finance:shop-login-begin', (event, month) => { financeSender(event); return getFinanceOnboarding().begin(month); });
-ipcMain.handle('finance:shop-login-inspect', (event, token) => { financeSender(event); return getFinanceOnboarding().inspect(token); });
-ipcMain.handle('finance:shop-login-confirm', (event, token, input) => { financeSender(event); return getFinanceOnboarding().confirm(token, input); });
-ipcMain.handle('finance:shop-login-cancel', (event, token) => { financeSender(event); return getFinanceOnboarding().cancel(token); });
-ipcMain.handle('finance:collect', (event, shopId, month, options) => { financeSender(event); return financeCollect(shopId, month, options || {}); });
-ipcMain.handle('finance:retry', (event, shopId, month, kinds) => { financeSender(event); return financeCollect(shopId, month, { retry: true, kinds: Array.isArray(kinds) ? kinds : [] }); });
-ipcMain.handle('finance:cancel', (event, shopId) => { financeSender(event); getFinanceRpa().cancel(shopId); return { cancelled: true }; });
-ipcMain.handle('finance:probe', (event, shopId, month) => { financeSender(event); return financeProbe(shopId, month); });
-ipcMain.handle('finance:batch', (event, batchId) => { financeSender(event); return localFinance('batchDetail', batchId); });
-ipcMain.handle('finance:preview-batch', (event, batchId, options) => { financeSender(event); return localFinance('previewBatch', batchId, options); });
-ipcMain.handle('finance:commit-batch', (event, batchId, acknowledged) => { financeSender(event); return localFinance('commitBatch', batchId, acknowledged === true); });
-ipcMain.handle('finance:retry-plan', (event, shopId, month) => { financeSender(event); return localFinance('retryPlan', shopId, month); });
-ipcMain.handle('finance:job', (event, jobId) => { financeSender(event); return localFinance('jobDetail', jobId); });
-ipcMain.handle('finance:open', async (event, shopId, month) => { financeSender(event); const shop = await localFinance('shop', shopId); const id = await localFinance('newJob', shopId, month); await localFinance('finishJob', id, 'needs_review', '店铺窗口已打开，请在窗口中完成登录后点击“立即取账”'); getFinanceBrowser().open(shop, month, id); financeNotify('店铺窗口已打开'); return { opened: true }; });
-ipcMain.handle('finance:close-window', (event, shopId) => { financeSender(event); getFinanceBrowser().close(shopId); return { closed: true }; });
-ipcMain.handle('finance:import', async (event, shop) => {
-  financeSender(event); await localFinance('shop', shop);
-  const selection = await dialog.showOpenDialog(mainWindow, { title: '选择本店原始财务账单', properties: ['openFile'], filters: [{ name: '财务账单', extensions: ['xlsx','xls','csv'] }] });
-  return selection.canceled ? null : localFinance('stage', shop, selection.filePaths[0]);
-});
-ipcMain.handle('finance:inspect', (event, id) => { financeSender(event); return localFinance('inspect', id); });
-ipcMain.handle('finance:preview', (event, token, options) => { financeSender(event); return localFinance('preview', token, options); });
-ipcMain.handle('finance:commit', (event, token, acknowledged) => { financeSender(event); return localFinance('commit', token, acknowledged === true); });
-ipcMain.handle('finance:restore', (event, id) => { financeSender(event); return localFinance('restore', id); });
-ipcMain.handle('finance:draft', (event, shop, month, data) => { financeSender(event); return localFinance('saveDraft', shop, month, data); });
-ipcMain.handle('finance:folder', async event => { financeSender(event); const dir = path.join(appDataDir(),'finance'); fs.mkdirSync(dir,{recursive:true}); const error = await shell.openPath(dir); if(error) throw new Error(error); return {opened:true}; });
-ipcMain.handle('finance:export', async (event, shop, month, originalId) => {
-  financeSender(event); await localFinance('shop',shop);
-  const original = originalId ? await localFinance('bill', originalId) : null;
-  if (original && original.shop !== shop) throw new Error('原文件不属于当前店铺');
-  const result = await dialog.showSaveDialog(mainWindow,{ defaultPath: original?.name || `财务填表资料-${month}.xlsx` });
-  if(result.canceled || !result.filePath) return null;
-  if (original) fs.copyFileSync(original.file,result.filePath);
-  else fs.writeFileSync(result.filePath, Buffer.from(await localFinance('export',shop,month)));
-  return {saved:true};
-});
-
-function businessSender(event, write = false) {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问经营数据');
+function moduleSender(event, write = false) {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问模块数据');
   if (write && runtimeMode() === 'client') throw new Error('请在主服务器导入或恢复经营数据');
 }
-let businessWriting = false;
-async function businessWrite(action) {
-  if (businessWriting) throw new Error('另一项经营数据操作正在执行，请稍后重试');
-  businessWriting = true;
-  try { return await action(); } finally { businessWriting = false; }
-}
-ipcMain.handle('business:get', (event, filters) => { businessSender(event); return readBusiness(filters); });
-ipcMain.handle('business:dingtalk-sync', event => {
-  businessSender(event,true);
-  return businessWrite(()=>businessJob(inventoryDatabasePath(),path.join(appDataDir(),'business'),'syncDingTalk',[],message=>{if(!event.sender.isDestroyed()) event.sender.send('business:progress',message);}));
-});
-ipcMain.handle('business:dingtalk-open', async event => {
-  businessSender(event);
-  await shell.openExternal('https://alidocs.dingtalk.com/i/nodes/R4GpnMqJzGBGbAvgHaZPYl4M8Ke0xjE3');
-  return {opened:true};
-});
-ipcMain.handle('business:sheets', (event, year) => {
-  businessSender(event);
-  return runtimeMode() === 'client'
-    ? remoteRequest(`/api/v1/business/sheets?year=${encodeURIComponent(String(year || ''))}`, { timeoutMs: 30000 })
-    : localBusiness('sheetSnapshot', year);
-});
-ipcMain.handle('business:save-cells', (event, payload) => {
-  businessSender(event, true);
-  return businessWrite(() => localBusiness('saveCells', payload));
-});
-ipcMain.handle('business:preview', async (event) => {
-  businessSender(event, true);
-  return businessWrite(async () => {
-    const choice = await dialog.showOpenDialog(mainWindow, { title: '导入经营数据', properties: ['openFile'], filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
-    if (choice.canceled) return { canceled: true };
-    return localBusiness('preview', choice.filePaths[0]);
-  });
-});
-ipcMain.handle('business:commit', (event, preview) => {
-  businessSender(event, true);
-  return businessWrite(() => localBusiness('commit', String(preview?.token || ''), preview?.previousVersionId || null));
-});
-ipcMain.handle('business:cancel', (event, token) => { businessSender(event, true); return businessWrite(() => localBusiness('cancel', token)); });
-ipcMain.handle('business:versions', (event) => { businessSender(event, true); return localBusiness('versions'); });
-ipcMain.handle('business:restore', (event, id) => { businessSender(event, true); return businessWrite(() => localBusiness('restore', String(id))); });
-ipcMain.handle('business:image', async (event, id) => {
-  businessSender(event);
-  const a = await businessAsset(String(id));
-  return `data:image/${a.extension};base64,${a.base64}`;
-});
-ipcMain.handle('purchase:read', (event, filters) => { businessSender(event); return localPurchase('read', { month: String(filters?.month || ''), startDate: String(filters?.startDate || ''), endDate: String(filters?.endDate || '') }); });
-ipcMain.handle('purchase:workbook-read', async event => { businessSender(event); return { ...await localPurchase('readWorkbook'), readOnly: runtimeMode() === 'client' }; });
-ipcMain.handle('purchase:workbook-save', (event, payload) => { businessSender(event, true); return localPurchase('saveWorkbook', payload); });
-ipcMain.handle('purchase:workbook-history', event => { businessSender(event); return localPurchase('listHistory'); });
-ipcMain.handle('purchase:workbook-diff', (event, revision) => { businessSender(event); return localPurchase('diffRevision', Number(revision)); });
-ipcMain.handle('purchase:workbook-dirty', (event, value) => { businessSender(event); purchaseWorkbookDirty = value === true; purchaseDiscardAuthorized = false; });
-ipcMain.handle('purchase:workbook-export', async (event, snapshot) => {
-  businessSender(event);
-  const choice = await dialog.showSaveDialog(mainWindow, { title: '导出当前采购表格（含未保存编辑）', defaultPath: '采购数据.xlsx', filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
+ipcMain.handle('pdd-monthly:state', async event => { moduleSender(event); return { ...(await getPddMonthlyExporter()).state(), readOnly: runtimeMode() === 'client' }; });
+ipcMain.handle('pdd-monthly:open', async (event, input) => { moduleSender(event, true); await (await getPddMonthlyExporter()).open({ month: input?.month }); return { opened: true }; });
+ipcMain.handle('pdd-monthly:start', async (event, input) => { moduleSender(event, true); return (await getPddMonthlyExporter()).start({ month: input?.month }); });
+ipcMain.handle('pdd-monthly:stop', async event => { moduleSender(event, true); return (await getPddMonthlyExporter()).stop(); });
+ipcMain.handle('pdd-monthly:export', async (event, input) => {
+  moduleSender(event, true);
+  const exporter = await getPddMonthlyExporter(), state = exporter.state(), result = state.result;
+  if (!['completed', 'idle'].includes(state.state) || typeof input?.id !== 'string' || !result?.id || input.id !== result.id) throw new Error('当前采集结果不可导出，请完成所选月份采集后重试');
+  const choice = await dialog.showSaveDialog(mainWindow, { title: `导出拼多多 ${result.month} 买家订单`, defaultPath: `拼多多采购订单-${result.month}.xlsx`, filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
   if (choice.canceled) return { canceled: true };
-  return localPurchase('exportWorkbook', snapshot, choice.filePath);
+  return exporter.exportResult({ id: input.id }, choice.filePath);
 });
-ipcMain.handle('purchase:export-yearly', async (event, year) => {
-  businessSender(event, true);
-  const yearStr = String(year || new Date().getFullYear());
-  const choice = await dialog.showSaveDialog(mainWindow, { title: `导出 ${yearStr} 年采购明细`, defaultPath: `${yearStr}年采购明细.xlsx`, filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
-  if (choice.canceled) return { canceled: true };
-  return localPurchase('exportYearly', yearStr, choice.filePath);
+ipcMain.handle('invoice:logs', event => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权读取开票运行日志');
+  return readInvoiceLogs(appDataDir());
 });
-ipcMain.handle('purchase:rollback', (event, importId) => { businessSender(event, true); return localPurchase('rollback', String(importId || '')); });
-ipcMain.handle('purchase:rollback-last', event => { businessSender(event, true); return localPurchase('rollbackLast'); });
-ipcMain.handle('purchase:operations', (event, limit) => { businessSender(event); return localPurchase('operations', Number(limit) || 100); });
-ipcMain.handle('purchase:manual-preview', (event, rows, meta) => { businessSender(event, true); return localPurchase('manualPreview', rows, meta); });
-ipcMain.handle('purchase:preview', async (event, meta) => {
-  businessSender(event, true);
-  const choice = await dialog.showOpenDialog(mainWindow, { title: '导入平台采购导出文件', properties: ['openFile'], filters: [{ name: '采购导出文件', extensions: ['xlsx', 'xls', 'csv'] }] });
-  if (choice.canceled) return { canceled: true };
-  const verifiedMeta = await getPurchaseAutomation().identifyCurrent(meta || {});
-  return localPurchase('preview', choice.filePaths[0], verifiedMeta);
-});
-ipcMain.handle('purchase:commit', async (event, token) => { businessSender(event, true); const result = await localPurchase('commit', String(token || '')); purchaseAutomation?.finish(token); return result; });
-ipcMain.handle('purchase:cancel', async (event, token) => { businessSender(event, true); await localPurchase('cancel', String(token || '')); purchaseAutomation?.finish(token); });
-ipcMain.handle('purchase:auto-state', event => { businessSender(event, true); return getPurchaseAutomation().state(); });
-ipcMain.handle('purchase:auto-start', (event, meta) => { businessSender(event, true); try { return getPurchaseAutomation().start(meta); } catch (error) { getPurchaseAutomation().log(`采集未启动：${error.message}`, 'error'); throw error; } });
-ipcMain.handle('purchase:auto-stop', event => { businessSender(event, true); return getPurchaseAutomation().stop(); });
-ipcMain.handle('purchase:auto-open', async (event, meta) => { businessSender(event, true); try { await getPurchaseAutomation().open(meta); return { opened: true }; } catch (error) { getPurchaseAutomation().log(`打开采集窗口失败：${error.message}`, 'error'); throw error; } });
-ipcMain.handle('purchase:backfill', async (event, input) => {
-  businessSender(event, true);
-  const year = String(input?.year || new Date().getFullYear());
-  const platform = ['taobao', 'goofish', 'pdd', 'alibaba_1688'].includes(input?.platform) ? input.platform : 'alibaba_1688';
-  const months = await localPurchase('missingMonths', year, platform);
-  try { return getPurchaseAutomation().backfill({ year, platform, months }); } catch (error) { getPurchaseAutomation().log(`补齐未启动：${error.message}`, 'error'); throw error; }
-});
-ipcMain.handle('purchase:open-logs', async event => { businessSender(event, true); const error = await shell.openPath(getPurchaseAutomation().logDirectory); if (error) throw new Error(error); });
-ipcMain.handle('purchase:open-platform', async (event, platform) => {
-  businessSender(event, true);
-  const urls = { taobao: 'https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm', alibaba_1688: 'https://trade.1688.com/order/buyer_order_list.htm' };
-  if (!urls[platform]) throw new Error('不支持的平台');
-  await shell.openExternal(urls[platform]);
+ipcMain.handle('invoice:open-logs', async event => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权打开开票日志目录');
+  const dir = invoiceLogDirectory(appDataDir());
+  fs.mkdirSync(dir, { recursive: true });
+  const error = await shell.openPath(dir);
+  if (error) throw new Error(error);
   return { opened: true };
 });
 ipcMain.handle('invoice:launch-assistant', event => {
@@ -1391,66 +1248,89 @@ ipcMain.handle('invoice:launch-watch', event => {
   if (event.sender !== mainWindow?.webContents) throw new Error('无权启动外部程序');
   return launchInvoiceTool('watch');
 });
+ipcMain.handle('invoice:launch-legacy', event => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动外部程序');
+  return launchInvoiceTool('legacy');
+});
 ipcMain.handle('invoice:folder', async event => {
   const dir = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'WuchengInvoiceAssistant');
   const error = await shell.openPath(dir);
   if (error) throw new Error(error);
   return { opened: true };
 });
-ipcMain.handle('invoice-inspection:summary', event => { if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票巡检'); return localInvoiceInspection('summary'); });
+ipcMain.handle('invoice-shops:list', event => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票店铺');
+  return invoiceShopStore().list();
+});
+ipcMain.handle('invoice-shops:add', (event, name, platform = 'taobao') => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可添加开票店铺');
+  const shop = invoiceShopStore().add(name, platform);
+  invoiceLog('info', 'shops', `已添加开票店铺 ${invoiceShopLedgerName(shop)}，尚未登录`);
+  return shop;
+});
+ipcMain.handle('invoice-shops:rename', (event, id, name) => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可修改开票店铺');
+  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后修改店铺名称');
+  const shop = invoiceShopStore().rename(id, name);
+  invoiceLog('info', 'shops', `已修正未确认的开票店铺名称为 ${invoiceShopLedgerName(shop)}；登录会话未清除，仍需核对页面身份`);
+  return shop;
+});
+ipcMain.handle('invoice-shops:open-login', (event, id) => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可打开开票登录');
+  return getInvoiceBrowser().open(invoiceShopStore().get(id));
+});
+ipcMain.handle('invoice-shops:login-account', async (event, id) => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权读取开票登录账号');
+  const shop = invoiceShopStore().get(id);
+  const snapshot = await getInvoiceBrowser().inspect(shop);
+  if (!snapshot.status.ok) throw new Error(snapshot.status.reason);
+  if (shop.platform !== 'pdd' && snapshot.accounts.length === 1) return { value: snapshot.accounts[0], mode: 'cookie' };
+  if (snapshot.accounts.length > 1) throw new Error('多个登录账号，无法确认店铺归属');
+  if (snapshot.headerNames.length === 1 && snapshot.headerNames[0] === shop.name) return { value: shop.name, mode: 'header' };
+  throw new Error(`${shop.platform === 'pdd' ? '拼多多订单开票' : '千牛开票'}页已打开，但右上角店铺名称与登记店铺不符或无法识别；请核对店铺`);
+});
+ipcMain.handle('invoice-shops:confirm', async (event, id, identity) => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权确认开票店铺');
+  const shop = invoiceShopStore().get(id);
+  const snapshot = await getInvoiceBrowser().inspect(shop);
+  if (!snapshot.status.ok) throw new Error(snapshot.status.reason);
+  let confirmed;
+  if (identity?.mode === 'header' && identity.value === shop.name && snapshot.headerNames.length === 1 && snapshot.headerNames[0] === shop.name) {
+    confirmed = invoiceShopStore().confirmHeader(id, shop.name);
+  } else if (shop.platform !== 'pdd' && identity?.mode === 'cookie' && snapshot.accounts.length === 1 && snapshot.accounts[0] === identity.value) {
+    confirmed = invoiceShopStore().confirm(id, identity.value);
+  } else throw new Error('页面店铺或登录账号已变化，请重新核对');
+  invoiceLog('info', 'shops', `已确认 ${confirmed.name} 的开票店铺身份（${confirmed.identityMode === 'header' ? '页面店铺名' : '登录账号'}）`);
+  return confirmed;
+});
+ipcMain.handle('invoice-shops:remove', async (event, id) => {
+  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权删除开票店铺');
+  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后删除');
+  const shop = invoiceShopStore().get(id);
+  await getInvoiceBrowser().remove(shop);
+  invoiceShopStore().remove(id);
+  invoiceLog('info', 'shops', `已删除开票店铺 ${shop.name}（历史巡检记录保留）`);
+  return { removed: true };
+});
+ipcMain.handle('invoice-inspection:summary', event => { if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票巡检'); return currentInvoiceSummary(); });
 ipcMain.handle('invoice-inspection:history', (event, limit) => { if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票巡检'); return localInvoiceInspection('history', Number(limit) || 100); });
 ipcMain.handle('invoice-inspection:schedule', () => readInvoiceSchedule());
-ipcMain.handle('invoice-inspection:save-schedule', (event, value) => { if (event.sender !== mainWindow?.webContents) throw new Error('无权修改开票巡检设置'); return writeInvoiceSchedule(value || {}); });
+ipcMain.handle('invoice-inspection:save-schedule', (event, value) => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权修改开票巡检设置');
+  const schedule = writeInvoiceSchedule({ ...value, lastRun: readInvoiceSchedule().lastRun });
+  invoiceLog('info', 'schedule', schedule.enabled ? `已设置每天 ${schedule.time} 自动巡检` : '已暂停每日自动巡检');
+  return schedule;
+});
 ipcMain.handle('invoice-inspection:scan-now', async event => {
   if (event.sender !== mainWindow?.webContents) throw new Error('无权启动开票巡检');
   if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后再试');
   return runInvoiceInspection({ scheduled: false });
 });
-ipcMain.handle('business:export', async (event, payload = {}) => {
-  businessSender(event);
-  const type = payload.type || 'data';
-  if (!['data', 'template', 'original', 'sheet'].includes(type)) throw new Error('不支持的导出类型');
-  const choice = await dialog.showSaveDialog(mainWindow, { title: '导出经营数据', defaultPath: type === 'template' ? '经营数据导入模板.xlsx' : type === 'original' ? '经营数据原文件.xlsx' : '经营数据导出.xlsx', filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
-  if (choice.canceled) return { canceled: true };
-  let bytes;
-  if (type === 'template') bytes = await localBusiness('template');
-  else if (type === 'original') {
-    const data = await readBusiness(payload.filters);
-    if (!data.available) throw new Error('尚未导入经营数据');
-    if (runtimeMode() === 'client') {
-      const file = await remoteRequest(`/api/v1/business/original/${encodeURIComponent(data.versionId)}`, { timeoutMs: 60000 });
-      bytes = Buffer.from(file.base64, 'base64');
-    } else bytes = (await localBusiness('original', data.versionId)).data;
-  } else if (type === 'sheet') {
-    if (runtimeMode() !== 'client') bytes = await localBusiness('exportSheets', payload.filters?.year);
-    else {
-      const snapshot = await remoteRequest(`/api/v1/business/sheets?year=${encodeURIComponent(String(payload.filters?.year || ''))}`, { timeoutMs: 30000 });
-      const ids = [...new Set(snapshot.sheets.flatMap(s => s.images).map(i => i.assetId))], assets = [];
-      for (let i = 0; i < ids.length; i += 4) {
-        const batch = await Promise.all(ids.slice(i, i + 4).map(businessAsset));
-        assets.push(...batch.map(a => ({ id: a.id, extension: a.extension, data: Buffer.from(a.base64, 'base64') })));
-      }
-      bytes = await localBusiness('exportSheetSnapshot', snapshot, assets);
-    }
-  } else if (runtimeMode() !== 'client') bytes = await localBusiness('export', businessFilters(payload.filters));
-  else {
-    const snapshot = await readBusiness(payload.filters);
-    if (!snapshot.available) throw new Error('尚未导入经营数据');
-    const ids = [...new Set(snapshot.images.map(r => r.assetId))], assets = [];
-    for (let i = 0; i < ids.length; i += 4) {
-      const batch = await Promise.all(ids.slice(i, i + 4).map(businessAsset));
-      assets.push(...batch.map(a => ({ id: a.id, extension: a.extension, data: Buffer.from(a.base64, 'base64') })));
-    }
-    bytes = await localBusiness('exportSnapshot', snapshot, assets);
-  }
-  const temporary = `${choice.filePath}.${randomUUID()}.tmp`;
-  try {
-    await fs.promises.writeFile(temporary, Buffer.from(bytes));
-    await fs.promises.rename(temporary, choice.filePath);
-  } finally { await fs.promises.rm(temporary, { force: true }); }
-  return { saved: true, filename: path.basename(choice.filePath) };
+ipcMain.handle('invoice-inspection:scan-shop', (event, id) => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动单店开票巡检');
+  if (typeof id !== 'string' || !id) throw new Error('请选择要查询的开票店铺');
+  return runInvoiceInspection({ selectedShopId: id });
 });
-
 ipcMain.handle("settings:get", async () => publicSettings());
 ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("app:about", () => ({ version: app.getVersion(), build: readBuildInfo(), changelog: CHANGELOG }));
@@ -1706,18 +1586,15 @@ app.on("second-instance", () => {
 });
 
 app.on("before-quit", event => {
-  if (purchaseWorkbookDirty && !confirmPurchaseDiscard()) { event.preventDefault(); return; }
   quitting = true;
-  clearInterval(financeTimer);
   clearInterval(invoiceInspectionTimer);
-  void purchaseAutomation?.closeAll();
-  try { financeBrowser?.closeAll(); } catch { /* 退出时窗口清理失败不影响退出 */ }
+  void pddMonthlyExporter?.closeAll();
   if (mcpBridgeChild && !mcpBridgeChild.killed) mcpBridgeChild.kill();
   void stopRemoteService();
 });
 app.on("window-all-closed", () => {
   const settings = readSettings();
-  if (!headlessMode && settings.runtimeMode !== "server" && !settings.scheduleEnabled && !settings.monthlySalesEnabled && !financeScheduleEnabled) app.quit();
+  if (!headlessMode && settings.runtimeMode !== "server" && !settings.scheduleEnabled && !settings.monthlySalesEnabled) app.quit();
 });
 
 app.whenReady().then(async () => {
@@ -1774,12 +1651,6 @@ app.whenReady().then(async () => {
   });
   updater.initialize();
   configureSchedule();
-  try {
-    await localFinance('recoverJobs');
-    financeScheduleEnabled = runtimeMode() !== 'client' && (await localFinance('shops')).some(s=>s.schedule);
-    financeTimer = setInterval(() => { void tickFinance(); }, 60000);
-    void tickFinance();
-  } catch (e) { appendLog(`财务账本启动检查失败：${e.message}`, 'error'); }
   try {
     invoiceInspectionTimer = setInterval(() => { void tickInvoiceInspection(); }, 60000);
     void tickInvoiceInspection();

@@ -70,6 +70,11 @@ export async function sendInventoryDingTalkMarkdown({ title, text, shouldNotify 
   };
 }
 
+export async function sendDingTalkWebhookMarkdown({ webhook, webhookSecret, title, text }) {
+  if (!webhook) throw new Error('未配置钉钉 Webhook 地址');
+  return sendDingTalkWebhook(buildDingTalkMarkdownPayload({ title, text }), webhook, webhookSecret);
+}
+
 export async function sendDingTalkMarkdownMessage({ title, text, atUserIds = [], atMobiles = [] }) {
   return sendDingTalkWebhook(buildDingTalkMarkdownPayload({ title, text, atUserIds, atMobiles }));
 }
@@ -78,14 +83,13 @@ export async function sendDingTalkTextMessage({ text, atUserIds = [], atMobiles 
   return sendDingTalkWebhook(buildDingTalkTextPayload({ text, atUserIds, atMobiles }));
 }
 
-async function sendDingTalkWebhook(payload) {
-  const webhook = process.env.DINGTALK_WEBHOOK;
+async function sendDingTalkWebhook(payload, webhook = process.env.DINGTALK_WEBHOOK, secret = process.env.DINGTALK_SECRET) {
   if (!webhook) {
     console.log("未配置 DINGTALK_WEBHOOK，跳过钉钉发送。");
     return { skipped: true };
   }
 
-  const url = buildWebhookUrl(webhook, process.env.DINGTALK_SECRET);
+  const url = buildWebhookUrl(webhook, secret);
   const response = await axios.post(url, payload);
 
   if (response.data?.errcode !== 0) {

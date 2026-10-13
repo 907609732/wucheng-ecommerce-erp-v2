@@ -22,6 +22,21 @@ test('validateInvoiceObservation: observed requires both non-negative counts', (
   assert.ok(ok.id);
 });
 
+test('PDD pending-only observation leaves Taobao-only unrecorded metric not applicable', () => {
+  const row = validateInvoiceObservation({ shop: '拼多多·店口五金店', outcome: 'observed', metric: 'pending_only', pending_count: 0, unrecorded_count: null, coverage: 'visible_range' });
+  assert.equal(row.pending_count, 0);
+  assert.equal(row.unrecorded_count, null);
+  assert.equal(row.state, 'partial');
+  assert.throws(() => validateInvoiceObservation({ shop: '淘宝店', outcome: 'observed', pending_count: 0, unrecorded_count: null, coverage: 'visible_range' }), /待录入/);
+});
+
+
+test('PDD reminder describes pending invoices without inventing an unrecorded count', () => {
+  const row = validateInvoiceObservation({ shop: '拼多多·店口五金店', outcome: 'observed', metric: 'pending_only', pending_count: 1, unrecorded_count: null, coverage: 'visible_range' });
+  const text = buildInvoiceInspectionText(summarizeChecks([row]));
+  assert.match(text, /拼多多·店口五金店：待开票 1 · 待录入 不适用/);
+});
+
 test('validateInvoiceObservation: failure cannot record counts; zero is never fabricated from failure', () => {
   assert.throws(() => validateInvoiceObservation({ shop: '米配匠', outcome: 'error', coverage: 'unknown', pending_count: 0 }), /不能记录/);
   assert.throws(() => validateInvoiceObservation({ shop: '米配匠', outcome: 'needs_login', coverage: 'unknown' }), /失败时必须记录原因/);

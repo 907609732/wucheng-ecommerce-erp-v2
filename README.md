@@ -11,8 +11,6 @@
 - Windows 桌面设置、计划任务和在线升级
 - 面向 AI 的只读诊断、CLI、MCP 和受信扩展接口
 - 敏感配置使用 Electron `safeStorage` 保存，不写入 Git
-- [运营看板](docs/business-dashboard.md)：原经营表格、图片凭证与钉钉手动同步
-- [店铺销售额采集](docs/taobao-sales-collection.md)：千牛收入账单月汇总 Excel 下载与导入核对；[独立账本技术说明](docs/finance-ledger.md)保留原财务功能边界（真实千牛自动下载尚未完成验收）
 - [各功能说明书与技术原理](docs/feature-manual.md)：各页右上角可离线阅读，含操作步骤、数据来源、核对口径、常见问题及未接通能力
 
 ## V2 边界
@@ -63,3 +61,7 @@ npm.cmd run ai:inspect:tools
 GitHub：<https://github.com/907609732/wucheng-ecommerce-erp-v2>
 
 本仓库为企业内部私有项目。
+
+## v0.5.0 功能调整
+
+已移除功能 02 运营看板、03 店铺销售额采集和 04 采购数据采集及其专用代码与资源。保留 01 云仓库存同步、05 自动开发票、06 拼多多采购订单独立导出及公共设置。旧业务数据保留在用户数据目录，不再提供被移除模块的读写入口。
