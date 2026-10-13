@@ -46,6 +46,10 @@ jobs:
         run: npm run desktop:build -- --publish never
       - name: Verify removed modules are absent from package
         run: node --test tests/packaged-modules.test.mjs
+      - name: Verify retained pages in packaged client
+        env:
+          REMOVAL_TEST_EXE: dist/win-unpacked/云仓库存同步.exe
+        run: node tests/removed-modules-ui.mjs
       - name: Publish complete GitHub Release
         shell: pwsh
         env:
