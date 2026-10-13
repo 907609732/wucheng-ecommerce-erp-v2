@@ -1214,7 +1214,7 @@ function openRemoteLogin() {
 
 function moduleSender(event, write = false) {
   if (event.sender !== mainWindow?.webContents) throw new Error('无权访问模块数据');
-  if (write && runtimeMode() === 'client') throw new Error('请在主服务器导入或恢复经营数据');
+  if (write && runtimeMode() === 'client') throw new Error('请在主服务器执行拼多多独立采集或导出');
 }
 ipcMain.handle('pdd-monthly:state', async event => { moduleSender(event); return { ...(await getPddMonthlyExporter()).state(), readOnly: runtimeMode() === 'client' }; });
 ipcMain.handle('pdd-monthly:open', async (event, input) => { moduleSender(event, true); await (await getPddMonthlyExporter()).open({ month: input?.month }); return { opened: true }; });
