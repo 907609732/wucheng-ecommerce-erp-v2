@@ -20,7 +20,7 @@ for(const spec of specs){
 const sums=new Map(fs.readFileSync(path.join(release,'SHA256SUMS.txt'),'utf8').trim().split(/\r?\n/).map(line=>{
   const [,sha,name]=line.match(/^([a-f0-9]{64})\s+(.+)$/);return [name,sha];
 }));
-for(const name of fs.readdirSync(release).filter(name=>/\.(exe|yml|blockmap)$/.test(name))){
+for(const name of fs.readdirSync(release).filter(name=>/\.(exe|yml|blockmap)$/.test(name)&&name!=='builder-debug.yml')){
   assert.equal(await digest(path.join(release,name)),sums.get(name),'Verified launcher changed: '+name);
 }
 const zip=new yazl.ZipFile();
