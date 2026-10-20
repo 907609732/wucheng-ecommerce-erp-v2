@@ -39,6 +39,7 @@ function invokeCli(args) {
     child.once("close", (code) => {
       try {
         const payload = JSON.parse(stdout.trim());
+        if (payload.code === 'MODULE_NOT_INSTALLED') { reject(new Error(payload.error)); return; }
         if (code !== 0 && payload.ok !== false) payload.ok = false;
         resolve(payload);
       } catch {

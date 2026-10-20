@@ -1,0 +1,14 @@
+{
+  "id": "lingtu.desks",
+  "name": "灵兔本机业务扩展",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entry": "extension.mjs",
+  "actions": [
+    {"name":"status","description":"检查各本机服务及数据目录","sideEffect":"read"},
+    {"name":"query","description":"读取采购订单、销售流水、总览或导入核对结果","sideEffect":"read"},
+    {"name":"start","description":"启动指定独立服务","sideEffect":"write"},
+    {"name":"stop","description":"空闲时停止指定后台","sideEffect":"write"},
+    {"name":"prepare","description":"保存待人工核对的导入或编辑草稿，不写账","sideEffect":"write"}
+  ]
+}

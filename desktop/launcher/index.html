@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>云仓库存同步</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="../assets/lingtu-icon.png" alt=""><div><strong>云仓库存同步</strong><span>灵兔 · 电商工作台</span></div></div>
+    <nav><button id="home">首页</button><button id="settings">扩展与设置</button><button id="help">使用说明</button></nav>
+  </header>
+  <main id="homePanel">
+    <div class="intro"><span class="eyebrow">你的业务，按需开启</span><h1>从这里开始今天的工作</h1><p>选择需要的模块。独立运行，本地保存，随时回来继续。</p></div>
+    <section id="cards" class="cards" aria-label="业务模块"></section>
+    <p class="hint">首次使用会下载模块与必要组件。卸载模块会保留你的账本。</p>
+  </main>
+  <main id="settingsPanel" hidden>
+    <div class="sectionHeading"><div><h1>扩展与设置</h1><p>管理模块、运行环境和本机服务。</p></div><div><button id="refresh">检查更新</button><button id="offline">导入离线包</button></div></div>
+    <section id="moduleList"></section>
+    <section class="moduleRow"><div><strong>启动台 0.8.0</strong><p id="hostUpdateStatus">启动台与业务扩展分别更新。</p></div><div class="actions"><button id="hostUpdate">检查启动台更新</button><button id="hostInstall" hidden>安装启动台更新</button></div></section>
+    <section><h2>后台服务</h2><button id="serviceRefresh">刷新服务状态</button><div id="serviceList"></div></section>
+  </main>
+  <main id="deskPanel" hidden><div class="deskHeading"><button id="back">← 返回首页</button><strong id="deskTitle"></strong><span>页面切换后保留当前状态</span></div><div id="extensionFrame"></div></main>
+  <p id="message" role="status" aria-live="polite"></p>
+  <dialog id="installDialog">
+    <h2 id="installTitle"></h2><p id="installSummary"></p><ul id="dependencies"></ul>
+    <p>程序包不包含其他用户的数据，账本保存在本机。</p>
+    <footer><button id="dismissInstall">暂不下载</button><button id="confirmInstall" class="primary">下载并安装</button></footer>
+  </dialog>
+  <dialog id="helpDialog"><h2>使用说明</h2><p>首页选择业务模块，首次使用先下载安装；安装后点击即可打开。</p><p>采购台中的历史订单导入、销售台中的经营收支总览，首次使用时分别安装。</p><p>更新需要你手动点击。有采集、导入或保存任务时不能更新或停止服务。关闭工作台后，已启动的后台继续运行。</p><p>卸载模块保留账本，重新安装后继续使用。无法联网时，可在扩展与设置中导入完整离线包。</p><button id="closeHelp">知道了</button></dialog>
+  <script src="renderer.js"></script>
+</body>
+</html>

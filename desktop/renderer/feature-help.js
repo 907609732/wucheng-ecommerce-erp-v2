@@ -5,7 +5,6 @@
   const body = document.getElementById('featureHelpBody');
   const title = document.getElementById('featureHelpTitle');
   const manual = document.getElementById('featureManualButton');
-  const principle = document.getElementById('featurePrincipleButton');
   const modeButtons = [...document.querySelectorAll('[data-feature-help-mode]')];
   let currentView = 'home';
   let helpView = 'home';
@@ -61,15 +60,13 @@
   }
 
   manual.addEventListener('click', () => open('manual'));
-  principle.addEventListener('click', () => open('principle'));
   document.getElementById('featureHelpClose').addEventListener('click', () => dialog.close());
   modeButtons.forEach(button => button.addEventListener('click', () => open(button.dataset.featureHelpMode, helpView)));
   dialog.addEventListener('close', () => { if (opener?.isConnected) opener.focus(); });
   window.addEventListener('erp:view', event => {
     currentView = Object.hasOwn(content, event.detail) ? event.detail : 'home';
     const name = content[currentView].title;
-    manual.title = `${name}说明书`;
-    principle.title = `${name}技术原理`;
+    manual.title = `${name} · 使用说明与技术原理`;
     if (dialog.open) open(helpMode, currentView);
   });
   window.erpFeatureHelp = Object.freeze({ open });

@@ -1,4 +1,7 @@
 import { app, BrowserWindow, ipcMain, safeStorage, session, shell, dialog } from "electron";
+import {installDeskViews} from './local-desks.mjs';
+import {installBundledDesks} from './shared/install-desks.mjs';
+import {startCloudControl} from './modules/cloud-control.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -31,12 +34,6 @@ import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedul
 import { externalLink } from "./shared/external-links.mjs";
 import { createRemoteService } from "./shared/remote-service.mjs";
 import { CHANGELOG } from './shared/changelog.mjs';
-import { invoiceJob } from './shared/invoice-jobs.mjs';
-import { InvoiceShopStore, matchingInvoiceAccount, invoiceShopLedgerName } from './shared/invoice-shops.mjs';
-import { createInvoiceBrowser } from './shared/invoice-browser.mjs';
-import { appendInvoiceLog, readInvoiceLogs, invoiceLogDirectory } from './shared/invoice-runtime-log.mjs';
-import { buildInvoiceInspectionText, chinaDateString, summarizeChecks } from './shared/invoice-inspection.mjs';
-import { deliverInvoiceReminder } from './shared/invoice-delivery.mjs';
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 import brandingModule from "./shared/branding.cjs";
 
@@ -74,6 +71,9 @@ let cachedSettings = null;
 let cachedSecrets = null;
 let remoteService = null;
 let remoteLoginWindow = null;
+const managedCloud = process.env.LINGTU_MANAGED_MODULE === '1';
+let managedMaintenance = managedCloud && process.env.LINGTU_MAINTENANCE === '1';
+let cloudControl = null;
 
 function appDataDir() {
   return path.join(app.getPath("userData"), "workspace");
@@ -89,266 +89,6 @@ function secretsPath() {
 
 function inventoryDatabasePath() {
   return path.join(appDataDir(), "data", "erp.sqlite");
-}
-
-// 开票代码和模板位于独立模块；打包时作为 extraResources 放在 asar 外供 Python 运行。
-const invoiceModuleDir = app.isPackaged
-  ? path.join(process.resourcesPath, 'invoice-module')
-  : path.join(desktopDir, 'invoice-module');
-function invoiceLog(level, source, message) {
-  const entry = appendInvoiceLog(appDataDir(), { level, source, message });
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('invoice:log', entry);
-  return entry;
-}
-function captureInvoiceStream(stream, source) {
-  let pending = '';
-  stream.setEncoding('utf8');
-  stream.on('data', chunk => {
-    pending += chunk;
-    const lines = pending.split(/\r?\n/);
-    pending = lines.pop().slice(-1200);
-    for (const line of lines.slice(-100)) if (line.trim()) invoiceLog(source.endsWith('stderr') ? 'error' : 'info', source, line);
-  });
-  stream.on('end', () => { if (pending.trim()) invoiceLog(source.endsWith('stderr') ? 'error' : 'info', source, pending); });
-}
-function invoiceToolTarget(kind) {
-  const map = {
-    assistant: { label: '自动开票助手', script: 'assistant.py', args: [] },
-    watch: { label: '每日开票巡检', script: 'invoice_watch.py', args: ['show'] },
-    legacy: { label: '旧版开票台账', script: 'run.py', args: ['--gui'] }
-  };
-  return map[kind] || null;
-}
-function launchInvoiceTool(kind) {
-  const target = invoiceToolTarget(kind);
-  if (!target) throw new Error('未知的开票工具');
-  invoiceLog('info', kind, `请求启动${target.label}`);
-  const script = path.join(invoiceModuleDir, target.script);
-  if (!fs.existsSync(script)) {
-    invoiceLog('error', kind, '开票模块脚本不存在');
-    throw new Error(`未找到${target.label}模块：${script}`);
-  }
-  // 指定 3.12，避免 Electron 或其他 Python 环境抢占 PATH；运行时数据仍隔离在用户目录。
-  const python = process.platform === 'win32'
-    ? path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'pythonw.exe')
-    : 'python3';
-  if (path.isAbsolute(python) && !fs.existsSync(python)) {
-    invoiceLog('error', kind, '未找到 Python 3.12 运行时');
-    throw new Error('未找到 Python 3.12，请安装开票模块依赖并确认 Python 安装位置。');
-  }
-  return new Promise((resolve, reject) => {
-    const child = spawn(python, [script, ...target.args], {
-      cwd: invoiceModuleDir, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
-    });
-    captureInvoiceStream(child.stdout, `${kind}:stdout`);
-    captureInvoiceStream(child.stderr, `${kind}:stderr`);
-    let settled = false;
-    child.once('spawn', () => {
-      invoiceLog('info', kind, `${target.label}进程已创建 (PID ${child.pid})`);
-      // OS 创建进程不代表 Python GUI 启动成功；进程早退必须显示错误。
-      setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        child.unref();
-        resolve({ launched: true, label: target.label });
-      }, 1200);
-    });
-    child.once('exit', (code, signal) => {
-      invoiceLog(code === 0 ? 'info' : 'error', kind, `${target.label}进程退出 (PID ${child.pid}, ${code ?? signal})`);
-      if (settled) return;
-      settled = true;
-      reject(new Error(`${target.label}启动后立即退出（${code ?? signal}），请检查开票运行日志。`));
-    });
-    child.once('error', error => {
-      invoiceLog('error', kind, `无法启动${target.label}：${error.message}`);
-      if (settled) return;
-      settled = true;
-      reject(new Error(`无法启动${target.label}：${error.message}`));
-    });
-  });
-}
-let pddMonthlyExporter, pddMonthlyModule;
-async function getPddMonthlyExporter() {
-  if (!pddMonthlyModule) {
-    pddMonthlyModule = (async () => {
-      const { PddMonthlyExport } = await import('./shared/pdd-monthly-export.mjs');
-      const options = {
-        directory: path.join(appDataDir(), 'pdd-monthly-export'), profile: { order_url: 'https://mobile.yangkeduo.com/orders.html', need_login_url_contains: ['/login'] },
-        notify: state => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pdd-monthly:progress', state); }
-      };
-      // Explicit development-only loopback fixture; never accepts a remote test origin.
-      if (!app.isPackaged && process.env.NODE_ENV === 'test' && process.env.PDD_MONTHLY_TEST_ORIGIN) {
-        const origin = new URL(process.env.PDD_MONTHLY_TEST_ORIGIN);
-        if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(origin.hostname) || !origin.port || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) throw new Error('拼多多测试接口必须是无参数的本机回环地址');
-        options.testOrigin = origin.origin;
-        options.launch = async (directory, config) => {
-          const { chromium } = await import('playwright');
-          return chromium.launchPersistentContext(directory, { ...config, channel: 'chrome', headless: true });
-        };
-      }
-      pddMonthlyExporter = new PddMonthlyExport(options);
-      return pddMonthlyExporter;
-    })().catch(error => { pddMonthlyModule = null; throw error; });
-  }
-  return pddMonthlyModule;
-}
-
-// ── 开票巡检：每日读取千牛「给买家开票」页的待处理/待录入数量，登记并发送钉钉提醒 ──
-const localInvoiceInspection = (operation, ...args) => invoiceJob(path.join(appDataDir(), 'invoice-inspection'), operation, ...args);
-const invoiceShopStore = () => new InvoiceShopStore(path.join(appDataDir(), 'invoice-inspection'));
-let invoiceBrowser;
-const getInvoiceBrowser = () => invoiceBrowser ||= createInvoiceBrowser();
-let invoiceInspectionTimer = null;
-let invoiceInspectionTickRunning = false;
-
-function invoiceSchedulePath() { return path.join(appDataDir(), 'invoice-inspection', 'schedule.json'); }
-function readInvoiceSchedule() {
-  const file = invoiceSchedulePath();
-  if (!fs.existsSync(file)) return { enabled: true, time: '20:00', lastRun: '' };
-  try { return { enabled: true, time: '20:00', lastRun: '', ...JSON.parse(fs.readFileSync(file, 'utf8')) }; }
-  catch { return { enabled: true, time: '20:00', lastRun: '' }; }
-}
-function writeInvoiceSchedule(value) {
-  const schedule = { enabled: value.enabled !== false, time: /^\d{2}:\d{2}$/.test(String(value.time || '')) ? String(value.time) : '20:00', lastRun: String(value.lastRun || '') };
-  fs.mkdirSync(path.dirname(invoiceSchedulePath()), { recursive: true });
-  fs.writeFileSync(invoiceSchedulePath(), JSON.stringify(schedule, null, 2));
-  return schedule;
-}
-
-/** 待验收：从开票页快照文本提取数量。只接受唯一匹配，识别不到就返回失败原因，绝不记成 0。 */
-function parseInvoiceCounts(text) {
-  const haystack = String(text || '').replace(/[\s\u3000]+/g, '');
-  if (!haystack.includes('给买家开票') && !haystack.includes('开票数据概览')) {
-    return { ok: false, reason: '页面未加载出「给买家开票」，可能未登录或停留在其他页' };
-  }
-  const pending = labeledNumber(haystack, '待处理');
-  const unrecorded = labeledNumber(haystack, '待录入开票') ?? labeledNumber(haystack, '待录入');
-  if (pending === null || unrecorded === null) {
-    return { ok: false, reason: '未能唯一识别待处理/待录入数量（开票页数量识别待现场验收），不记为 0' };
-  }
-  return { ok: true, pending, unrecorded };
-}
-function labeledNumber(haystack, label) {
-  const index = haystack.indexOf(label);
-  if (index < 0) return null;
-  const tail = haystack.slice(index + label.length, index + label.length + 16);
-  const match = tail.match(/^[^\d]*(\d{1,6})/);
-  return match ? Number(match[1]) : null;
-}
-
-async function currentInvoiceSummary() {
-  const shops = new Map(invoiceShopStore().list().map(shop => [invoiceShopLedgerName(shop), shop]));
-  const history = await localInvoiceInspection('summary');
-  return summarizeChecks(history.shops.filter(row => {
-    const shop = shops.get(row.shop);
-    return shop && shop.createdAt && row.checked_at >= shop.createdAt;
-  }));
-}
-async function sendInvoiceInspectionReminder(summary, scheduled = false) {
-  const date = chinaDateString();
-  const time = scheduled ? readInvoiceSchedule().time : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-  const text = buildInvoiceInspectionText(summary, { date, time });
-  try {
-    const result = await deliverInvoiceReminder({ settings: readSettings(), secrets: await readSecrets(), title: `每日开票巡检 · ${date}`, text });
-    invoiceLog('info', 'dingtalk', `开票巡检提醒已通过云仓${result.mode === 'app' ? '企业应用机器人' : 'Webhook'}发送到同一群`);
-    return result;
-  } catch (error) {
-    const reason = sanitizeDiagnosticText(error?.message || error, await diagnosticSensitiveValues());
-    invoiceLog('error', 'dingtalk', `开票巡检提醒未发送：${reason}`);
-    appendLog(`开票巡检钉钉提醒未发送：${reason}`, 'error');
-    return { sent: false, error: reason };
-  }
-}
-
-async function runInvoiceInspection({ scheduled = false, selectedShopId = null } = {}) {
-  if (quitting || runtimeMode() === 'client') throw new Error('开票巡检请在主服务器使用');
-  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后再试');
-  invoiceInspectionTickRunning = true;
-  invoiceLog('info', 'inspection', `开始${selectedShopId ? '单店' : scheduled ? '定时' : '手动'}开票巡检`);
-  try {
-    const shops = selectedShopId ? [invoiceShopStore().get(selectedShopId)] : invoiceShopStore().list();
-    if (!shops.length) {
-      invoiceLog('warning', 'inspection', '尚未添加开票店铺；请在本模块添加并登录，不读取销售额模块店铺');
-      throw new Error('请先在自动开发票模块添加开票店铺并完成登录确认');
-    }
-    let selectedResult = null;
-    const record = async observation => {
-      const row = await localInvoiceInspection('record', observation);
-      if (selectedShopId) selectedResult = row;
-      return row;
-    };
-    for (const shop of shops) {
-      const shopName = invoiceShopLedgerName(shop);
-      try {
-        if (!shop.account && shop.identityMode !== 'header') {
-          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: '请先在开票模块确认登录账号' });
-          invoiceLog('warning', 'inspection', `${shopName}：尚未确认开票登录账号`);
-          continue;
-        }
-        const snapshot = await getInvoiceBrowser().inspect(shop);
-        if (!snapshot.status.ok) {
-          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: snapshot.status.reason });
-          invoiceLog('warning', 'inspection', `${shopName}：${snapshot.status.reason}`);
-          continue;
-        }
-        const identity = matchingInvoiceAccount(shop, snapshot.accounts, snapshot.headerNames);
-        if (!identity.ok) {
-          await record({ shop: shopName, outcome: 'needs_login', coverage: 'unknown', message: identity.reason });
-          invoiceLog('warning', 'inspection', `${shopName}：${identity.reason}`);
-          continue;
-        }
-        const parsed = shop.platform === 'pdd' ? snapshot.counts : parseInvoiceCounts(snapshot.text);
-        if (parsed?.ok) {
-          await record({ shop: shopName, outcome: 'observed', pending_count: parsed.pending, unrecorded_count: parsed.unrecorded,
-            ...(shop.platform === 'pdd' ? { metric: 'pending_only' } : {}), coverage: 'visible_range' });
-          invoiceLog('info', 'inspection', shop.platform === 'pdd'
-            ? `${shopName}：待开票 ${parsed.pending}（仅当前待开票列表）`
-            : `${shopName}：待处理 ${parsed.pending}，待录入 ${parsed.unrecorded}（仅当前可见范围）`);
-        } else {
-          await record({ shop: shopName, outcome: 'error', coverage: 'unknown', message: parsed?.reason || '未获取到开票列表数量' });
-          invoiceLog('warning', 'inspection', `${shopName}：识别失败：${parsed?.reason || '未获取到开票列表数量'}`);
-        }
-      } catch (error) {
-        invoiceLog('error', 'inspection', `${shopName}：巡检异常：${error?.message || error}`);
-        await record({ shop: shopName, outcome: 'error', coverage: 'unknown', message: String(error?.message || error) });
-      }
-    }
-    const summary = await currentInvoiceSummary();
-    if (selectedShopId) {
-      if (!selectedResult) throw new Error('单店巡检未生成结果，请查看开票日志');
-      summary.selected = selectedResult;
-      summary.notification = { sent: false, skipped: true, reason: '单店查询不发送钉钉提醒' };
-    } else summary.notification = await sendInvoiceInspectionReminder(summary, scheduled);
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('invoice-inspection:changed', summary);
-    invoiceLog('info', 'inspection', selectedShopId
-      ? `单店查询完成：${selectedResult.shop}，${selectedResult.state}（不发送钉钉）`
-      : `巡检完成：检查 ${shops.length} 家，待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}`);
-    if (!selectedShopId) appendLog(`开票巡检${scheduled ? '（定时）' : ''}：检查 ${shops.length} 家店铺，待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}`, 'info');
-    return summary;
-  } catch (error) {
-    invoiceLog('error', 'inspection', `巡检失败：${error?.message || error}`);
-    throw error;
-  } finally {
-    invoiceInspectionTickRunning = false;
-  }
-}
-
-async function tickInvoiceInspection() {
-  if (invoiceInspectionTickRunning || quitting || runtimeMode() === 'client') return;
-  const schedule = readInvoiceSchedule();
-  if (!schedule.enabled) return;
-  const now = new Date();
-  const c = new Date(now.getTime() + 8 * 3600000).toISOString();
-  const today = c.slice(0, 10);
-  const hhmm = c.slice(11, 16);
-  if (hhmm < schedule.time || schedule.lastRun === today) return;
-  try {
-    await runInvoiceInspection({ scheduled: true });
-    writeInvoiceSchedule({ ...schedule, lastRun: today });
-  } catch (error) {
-    invoiceLog('error', 'schedule', `定时巡检失败：${error.message}`);
-    appendLog(`开票巡检计划：${error.message}`, 'error');
-  }
 }
 
 function runtimeMode() {
@@ -555,7 +295,7 @@ function secretFlags(secrets) {
 }
 
 async function publicSettings() {
-  const firstRun = !fs.existsSync(settingsPath());
+  const firstRun = !fs.existsSync(settingsPath()) || readSettings().firstRunPending === true;
   const settings = readSettings();
   const secrets = await readSecrets();
   return { ...settings, firstRun, secretFlags: secretFlags(secrets) };
@@ -595,11 +335,12 @@ function emitState(extra = {}) {
 function createWindow() {
   const branding = currentBranding();
   mainWindow = new BrowserWindow({
-    width: 1080,
-    height: 780,
+    width: 1280,
+    height: 900,
     minWidth: 900,
     minHeight: 680,
     title: branding.productName,
+    icon: path.join(desktopDir, "assets", "lingtu-icon.png"),
     backgroundColor: "#f4f1ec",
     show: !process.argv.includes("--hidden"),
     webPreferences: {
@@ -610,7 +351,8 @@ function createWindow() {
     }
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(rendererPath);
+  mainWindow.loadFile(rendererPath, managedCloud ? {query:{module:'warehouse'}} : {});
+  installDeskViews(mainWindow,{notify:message=>appendLog(message,'warning')});
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("close", (event) => {
@@ -1212,125 +954,6 @@ function openRemoteLogin() {
   return { opened: true };
 }
 
-function moduleSender(event, write = false) {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问模块数据');
-  if (write && runtimeMode() === 'client') throw new Error('请在主服务器执行拼多多独立采集或导出');
-}
-ipcMain.handle('pdd-monthly:state', async event => { moduleSender(event); return { ...(await getPddMonthlyExporter()).state(), readOnly: runtimeMode() === 'client' }; });
-ipcMain.handle('pdd-monthly:open', async (event, input) => { moduleSender(event, true); await (await getPddMonthlyExporter()).open({ month: input?.month }); return { opened: true }; });
-ipcMain.handle('pdd-monthly:start', async (event, input) => { moduleSender(event, true); return (await getPddMonthlyExporter()).start({ month: input?.month }); });
-ipcMain.handle('pdd-monthly:stop', async event => { moduleSender(event, true); return (await getPddMonthlyExporter()).stop(); });
-ipcMain.handle('pdd-monthly:export', async (event, input) => {
-  moduleSender(event, true);
-  const exporter = await getPddMonthlyExporter(), state = exporter.state(), result = state.result;
-  if (!['completed', 'idle'].includes(state.state) || typeof input?.id !== 'string' || !result?.id || input.id !== result.id) throw new Error('当前采集结果不可导出，请完成所选月份采集后重试');
-  const choice = await dialog.showSaveDialog(mainWindow, { title: `导出拼多多 ${result.month} 买家订单`, defaultPath: `拼多多采购订单-${result.month}.xlsx`, filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }] });
-  if (choice.canceled) return { canceled: true };
-  return exporter.exportResult({ id: input.id }, choice.filePath);
-});
-ipcMain.handle('invoice:logs', event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权读取开票运行日志');
-  return readInvoiceLogs(appDataDir());
-});
-ipcMain.handle('invoice:open-logs', async event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权打开开票日志目录');
-  const dir = invoiceLogDirectory(appDataDir());
-  fs.mkdirSync(dir, { recursive: true });
-  const error = await shell.openPath(dir);
-  if (error) throw new Error(error);
-  return { opened: true };
-});
-ipcMain.handle('invoice:launch-assistant', event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动外部程序');
-  return launchInvoiceTool('assistant');
-});
-ipcMain.handle('invoice:launch-watch', event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动外部程序');
-  return launchInvoiceTool('watch');
-});
-ipcMain.handle('invoice:launch-legacy', event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动外部程序');
-  return launchInvoiceTool('legacy');
-});
-ipcMain.handle('invoice:folder', async event => {
-  const dir = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'WuchengInvoiceAssistant');
-  const error = await shell.openPath(dir);
-  if (error) throw new Error(error);
-  return { opened: true };
-});
-ipcMain.handle('invoice-shops:list', event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票店铺');
-  return invoiceShopStore().list();
-});
-ipcMain.handle('invoice-shops:add', (event, name, platform = 'taobao') => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可添加开票店铺');
-  const shop = invoiceShopStore().add(name, platform);
-  invoiceLog('info', 'shops', `已添加开票店铺 ${invoiceShopLedgerName(shop)}，尚未登录`);
-  return shop;
-});
-ipcMain.handle('invoice-shops:rename', (event, id, name) => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可修改开票店铺');
-  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后修改店铺名称');
-  const shop = invoiceShopStore().rename(id, name);
-  invoiceLog('info', 'shops', `已修正未确认的开票店铺名称为 ${invoiceShopLedgerName(shop)}；登录会话未清除，仍需核对页面身份`);
-  return shop;
-});
-ipcMain.handle('invoice-shops:open-login', (event, id) => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('仅主服务器可打开开票登录');
-  return getInvoiceBrowser().open(invoiceShopStore().get(id));
-});
-ipcMain.handle('invoice-shops:login-account', async (event, id) => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权读取开票登录账号');
-  const shop = invoiceShopStore().get(id);
-  const snapshot = await getInvoiceBrowser().inspect(shop);
-  if (!snapshot.status.ok) throw new Error(snapshot.status.reason);
-  if (shop.platform !== 'pdd' && snapshot.accounts.length === 1) return { value: snapshot.accounts[0], mode: 'cookie' };
-  if (snapshot.accounts.length > 1) throw new Error('多个登录账号，无法确认店铺归属');
-  if (snapshot.headerNames.length === 1 && snapshot.headerNames[0] === shop.name) return { value: shop.name, mode: 'header' };
-  throw new Error(`${shop.platform === 'pdd' ? '拼多多订单开票' : '千牛开票'}页已打开，但右上角店铺名称与登记店铺不符或无法识别；请核对店铺`);
-});
-ipcMain.handle('invoice-shops:confirm', async (event, id, identity) => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权确认开票店铺');
-  const shop = invoiceShopStore().get(id);
-  const snapshot = await getInvoiceBrowser().inspect(shop);
-  if (!snapshot.status.ok) throw new Error(snapshot.status.reason);
-  let confirmed;
-  if (identity?.mode === 'header' && identity.value === shop.name && snapshot.headerNames.length === 1 && snapshot.headerNames[0] === shop.name) {
-    confirmed = invoiceShopStore().confirmHeader(id, shop.name);
-  } else if (shop.platform !== 'pdd' && identity?.mode === 'cookie' && snapshot.accounts.length === 1 && snapshot.accounts[0] === identity.value) {
-    confirmed = invoiceShopStore().confirm(id, identity.value);
-  } else throw new Error('页面店铺或登录账号已变化，请重新核对');
-  invoiceLog('info', 'shops', `已确认 ${confirmed.name} 的开票店铺身份（${confirmed.identityMode === 'header' ? '页面店铺名' : '登录账号'}）`);
-  return confirmed;
-});
-ipcMain.handle('invoice-shops:remove', async (event, id) => {
-  if (event.sender !== mainWindow?.webContents || runtimeMode() === 'client') throw new Error('无权删除开票店铺');
-  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后删除');
-  const shop = invoiceShopStore().get(id);
-  await getInvoiceBrowser().remove(shop);
-  invoiceShopStore().remove(id);
-  invoiceLog('info', 'shops', `已删除开票店铺 ${shop.name}（历史巡检记录保留）`);
-  return { removed: true };
-});
-ipcMain.handle('invoice-inspection:summary', event => { if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票巡检'); return currentInvoiceSummary(); });
-ipcMain.handle('invoice-inspection:history', (event, limit) => { if (event.sender !== mainWindow?.webContents) throw new Error('无权访问开票巡检'); return localInvoiceInspection('history', Number(limit) || 100); });
-ipcMain.handle('invoice-inspection:schedule', () => readInvoiceSchedule());
-ipcMain.handle('invoice-inspection:save-schedule', (event, value) => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权修改开票巡检设置');
-  const schedule = writeInvoiceSchedule({ ...value, lastRun: readInvoiceSchedule().lastRun });
-  invoiceLog('info', 'schedule', schedule.enabled ? `已设置每天 ${schedule.time} 自动巡检` : '已暂停每日自动巡检');
-  return schedule;
-});
-ipcMain.handle('invoice-inspection:scan-now', async event => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动开票巡检');
-  if (invoiceInspectionTickRunning) throw new Error('巡检正在进行，请稍后再试');
-  return runInvoiceInspection({ scheduled: false });
-});
-ipcMain.handle('invoice-inspection:scan-shop', (event, id) => {
-  if (event.sender !== mainWindow?.webContents) throw new Error('无权启动单店开票巡检');
-  if (typeof id !== 'string' || !id) throw new Error('请选择要查询的开票店铺');
-  return runInvoiceInspection({ selectedShopId: id });
-});
 ipcMain.handle("settings:get", async () => publicSettings());
 ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("app:about", () => ({ version: app.getVersion(), build: readBuildInfo(), changelog: CHANGELOG }));
@@ -1379,6 +1002,7 @@ ipcMain.handle("settings:save-section", async (_event, payload = {}) => {
     if (value) mergedSecrets[key] = value;
   }
   const settings = normalizeSettings({ ...currentSettings, ...(payload.settings || {}) });
+  if (section === "runtime") delete settings.firstRunPending;
   const validation = validator(settings, secretFlags(mergedSecrets));
   if (!validation.ok) throw new Error(validation.errors.join("；"));
 
@@ -1578,6 +1202,7 @@ function writeCliResult(value) {
 }
 
 app.on("second-instance", () => {
+  if (managedMaintenance) return;
   if (!mainWindow) createWindow();
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -1586,13 +1211,13 @@ app.on("second-instance", () => {
 });
 
 app.on("before-quit", event => {
+  cloudControl?.close();
   quitting = true;
-  clearInterval(invoiceInspectionTimer);
-  void pddMonthlyExporter?.closeAll();
   if (mcpBridgeChild && !mcpBridgeChild.killed) mcpBridgeChild.kill();
   void stopRemoteService();
 });
 app.on("window-all-closed", () => {
+  if (managedCloud) return;
   const settings = readSettings();
   if (!headlessMode && settings.runtimeMode !== "server" && !settings.scheduleEnabled && !settings.monthlySalesEnabled) app.quit();
 });
@@ -1600,6 +1225,7 @@ app.on("window-all-closed", () => {
 app.whenReady().then(async () => {
   app.setAppUserModelId("com.diankouwujin.cainiao.inventory");
   ensureWorkspace();
+  installBundledDesks({source:path.join(desktopDir,'extensions','lingtu-desks'),workspace:appDataDir(),settingsPath:settingsPath()});
   if (cliMode) {
     try {
       const result = await runCli();
@@ -1640,6 +1266,18 @@ app.whenReady().then(async () => {
   } catch (error) {
     configurationWarmError = error;
   }
+  if (managedCloud) {
+    cloudControl = await startCloudControl({
+      root: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion(),
+      busy: () => !!runningChild || !!runningTaskPromise,
+      activate: async () => {
+        if (managedMaintenance) { managedMaintenance = false; configureSchedule(); await configureRemoteService(); }
+      },
+      open: async () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); mainWindow.show(); mainWindow.focus(); },
+      stop: () => app.quit()
+    });
+    if (managedMaintenance) return;
+  }
   createWindow();
   const importedUpdateToken = await importBundledUpdateToken();
   if (importedUpdateToken) appendLog("在线升级凭据已内置并转存到 Windows 安全存储。", "success");
@@ -1649,12 +1287,8 @@ app.whenReady().then(async () => {
     onState: (state) => mainWindow?.webContents.send("update:state", state),
     log: appendLog
   });
-  updater.initialize();
+  if (!managedCloud) updater.initialize();
   configureSchedule();
-  try {
-    invoiceInspectionTimer = setInterval(() => { void tickInvoiceInspection(); }, 60000);
-    void tickInvoiceInspection();
-  } catch (e) { appendLog(`开票巡检启动失败：${e.message}`, 'error'); }
   try {
     await configureRemoteService();
   } catch {

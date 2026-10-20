@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {ModuleManager} from '../desktop/modules/module-manager.mjs';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-complete-offline-'));
+const manager=new ModuleManager({root,hostVersion:'0.8.0',publicKeys:JSON.parse(fs.readFileSync('desktop/launcher/public-keys.json','utf8')),
+  fetchImpl:()=>{throw Error('Offline verification forbids network');}});
+const inspected=await manager.inspectOffline(path.resolve('dist/modules/LingtuModules-Complete-Offline.zip'));
+assert.equal(inspected.packages.length,7);
+const plan=manager.planOffline(inspected.token,'warehouse');
+assert.deepEqual(plan.packages.map(p=>p.id),['browser-runtime','warehouse']);
+await manager.installOffline(inspected.token,'node-runtime');
+const p=manager.state().packages['node-runtime'];
+const result=spawnSync(path.join(p.root,p.entry),['--version'],{encoding:'utf8',windowsHide:true});
+assert.equal(result.status,0);assert.equal(result.stdout.trim(),'v24.18.0');
+await manager.discardOffline(inspected.token);
+const report={ok:true,officialSignature:true,allSevenArchivesVerified:true,dependencyGraphComplete:true,networkCallsAllowed:false,runtimeLaunched:true};
+fs.writeFileSync('dist/module-verification/offline.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));

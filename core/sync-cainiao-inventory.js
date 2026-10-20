@@ -250,7 +250,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const chrome = await chromium.launch({
-    channel: 'chrome',
+    ...(process.env.LINGTU_BROWSER_PATH ? {executablePath:process.env.LINGTU_BROWSER_PATH} : {channel:'chrome'}),
     headless: false,
     args: ['--disable-blink-features=AutomationControlled', '--no-proxy-server'],
   });

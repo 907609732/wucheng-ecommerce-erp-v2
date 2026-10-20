@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'">
   <title>云仓库存同步</title>
+  <link rel="icon" type="image/png" href="../assets/lingtu-icon.png">
   <link rel="stylesheet" href="../../node_modules/gridjs/dist/theme/mermaid.min.css">
-  <link rel="stylesheet" href="../../node_modules/tabulator-tables/dist/css/tabulator_simple.min.css">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="pdd-monthly.css">
 </head>
 <body>
   <section id="firstRunSetup" class="first-run-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
@@ -38,49 +37,31 @@
   </section>
   <main class="shell">
     <header class="hero">
-      <div>
+      <div class="hero-brand">
+        <img class="hero-logo" src="../assets/lingtu-icon.png" alt="灵兔云仓" width="72" height="72">
+        <div>
         <p class="eyebrow">WUCHENG E-COMMERCE · ERP V2</p>
         <h1>功能主页</h1>
         <p class="subtitle">选择需要使用的功能。</p>
+        </div>
       </div>
       <div class="hero-actions" aria-label="当前功能帮助与导航">
-        <button id="featureManualButton" type="button" aria-haspopup="dialog" aria-controls="featureHelpDialog">说明书</button>
-        <button id="featurePrincipleButton" type="button" aria-haspopup="dialog" aria-controls="featureHelpDialog">技术原理</button>
+        <button type="button" data-open-view="settings">设置与服务</button>
+        <button id="featureManualButton" type="button" aria-haspopup="dialog" aria-controls="featureHelpDialog" title="使用说明与技术原理">使用说明</button>
         <button id="backHome" class="hidden" type="button">返回主页</button>
       </div>
     </header>
 
     <section data-view-panel="home" id="featureHome">
       <div class="feature-grid">
-        <button class="feature-card" data-open-view="dashboard"><span class="feature-number">01</span><strong>云仓库存同步</strong><span>库存采集、补货预警与云仓销售趋势</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-view="invoice"><span class="feature-number">05</span><strong>自动开发票</strong><span>开票申请采集、核对、模板准备与每日巡检</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-view="pdd-monthly"><span class="feature-number">06</span><strong>拼多多采购订单导出</strong><span>独立选择月份读取买家订单 · 预览并导出 Excel，不写采购账本</span><span class="feature-enter">进入功能 →</span></button>
+        <button class="feature-card" data-open-view="dashboard"><span class="feature-number">01</span><strong>云仓同步</strong><span>库存采集、补货预警与云仓销售趋势</span><span class="feature-enter">进入功能 →</span></button>
+        <button class="feature-card" data-open-desk="purchase"><span class="feature-number">02</span><strong>采购台</strong><span>采购账本、历史订单核对与安全导入</span><span class="feature-enter">打开采购台 →</span></button>
+        <button class="feature-card" data-open-desk="sales"><span class="feature-number">03</span><strong>销售台</strong><span>销售账单、资金对账与经营收支总览</span><span class="feature-enter">打开销售台 →</span></button>
       </div>
-      <button class="home-settings" data-open-view="settings">公共设置</button>
     </section>
+    <div id="deskSwitcher" class="hidden desk-switcher"><button data-open-desk="purchase">采购台</button><button data-open-desk="sales">销售台</button><button data-open-desk="overview">经营收支总览</button></div>
+    <section id="extensionFrame" class="hidden extension-frame" aria-label="独立业务扩展"></section>
 
-    <section data-view-panel="pdd-monthly" class="hidden" id="pddMonthlyPanel" aria-label="拼多多采购订单导出">
-      <div class="panel">
-        <h2>按月份读取拼多多买家订单</h2>
-        <p>这是独立采集与导出模块，不写入或修改 ERP 采购账本。选择自然月，本人完成登录后点击读取。</p>
-        <div class="pdd-monthly-actions">
-          <label>订单月份<input type="month" id="pddMonthlyMonth" required aria-label="拼多多订单月份"></label>
-          <button id="pddMonthlyLogin" type="button">打开拼多多登录</button>
-          <button id="pddMonthlyStart" type="button" class="primary">读取所选月份订单</button>
-          <button id="pddMonthlyStop" type="button" disabled>停止读取</button>
-          <button id="pddMonthlyExport" type="button" disabled>导出 Excel 表格</button>
-        </div>
-        <p id="pddMonthlyStatus" role="status" aria-live="polite">请选择订单月份。首次使用需在独立浏览器窗口登录拼多多买家账号。</p>
-        <p id="pddMonthlySummary">尚未读取订单；没有结果不代表该月份为零订单。</p>
-        <p class="pdd-monthly-note">按北京时间下单月份筛选，保留平台返回的全部订单状态；金额按整单只计一次。待支付、关闭或退款订单请结合状态核对，平台金额合计不等于成功采购额或净支出。</p>
-      </div>
-      <section class="panel pdd-monthly-results" aria-label="采集结果表格">
-        <h2>所选月份的数据表格</h2>
-        <p id="pddMonthlyResultInfo">采集成功后显示订单号、商品规格、数量、单价、整单金额、供应商和状态。</p>
-        <div id="pddMonthlyGrid"></div>
-      </section>
-      <details class="panel"><summary>采集进度与日志</summary><pre id="pddMonthlyLogs">等待操作…</pre></details>
-    </section>
     <nav class="view-tabs hidden" aria-label="页面导航">
       <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
       <button class="view-tab" type="button" data-view="inventory">商品库存</button>
@@ -204,56 +185,8 @@
       </section>
     </div>
 
-    <section data-view-panel="invoice" class="hidden" id="invoicePanel">
-      <div class="panel">
-        <div class="section-heading">
-          <div><p class="eyebrow">INVOICE</p><h2>自动开发票</h2></div>
-        </div>
-
-        <div class="section-heading">
-          <div><p class="eyebrow">每日开票巡检</p><h3>扫描店铺开票申请，发送钉钉群提醒</h3></div>
-        </div>
-        <p class="field-help">淘宝读取千牛「给买家开票」；拼多多读取「订单开票 → 开票列表 → 待开票」的当前列表，不采用首页“10日内未开票数”。按独立店铺和会话逐店巡检后复用公共设置中的云仓钉钉机器人发送同一群。登录失败或列表计数不一致记为未知；只读检查，不执行开票。</p>
-        <fieldset class="invoice-platform-picker" aria-label="选择开票平台">
-          <legend>第一步 · 选择开票平台</legend>
-          <div class="invoice-platform-options">
-            <label class="invoice-platform-option"><input type="radio" name="invoiceShopPlatform" value="taobao" checked><span class="invoice-platform-icon" data-platform="taobao" aria-hidden="true">淘</span><span><strong>淘宝 / 千牛</strong><small>给买家开票</small></span></label>
-            <label class="invoice-platform-option"><input type="radio" name="invoiceShopPlatform" value="pdd"><span class="invoice-platform-icon" data-platform="pdd" aria-hidden="true">拼</span><span><strong>拼多多</strong><small>商家后台订单开票</small></span></label>
-          </div>
-        </fieldset>
-        <div class="invoice-actions invoice-shop-add"><label>第二步 · 填写开票店铺名称<input id="invoiceShopName" placeholder="与平台页面右上角店铺名一致" maxlength="60"></label><button id="invoiceAddShop">添加所选平台店铺</button></div>
-        <p id="invoiceShopStatus" class="module-note" role="status" aria-live="polite">先添加店铺，再打开该店铺的独立平台窗口登录并确认身份。</p>
-        <div id="invoiceShopList"></div>
-        <div class="invoice-actions">
-          <button id="invoiceInspectNow" class="primary">全部店铺巡检并通知</button>
-          <label class="invoice-schedule">每天<input id="invoiceInspectTime" type="time" value="20:00">检查</label>
-          <label class="check invoice-check"><input id="invoiceInspectEnabled" type="checkbox">启用每日巡检</label>
-          <button id="invoiceInspectSave">保存定时设置</button>
-          <button id="invoiceInspectRefresh">刷新记录</button>
-        </div>
-        <p id="invoiceInspectStatus" class="module-note" role="status" aria-live="polite"></p>
-        <div id="invoiceInspectTable"></div>
-
-        <div class="section-heading changelog-heading">
-          <div><p class="eyebrow">ERP 内独立模块</p><h3>五步开票工作台、旧版台账与独立巡检</h3></div>
-        </div>
-        <p class="field-help">从 ERP 内置的开票模块启动独立窗口，处理申请采集、核对、模板准备、执行任务、结果登记与附件归档；与库存、物流数据库隔离。</p>
-        <div class="invoice-actions">
-          <button id="invoiceLaunchAssistant" class="primary">启动自动开票助手</button>
-          <button id="invoiceLaunchWatch">打开每日开票巡检</button>
-          <button id="invoiceLaunchLegacy">打开旧版开票台账</button>
-          <button id="invoiceOpenFolder">打开本地数据目录</button>
-        </div>
-        <p id="invoiceStatus" class="module-note" role="status" aria-live="polite">开票代码和模板位于当前 ERP 工作区的独立模块；历史配置与数据保存在本机用户数据目录，不依赖旧工作区。</p>
-        <section class="logs-panel" aria-label="开票运行日志">
-          <div class="section-heading"><h3>开票运行日志</h3><div class="invoice-actions"><button id="invoiceRefreshLogs">刷新日志</button><button id="invoiceCopyLogs">复制日志</button><button id="invoiceOpenLogs">打开日志目录</button></div></div>
-          <p class="module-note">显示最近 300 条；记录工具启动与退出、子程序输出、逐店巡检结果、定时任务和钉钉发送状态。按天保存在本机，重启后可查；日志可能含店铺业务信息，分享前请检查。</p>
-          <pre id="invoiceLogs" role="log" aria-live="polite">暂无运行日志</pre>
-        </section>
-      </div>
-    </section>
-
     <div data-view-panel="settings" class="hidden">
+      <section class="panel"><div class="section-heading"><h2>本机扩展服务</h2><button id="refreshDeskServices" type="button">刷新状态</button></div><p>点击业务入口后启动；关闭主程序后后台继续运行。停止后台会使对应浏览器或手机入口暂时不可用。</p><div id="deskServiceList"></div></section>
     <section class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
@@ -439,10 +372,9 @@
   </dialog>
   <script src="../../node_modules/gridjs/dist/gridjs.production.min.js"></script>
   <script src="../../node_modules/echarts/dist/echarts.min.js"></script>
-  <script src="../../node_modules/tabulator-tables/dist/js/tabulator.min.js"></script>
   <script src="feature-help-content.js"></script>
   <script src="feature-help.js"></script>
   <script src="renderer.js"></script>
-  <script src="pdd-monthly.js"></script>
+  <script src="local-desks.js"></script>
 </body>
 </html>

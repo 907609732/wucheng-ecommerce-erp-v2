@@ -33,7 +33,7 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launchPersistentContext(tempUserDataDir, {
-      channel: 'chrome',
+      ...(process.env.LINGTU_BROWSER_PATH ? {executablePath:process.env.LINGTU_BROWSER_PATH} : {channel:'chrome'}),
       headless: false,
       viewport: { width: 1440, height: 900 },
       args: [

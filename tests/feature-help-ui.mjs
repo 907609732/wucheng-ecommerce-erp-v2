@@ -24,13 +24,14 @@ try {
   await page.locator('#finishFirstRun').click();
   await page.locator('#firstRunSetup').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('#featureManualButton').count(), 1, '页面右上角应有说明书入口');
-  assert.equal(await page.locator('#featurePrincipleButton').count(), 1, '页面右上角应有技术原理入口');
+  assert.equal(await page.locator('#featurePrincipleButton').count(), 0, '右上角只保留合并后的入口');
+  assert.equal(await page.locator('#featureManualButton').textContent(), '使用说明');
   const dialog = page.locator('#featureHelpDialog');
   const modes = [['manual', '说明书'], ['principle', '技术原理']];
   const views = [
     ['home', '功能主页'], ['dashboard', '云仓库存同步'],
     ['inventory', '云仓库存同步 · 库存明细'], ['sales', '云仓库存同步 · 月度销量'],
-    ['invoice', '自动开发票'], ['settings', '公共设置'], ['pdd-monthly', '拼多多采购订单导出']
+    ['settings', '公共设置']
   ];
   for (const [view, title] of views) {
     if (view !== 'home') {
@@ -44,7 +45,8 @@ try {
       }
     }
     for (const [mode, label] of modes) {
-      await page.locator(mode === 'manual' ? '#featureManualButton' : '#featurePrincipleButton').click();
+      await page.locator('#featureManualButton').click();
+      if (mode === 'principle') await page.locator('[data-feature-help-mode="principle"]').click();
       assert.equal(await dialog.isVisible(), true);
       assert.equal(await dialog.getAttribute('data-view'), view);
       assert.equal(await dialog.getAttribute('data-mode'), mode);
@@ -52,7 +54,7 @@ try {
       assert.ok((await page.locator('#featureHelpBody').textContent()).length > 150, `${view} 应有具体内容`);
       await page.locator('#featureHelpClose').click();
       assert.equal(await dialog.isVisible(), false);
-      assert.equal(await page.locator(mode === 'manual' ? '#featureManualButton' : '#featurePrincipleButton').evaluate(el => el === document.activeElement), true);
+      assert.equal(await page.locator('#featureManualButton').evaluate(el => el === document.activeElement), true);
       checked.push(`${view}:${mode}`);
     }
     await page.locator('#featureManualButton').click();
@@ -65,16 +67,14 @@ try {
   for (const width of [1280, 760]) {
     await page.setViewportSize({ width, height: 850 });
     assert.equal(await page.locator('#featureManualButton').isVisible(), true);
-    assert.equal(await page.locator('#featurePrincipleButton').isVisible(), true);
     const layout = await page.evaluate(() => {
       const hero = document.querySelector('.hero').getBoundingClientRect();
       const a = document.querySelector('#featureManualButton').getBoundingClientRect();
-      const b = document.querySelector('#featurePrincipleButton').getBoundingClientRect();
-      return { heroRight: hero.right, heroLeft: hero.left, left: a.left, right: b.right, overlap: a.right > b.left, scroll: document.documentElement.scrollWidth, width: innerWidth };
+      return { heroRight: hero.right, heroLeft: hero.left, left: a.left, right: a.right, scroll: document.documentElement.scrollWidth, width: innerWidth };
     });
     assert.ok(layout.left >= layout.heroLeft && layout.right <= layout.heroRight + 1);
-    assert.equal(layout.overlap, false);
     assert.ok(layout.scroll <= layout.width + 1, '说明入口不应造成水平溢出');
+    await page.screenshot({path:path.join(output,`home-${width}.png`)});
     await page.locator('#featureManualButton').click();
     assert.ok(await page.locator('#featureHelpBody').evaluate(el => el.scrollHeight > 0));
     await page.locator('#featureHelpClose').click();

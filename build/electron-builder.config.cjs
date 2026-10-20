@@ -29,19 +29,21 @@ module.exports = {
   },
   files: [
     "desktop/**/*",
+    "!desktop/launcher/**/*",
+    "!desktop/modules/{module-manager,package-format,service-lifecycle,electron-lifecycle}.mjs",
     "!desktop/invoice-module/**/*",
     "core/**/*",
     "config.json",
     "package.json"
   ],
   extraResources: [
-    { from: "desktop/invoice-module", to: "invoice-module", filter: ["**/*", "!tests/**", "!**/__pycache__/**", "!.pytest_cache/**", "!**/*.pyc", "!config.yaml", "!output/**", "!数据/**", "!订单投放/**", "!日志/**", "!归档/**", "!README.md", "!使用说明.md", "!MIGRATION.md", "!build_*.py", "!*.spec", "!.gitignore"] },
     { from: "build/private/update-token.txt", to: "update-token.txt" },
     { from: "build/private/build-info.json", to: "build-info.json" }
   ],
   asar: true,
   npmRebuild: false,
   win: {
+    icon: "desktop/assets/lingtu-icon.png",
     target: [
       { target: "nsis", arch: ["x64"] },
       { target: "portable", arch: ["x64"] }

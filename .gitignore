@@ -9,6 +9,7 @@
 node_modules/
 dist/
 build/private/
+desktop/invoice-module/
 downloads/
 uploads/
 data/

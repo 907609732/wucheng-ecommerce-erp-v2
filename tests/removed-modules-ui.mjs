@@ -22,12 +22,12 @@ try {
   await page.locator('[data-setup-mode="standalone"]').click();
   await page.locator('#finishFirstRun').click();
   await page.locator('#firstRunSetup').waitFor({ state: 'hidden' });
-  assert.deepEqual(await page.locator('.feature-number').allTextContents(), ['01', '05', '06']);
+  assert.deepEqual(await page.locator('.feature-number').allTextContents(), ['01']);
   assert.equal(await page.locator('[data-view-panel="business"], [data-view-panel="finance"], [data-view-panel="purchase"]').count(), 0);
-  assert.deepEqual(await page.evaluate(() => Object.keys(window.inventoryApp).filter(name => /Finance|Business|Purchase/.test(name))), []);
+  assert.deepEqual(await page.evaluate(() => Object.keys(window.inventoryApp).filter(name => /Finance|Business|Purchase|Invoice|Pdd/.test(name))), []);
   fs.mkdirSync('dist/removal-verification', { recursive: true });
   await page.screenshot({ path: path.resolve('dist/removal-verification/home.png'), fullPage: true });
-  for (const view of ['dashboard', 'inventory', 'sales', 'invoice', 'pdd-monthly', 'settings']) {
+  for (const view of ['dashboard', 'inventory', 'sales', 'settings']) {
     if (['inventory', 'sales'].includes(view)) {
       await page.locator('[data-open-view="dashboard"]').click();
       await page.locator(`[data-view="${view}"]`).click();
@@ -42,7 +42,7 @@ try {
   const verify = new DatabaseSync(database, { readOnly: true });
   assert.equal(verify.prepare('SELECT amount FROM preserved_history WHERE id=?').get('retained-history').amount, 1234);
   verify.close();
-  console.log(JSON.stringify({ ok: true, checks: '打包客户端仅有01/05/06；被删接口不可用；全部保留页面及说明可打开；历史数据未变', directory }));
+  console.log(JSON.stringify({ ok: true, checks: '客户端仅有云仓；其他业务接口不存在；库存、销量、设置及说明可打开；云仓数据未变', directory }));
 } finally {
   if (application) { await application.evaluate(({ app }) => app.exit(0)).catch(() => {}); await application.close().catch(() => {}); }
 }

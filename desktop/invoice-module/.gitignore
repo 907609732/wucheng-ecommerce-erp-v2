@@ -1,9 +1,0 @@
-__pycache__/
-.pytest_cache/
-*.pyc
-config.yaml
-output/
-数据/
-订单投放/
-日志/
-归档/

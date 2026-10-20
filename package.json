@@ -1,12 +1,16 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.5.1",
+  "version": "0.7.1",
   "description": "本地优先、AI 可调用的云仓库存同步工具",
   "author": "五成电子商务集团",
   "private": true,
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {
+    "launcher": "electron desktop/launcher",
+    "launcher:build": "node scripts/build-launcher.mjs",
+    "test:modules": "node --test tests/module-manager.test.mjs",
+    "test:launcher": "node tests/launcher-ui.mjs",
     "desktop": "electron .",
     "ai:status": "electron . --cli status",
     "ai:doctor": "electron . --cli doctor",
@@ -22,30 +26,25 @@
     "sync:inventory:local": "node core/sync-cainiao-inventory.js",
     "sync:sales:monthly": "node core/sync-cainiao-monthly-sales.js",
     "sync:sales:backfill": "node core/backfill-cainiao-monthly-sales.js --from 2025-08 --to 2026-07",
-    "monthly:report": "node core/monthly-report.js",
     "test:core": "node --test tests/cainiao-export-controls.test.js tests/dingtalk-auth.test.js tests/dingtalk-app-robot.test.js tests/dingtalk-inventory-reminder.test.js tests/inventory-validation.test.js",
     "test:warehouse-sales": "node --test tests/warehouse-monthly-sales.test.js tests/monthly-sales-dashboard.test.js",
-    "test:pdd-monthly": "node --test tests/pdd-monthly-export.test.mjs tests/pdd-monthly-bridge.test.mjs tests/pdd-monthly-export-columns.test.mjs",
-    "test:pdd-monthly-ui": "node tests/pdd-monthly-ui.mjs && node tests/pdd-monthly-integration.mjs",
     "docs:features": "node scripts/export-feature-help.mjs",
     "test:feature-help": "node --test tests/feature-help-content.test.mjs && node tests/feature-help-ui.mjs",
     "test:desktop": "node --test tests/desktop-settings.test.js tests/desktop-ai-interface.test.js tests/desktop-inventory.test.js tests/desktop-task-process.test.js tests/desktop-remote-service.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.1.0",
-    "adm-zip": "^0.6.1",
     "axios": "^1.20.0",
     "dingtalk-stream": "^2.1.5",
     "dotenv": "^16.4.7",
     "echarts": "^6.1.0",
     "electron-updater": "^6.8.9",
-    "exceljs": "^4.4.0",
-    "fast-xml-parser": "^5.11.2",
     "fastify": "^5.12.5",
     "gridjs": "^6.2.0",
     "playwright": "^1.49.1",
-    "tabulator-tables": "^6.6.1",
+    "semver": "7.7.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yauzl": "3.4.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -53,11 +52,7 @@
     "@modelcontextprotocol/inspector": "^2.8.0",
     "@playwright/test": "^1.61.0",
     "electron": "44.4.5",
-    "electron-builder": "26.15.3"
-  },
-  "overrides": {
-    "exceljs": {
-      "uuid": "11.1.1"
-    }
+    "electron-builder": "26.15.3",
+    "yazl": "3.3.1"
   }
 }

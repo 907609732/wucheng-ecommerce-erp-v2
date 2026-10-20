@@ -45,6 +45,7 @@ export function createUpdater({ app, getToken, onState, log }) {
   });
 
   async function check({ automatic = false } = {}) {
+    if (process.env.LINGTU_MANAGED_MODULE === '1') return updateState({status:'managed',message:'请在启动台的扩展与设置中更新此模块'});
     if (!app.isPackaged) return updateState({ credentialAvailable: false, status: "development", message: "开发模式不检查更新" });
     const token = String((await getToken()) || process.env.GH_TOKEN || "").trim();
     updateState({ credentialAvailable: true });
@@ -65,6 +66,7 @@ export function createUpdater({ app, getToken, onState, log }) {
   }
 
   function install() {
+    if (process.env.LINGTU_MANAGED_MODULE === '1') throw new Error('请在启动台更新此模块');
     if (state.status !== "ready") throw new Error("尚无已下载的更新");
     autoUpdater.quitAndInstall(false, true);
     return { installing: true };

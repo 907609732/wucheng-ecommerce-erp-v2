@@ -37,31 +37,30 @@ jobs:
       - run: npm run ai:inspect:tools
       - run: npm run test:core
       - run: npm run test:warehouse-sales
-      - run: node --test tests/removed-modules.test.mjs tests/invoice*.test.mjs tests/pdd-invoice.test.mjs
-      - run: npm run test:pdd-monthly
-      - name: Build Windows release
+      - run: node --test tests/removed-modules.test.mjs tests/warehouse-cleanup.test.mjs
+      - run: npm run test:modules
+      - name: Require signed official module catalog
+        shell: pwsh
+        run: |
+          if (!(Test-Path desktop/launcher/catalog.json)) { throw "Publish signed module packages before the launcher" }
+      - name: Build pure launcher Windows release
+        run: npm run launcher:build
+      - name: Verify packaged launcher
         env:
-          CAINIAO_INTERNAL_UPDATE_TOKEN: ${{ secrets.CAINIAO_INTERNAL_UPDATE_TOKEN }}
-          CAINIAO_BUILD_CHANNEL: release
-        run: npm run desktop:build -- --publish never
-      - name: Verify removed modules are absent from package
-        run: node --test tests/packaged-modules.test.mjs
-      - name: Verify retained pages in packaged client
-        env:
-          REMOVAL_TEST_EXE: dist/win-unpacked/云仓库存同步.exe
-        run: node tests/removed-modules-ui.mjs
+          LAUNCHER_TEST_EXE: dist/launcher-release/win-unpacked/云仓库存同步.exe
+        run: npm run test:launcher
       - name: Publish complete GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = $env:GITHUB_REF_NAME
-          $version = node -p "require('./package.json').version"
+          $version = node -p "require('./desktop/launcher/package.json').version"
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --generate-notes --verify-tag
           }
-          $assets = Get-ChildItem dist -File | Where-Object {
+          $assets = Get-ChildItem dist/launcher-release -File | Where-Object {
             $_.Name -match '\.(exe|yml|blockmap)$'
           }
           foreach ($asset in $assets) {
@@ -82,6 +81,6 @@ jobs:
         with:
           name: windows-release
           path: |
-            dist/*.exe
-            dist/*.yml
-            dist/*.blockmap
+            dist/launcher-release/*.exe
+            dist/launcher-release/*.yml
+            dist/launcher-release/*.blockmap

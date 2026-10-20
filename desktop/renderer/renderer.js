@@ -581,16 +581,14 @@ async function refreshSettings() {
 }
 
 function navigateView(view) {
-  const titles = { home: '功能主页', dashboard: '云仓库存同步', inventory: '云仓库存同步', sales: '云仓库存同步', settings: '公共设置', invoice: '自动开发票', 'pdd-monthly': '拼多多采购订单导出' };
+  const titles = { home: '功能主页', dashboard: '云仓库存同步', inventory: '云仓库存同步', sales: '云仓库存同步', settings: '公共设置' };
   if (!titles[view]) return;
-  document.body.classList.toggle('pdd-monthly-open', view === 'pdd-monthly');
   document.querySelectorAll('.view-tab').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));
   document.querySelector('.view-tabs').classList.toggle('hidden', !['dashboard', 'inventory', 'sales'].includes(view));
   byId('backHome').classList.toggle('hidden', view === 'home');
   document.querySelector('h1').textContent = titles[view];
-  document.querySelector('.subtitle').textContent = view === 'home' ? '选择需要使用的功能。' : view === 'invoice' ? '开票申请采集、核对、模板准备与每日巡检' : view === 'settings' ? '管理运行模式、账号、同步计划与软件更新。' : '采集、校验并通过企业应用机器人发送到钉钉。';
-  if (view === 'pdd-monthly') document.querySelector('.subtitle').textContent = '拼多多买家订单 · 选择月份、独立读取并生成 Excel 表格';
+  document.querySelector('.subtitle').textContent = view === 'home' ? '选择需要使用的功能。' : view === 'settings' ? '管理运行模式、账号、同步计划与软件更新。' : '采集、校验并通过企业应用机器人发送到钉钉。';
   if (view !== 'settings') hideAllSecrets();
   if (view === 'inventory') loadInventory();
   if (view === 'sales') {
@@ -605,222 +603,6 @@ function navigateView(view) {
 document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.view)));
 document.querySelectorAll('[data-open-view]').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.openView)));
 byId('backHome').addEventListener('click', () => navigateView('home'));
-
-// 自动开发票：启动本机「电商自动开票助手」独立程序。
-function setInvoiceStatus(message, isError = false) {
-  const el = byId('invoiceStatus');
-  if (!el) return;
-  el.textContent = message;
-  el.classList.toggle('invoice-status-error', isError);
-}
-async function launchInvoice(kind, buttonId) {
-  const button = byId(buttonId);
-  if (!button) return;
-  const label = { assistant: '自动开票助手', watch: '每日开票巡检', legacy: '旧版开票台账' }[kind];
-  button.disabled = true;
-  setInvoiceStatus(`正在启动${label}…`);
-  try {
-    const result = kind === 'assistant' ? await api.launchInvoiceAssistant()
-      : kind === 'legacy' ? await api.launchInvoiceLegacy() : await api.launchInvoiceWatch();
-    setInvoiceStatus(`${result.label}已启动，请在独立窗口继续操作。`);
-  } catch (error) {
-    setInvoiceStatus(`启动失败：${error.message}`, true);
-  } finally {
-    button.disabled = false;
-  }
-}
-byId('invoiceLaunchAssistant')?.addEventListener('click', () => launchInvoice('assistant', 'invoiceLaunchAssistant'));
-byId('invoiceLaunchWatch')?.addEventListener('click', () => launchInvoice('watch', 'invoiceLaunchWatch'));
-byId('invoiceLaunchLegacy')?.addEventListener('click', () => launchInvoice('legacy', 'invoiceLaunchLegacy'));
-byId('invoiceOpenFolder')?.addEventListener('click', async () => {
-  try { await api.openInvoiceFolder(); } catch (error) { setInvoiceStatus(`打开目录失败：${error.message}`, true); }
-});
-
-let invoiceLogEntries = [];
-function renderInvoiceLogs() {
-  const el = byId('invoiceLogs');
-  if (!el) return;
-  el.textContent = invoiceLogEntries.length
-    ? invoiceLogEntries.map(item => `${formatCheckedAt(item.at)} [${item.level}] [${item.source}] ${item.message}`).join('\n')
-    : '暂无运行日志';
-  el.scrollTop = el.scrollHeight;
-}
-async function loadInvoiceLogs() {
-  try { invoiceLogEntries = await api.getInvoiceLogs(); renderInvoiceLogs(); }
-  catch (error) { setInvoiceStatus(`读取开票日志失败：${error.message}`, true); }
-}
-byId('invoiceRefreshLogs')?.addEventListener('click', () => void loadInvoiceLogs());
-byId('invoiceCopyLogs')?.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(byId('invoiceLogs')?.textContent || ''); setInvoiceStatus('日志已复制；发送给他人前请检查业务信息。'); }
-  catch (error) { setInvoiceStatus(`复制日志失败：${error.message}`, true); }
-});
-byId('invoiceOpenLogs')?.addEventListener('click', async () => {
-  try { await api.openInvoiceLogs(); } catch (error) { setInvoiceStatus(`打开日志目录失败：${error.message}`, true); }
-});
-api.onInvoiceLog?.(entry => { invoiceLogEntries.push(entry); invoiceLogEntries = invoiceLogEntries.slice(-300); renderInvoiceLogs(); });
-
-// 每日开票巡检：独立店铺、账号绑定、汇总表及定时设置。
-async function loadInvoiceShops() {
-  const list = byId('invoiceShopList');
-  const shops = await api.listInvoiceShops();
-  list.replaceChildren();
-  if (!shops.length) { list.textContent = '尚未添加开票店铺；不会读取销售额采集模块的店铺。'; return; }
-  for (const shop of shops) {
-    const row = document.createElement('div');
-    row.className = 'invoice-actions invoice-shop-row';
-    const badge = document.createElement('span');
-    badge.className = 'invoice-platform-badge';
-    const icon = document.createElement('span');
-    icon.className = 'invoice-platform-icon';
-    icon.dataset.platform = shop.platform === 'pdd' ? 'pdd' : 'taobao';
-    icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = shop.platform === 'pdd' ? '拼' : '淘';
-    const platformName = document.createElement('span');
-    platformName.textContent = shop.platform === 'pdd' ? '拼多多' : '淘宝';
-    badge.append(icon, platformName);
-    const label = document.createElement('span');
-    label.className = 'invoice-shop-identity';
-    label.textContent = `${shop.name} · ${shop.account ? `已绑定账号 ${shop.account}` : shop.identityMode === 'header' ? '已核对页面店铺名' : '待登录确认'}`;
-    row.append(badge, label);
-    for (const [title, action] of [['打开登录窗口', 'open'], ...(!shop.account && !shop.identityMode ? [['修改店铺名称', 'rename']] : []), ['确认当前登录账号', 'confirm'], ['只查此店发票', 'scan'], ['删除店铺', 'remove']]) {
-      const button = document.createElement('button');
-      button.type = 'button'; button.textContent = title;
-      button.dataset.invoiceShopAction = action; button.dataset.shopId = shop.id; button.dataset.shopPlatform = shop.platform || 'taobao';
-      row.append(button);
-    }
-    list.append(row);
-  }
-}
-byId('invoiceAddShop')?.addEventListener('click', async () => {
-  const input = byId('invoiceShopName');
-  try {
-    const platform = document.querySelector('input[name="invoiceShopPlatform"]:checked')?.value;
-    if (!platform) throw new Error('请先选择开票平台');
-    const shop = await api.addInvoiceShop(input.value, platform);
-    input.value = '';
-    byId('invoiceShopStatus').textContent = `已添加${shop.platform === 'pdd' ? '拼多多' : '淘宝'}店铺 ${shop.name}，请点击打开登录窗口。`;
-    await loadInvoiceShops();
-  } catch (error) { byId('invoiceShopStatus').textContent = `添加失败：${error.message}`; }
-});
-byId('invoiceShopList')?.addEventListener('click', async event => {
-  const button = event.target.closest('button[data-invoice-shop-action]');
-  if (!button) return;
-  const id = button.dataset.shopId;
-  button.disabled = true;
-  try {
-    if (button.dataset.invoiceShopAction === 'open') {
-      await api.openInvoiceShopLogin(id);
-      byId('invoiceShopStatus').textContent = `请在弹出的${button.dataset.shopPlatform === 'pdd' ? '拼多多' : '千牛'}窗口登录；完成后返回此处确认店铺。`;
-    } else if (button.dataset.invoiceShopAction === 'rename') {
-      const row = button.closest('.invoice-shop-row');
-      if (!row.querySelector('.invoice-shop-rename-input')) {
-        const input = document.createElement('input');
-        input.className = 'invoice-shop-rename-input';
-        input.setAttribute('aria-label', '修正开票店铺名称');
-        input.maxLength = 60;
-        input.value = row.querySelector('.invoice-shop-identity')?.textContent?.split(' · ')[0] || '';
-        row.insertBefore(input, button);
-        button.textContent = '保存名称';
-        input.focus(); input.select();
-        return;
-      } else {
-        const shop = await api.renameInvoiceShop(id, row.querySelector('.invoice-shop-rename-input').value);
-        byId('invoiceShopStatus').textContent = `已修改为 ${shop.name}；登录会话保留，请再点“确认当前登录账号”核对身份。`;
-      }
-    } else if (button.dataset.invoiceShopAction === 'confirm') {
-      const identity = await api.readInvoiceShopAccount(id);
-      const description = identity.mode === 'header' ? `${button.dataset.shopPlatform === 'pdd' ? '拼多多' : '千牛'}开票页右上角店铺：${identity.value}` : `当前千牛登录账号：${identity.value}`;
-      if (window.confirm(`${description}\n确认它属于所选开票店铺？`)) {
-        await api.confirmInvoiceShop(id, identity);
-        byId('invoiceShopStatus').textContent = '开票店铺身份已确认，可以立即巡检。';
-      }
-    } else if (button.dataset.invoiceShopAction === 'scan') {
-      setInvoiceInspectStatus('正在只查询所选店铺，请稍候…');
-      const summary = await api.scanInvoiceShop(id);
-      renderInvoiceInspectionTable(summary);
-      const result = summary.selected;
-      const detail = result.state === 'needs_login' ? `尚未确认登录身份：${result.message}`
-        : result.state === 'error' ? `结果未知：${result.message}`
-          : result.unrecorded_count === null ? `当前列表待开票 ${result.pending_count}（待录入不适用）`
-            : `待处理 ${result.pending_count}，待录入 ${result.unrecorded_count}（仅当前可见范围）`;
-      setInvoiceInspectStatus(`${result.shop}：${detail}。仅检查此店，未发送钉钉。`, result.state === 'needs_login' || result.state === 'error');
-    } else if (button.dataset.invoiceShopAction === 'remove') {
-      if (window.confirm('删除这个开票店铺及其独立登录会话？历史巡检记录保留。')) {
-        await api.removeInvoiceShop(id);
-        byId('invoiceShopStatus').textContent = '开票店铺已删除。';
-      }
-    }
-    await loadInvoiceShops();
-  } catch (error) {
-    if (button.dataset.invoiceShopAction === 'scan') setInvoiceInspectStatus(`单店查询失败：${error.message}`, true);
-    else byId('invoiceShopStatus').textContent = `操作失败：${error.message}`;
-  }
-  finally { button.disabled = false; }
-});
-
-// 每日开票巡检：汇总表、立即巡检、定时设置。
-const invoiceStateLabels = { attention: '有待核对申请', clear: '范围内无申请', partial: '仅部分范围', error: '检查失败', needs_login: '需要登录' };
-function escHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function formatCheckedAt(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('zh-CN', { hour12: false }); }
-function setInvoiceInspectStatus(message, isError = false) {
-  const el = byId('invoiceInspectStatus');
-  if (!el) return;
-  el.textContent = message;
-  el.classList.toggle('invoice-status-error', isError);
-}
-function renderInvoiceInspectionTable(summary) {
-  const el = byId('invoiceInspectTable');
-  if (!el) return;
-  const shops = summary?.shops || [];
-  if (!shops.length) { el.innerHTML = '<p class="module-note">尚无巡检记录，不能视为没有待开票申请。</p>'; return; }
-  const rows = shops.map(s => {
-    const known = s.state === 'attention' || s.state === 'clear' || s.state === 'partial';
-    const bad = s.state === 'error' || s.state === 'needs_login';
-    return `<tr><td>${escHtml(s.shop)}</td><td>${known ? s.pending_count : '未知'}</td><td>${known ? (s.unrecorded_count === null ? '不适用' : s.unrecorded_count) : '未知'}</td><td class="${bad ? 'bad' : ''}">${invoiceStateLabels[s.state] || s.state}</td><td>${escHtml(formatCheckedAt(s.checked_at))}</td></tr>`;
-  }).join('');
-  el.innerHTML = `<table class="invoice-inspect-table"><thead><tr><th>店铺</th><th>待处理申请</th><th>待录入开票</th><th>状态</th><th>检查时间</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>合计（已核实店铺）</td><td>${summary.total_pending}</td><td>${summary.total_unrecorded}</td><td colspan="2">共 ${shops.length} 家店铺</td></tr></tfoot></table>`;
-}
-async function loadInvoiceInspection() {
-  try { await loadInvoiceShops(); }
-  catch (error) { byId('invoiceShopStatus').textContent = `读取开票店铺失败：${error.message}`; }
-  try {
-    const summary = await api.getInvoiceInspectionSummary();
-    renderInvoiceInspectionTable(summary);
-  } catch (error) { setInvoiceInspectStatus(`读取巡检记录失败：${error.message}`, true); }
-  try {
-    const schedule = await api.getInvoiceInspectionSchedule();
-    if (schedule) {
-      byId('invoiceInspectTime').value = schedule.time || '20:00';
-      byId('invoiceInspectEnabled').checked = schedule.enabled !== false;
-      setInvoiceInspectStatus(schedule.enabled === false ? '每日巡检已暂停。' : `每天 ${schedule.time} 自动巡检（北京时间），需保持本软件运行、平台账号已登录并联网。`);
-    }
-  } catch (error) { setInvoiceInspectStatus(`读取定时设置失败：${error.message}`, true); }
-}
-byId('invoiceInspectNow')?.addEventListener('click', async () => {
-  const button = byId('invoiceInspectNow');
-  button.disabled = true;
-  setInvoiceInspectStatus('正在逐店读取平台开票页数量，请稍候（不要切换店铺）…');
-  try {
-    const summary = await api.scanInvoiceInspectionNow();
-    renderInvoiceInspectionTable(summary);
-    const known = summary.shops.filter(s => ['attention', 'clear', 'partial'].includes(s.state)).length;
-    const unknown = summary.shops.length - known;
-    const detail = `巡检完成：已识别 ${known} 家${unknown ? `，${unknown} 家结果未知` : ''}；已识别范围待处理 ${summary.total_pending}，待录入 ${summary.total_unrecorded}。`;
-    setInvoiceInspectStatus(summary.notification?.sent ? `${detail} 钉钉群提醒已发送。` : `${detail} 钉钉群提醒未发送：${summary.notification?.error || '请查看开票运行日志'}`, !summary.notification?.sent);
-  } catch (error) {
-    setInvoiceInspectStatus(`巡检失败：${error.message}`, true);
-  } finally { button.disabled = false; }
-});
-byId('invoiceInspectSave')?.addEventListener('click', async () => {
-  const value = { enabled: byId('invoiceInspectEnabled')?.checked, time: byId('invoiceInspectTime')?.value };
-  try {
-    const schedule = await api.saveInvoiceInspectionSchedule(value);
-    setInvoiceInspectStatus(schedule.enabled === false ? '已保存：每日巡检已暂停。' : `已保存：每天 ${schedule.time} 自动巡检（北京时间）。`);
-  } catch (error) { setInvoiceInspectStatus(`保存失败：${error.message}`, true); }
-});
-byId('invoiceInspectRefresh')?.addEventListener('click', () => void loadInvoiceInspection());
-api.onInvoiceInspectionChanged?.(summary => renderInvoiceInspectionTable(summary));
-window.addEventListener('erp:view', event => { if (event.detail === 'invoice') { void loadInvoiceInspection(); void loadInvoiceLogs(); } });
 
 document.querySelectorAll("[data-sales-scope]").forEach((button) => button.addEventListener("click", () => {
   monthlySalesScope = button.dataset.salesScope;
@@ -1013,4 +795,10 @@ window.addEventListener("resize", () => {
   monthlySalesChart?.resize();
   annualSalesChart?.resize();
 });
-load().catch((error) => appendLog({ line: `初始化失败：${error.message}` }));
+load().then(() => {
+  if (new URLSearchParams(location.search).get('module') === 'warehouse') {
+    navigateView('dashboard');
+    byId('backHome').textContent='返回启动台';
+    byId('backHome').addEventListener('click',event=>{event.stopImmediatePropagation();window.close();},true);
+  }
+}).catch((error) => appendLog({ line: `初始化失败：${error.message}` }));

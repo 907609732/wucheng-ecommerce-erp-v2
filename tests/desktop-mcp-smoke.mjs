@@ -66,7 +66,7 @@ try {
   const extensionResponse = await client.callTool({ name: "inventory_extension_list", arguments: {} });
   if (extensionResponse.isError) throw new Error("MCP 扩展发现失败");
   const extensionList = JSON.parse(extensionResponse.content?.find((item) => item.type === "text")?.text || "{}");
-  if (extensionList.extensions?.[0]?.id !== "smoke.extension" || extensionList.extensions?.[0]?.trusted !== true) {
+  if (extensionList.extensions?.find(e=>e.id==="smoke.extension")?.trusted !== true || extensionList.extensions?.find(e=>e.id==="lingtu.desks")?.trusted !== true) {
     throw new Error("MCP 扩展信任状态异常");
   }
   const extensionCall = await client.callTool({
