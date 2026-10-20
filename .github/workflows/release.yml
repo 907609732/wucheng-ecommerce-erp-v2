@@ -61,10 +61,16 @@ jobs:
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --generate-notes --verify-tag
           }
           $assets = Get-ChildItem dist/launcher-release -File | Where-Object {
-            $_.Name -match '\.(exe|yml|blockmap)$'
+            $_.Name -match '\.(exe|yml|blockmap)$' -and $_.Name -ne 'builder-debug.yml'
           }
+          $existingAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
           foreach ($asset in $assets) {
-            gh release upload $tag $asset.FullName --repo $env:GITHUB_REPOSITORY --clobber
+            # Keep locally verified release files immutable when this tag was
+            # created by the local module publication workflow.
+            if ($existingAssets -notcontains $asset.Name) {
+              gh release upload $tag $asset.FullName --repo $env:GITHUB_REPOSITORY
+              if ($LASTEXITCODE -ne 0) { throw "Release upload failed: $($asset.Name)" }
+            }
           }
           $remoteAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
           foreach ($required in @(

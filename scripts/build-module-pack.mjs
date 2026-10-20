@@ -34,6 +34,12 @@ try {
       if (/\.(?:sqlite(?:-wal|-shm)?|db|pfx|pem|key)$/i.test(file)) throw Error('Prebuilt package contains private data');
       return true;
     }});
+    // NSIS detects running launchers by executable name. Give the background
+    // cloud process its own image name so a launcher upgrade cannot terminate it.
+    if(id==='warehouse'&&entry!=='LingtuWarehouseModule.exe'){
+      fs.renameSync(path.join(stage,entry),path.join(stage,'LingtuWarehouseModule.exe'));
+      entry='LingtuWarehouseModule.exe';
+    }
   } else if (id === 'node-runtime') {
     const exe = values['node-exe'] || path.join(workspace, 'node.exe');
     const result = spawnSync(exe, ['--version'], {encoding: 'utf8', windowsHide: true});

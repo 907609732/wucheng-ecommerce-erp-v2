@@ -20,6 +20,7 @@ const manager=new ModuleManager({root:path.join(profile,'modules'),hostVersion:'
 const options={services,dataRoot:path.join(profile,'module-data'),backupRoot:path.join(profile,'module-backups'),getInstalled:id=>manager.state().packages[id]};
 manager.lifecycle=withElectronLifecycle(createServiceLifecycle(options),options);
 manager.setCatalog(JSON.parse(fs.readFileSync('dist/modules/catalog.json','utf8')));
+if(process.argv.includes('--reinstall-warehouse'))await manager.uninstall('warehouse');
 for(const id of ['warehouse','purchase','sales','overview','exporter'])await manager.install(id,{offlineDirectory:path.resolve('dist/modules')});
 const result={ok:true,packages:manager.list().filter(x=>x.installed).map(x=>({id:x.id,version:x.installed.version})),
   services:(await services.status({includeWarehouse:true})).map(({extension,status,version,busy})=>({extension,status,version,busy})),completedAt:new Date().toISOString()};

@@ -37,7 +37,10 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       const config=services.config(id),registry=readRegistry(services.registryFile);
       if(registry[id]&&config.allowInitialize!==true&&!fs.existsSync(config.dataDir))throw fail('MISSING_LEDGER','原数据目录不存在，已阻止创建空数据');
       await stop(id);
-      if(process.platform==='win32'){
+      // On a first launcher installation the historical cloud executable path
+      // points to this launcher itself. It is not a legacy cloud worker.
+      const isLauncher=id==='warehouse'&&path.resolve(config.exe).toLowerCase()===path.resolve(process.execPath).toLowerCase();
+      if(process.platform==='win32'&&!isLauncher){
         const probe=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',
           '@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:LINGTU_CHECK_EXE }).Count'],
           {env:{...process.env,LINGTU_CHECK_EXE:config.exe},encoding:'utf8',windowsHide:true,timeout:15000});
