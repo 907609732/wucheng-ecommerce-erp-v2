@@ -1,18 +1,21 @@
+param([ValidateSet('offline','online')][string]$Mode='offline')
 $ErrorActionPreference = 'Stop'
 $root = (Get-Location).Path
-$kit = Join-Path $root 'dist\sandbox-kit'
-$results = Join-Path $root 'dist\module-verification\sandbox-offline'
+$kit = Join-Path $root $(if ($Mode -eq 'offline') { 'dist\sandbox-kit' } else { 'dist\sandbox-online-kit' })
+$results = Join-Path $root "dist\module-verification\sandbox-$Mode"
 $inputFolder = Join-Path $root 'dist\launcher-release'
 New-Item -ItemType Directory -Force -Path $kit,$results | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'tests\sandbox-driver.mjs') -Destination $kit
+$Mode | Set-Content -LiteralPath (Join-Path $kit 'mode.txt') -Encoding ascii
 Get-Content -LiteralPath (Join-Path $root 'tests\sandbox-bootstrap.ps1') -Raw -Encoding utf8 | Set-Content -LiteralPath (Join-Path $kit 'sandbox-bootstrap.ps1') -Encoding utf8BOM
 $xmlInput = [Security.SecurityElement]::Escape($inputFolder)
 $xmlKit = [Security.SecurityElement]::Escape($kit)
 $xmlResults = [Security.SecurityElement]::Escape($results)
+$network = if ($Mode -eq 'online') { 'Enable' } else { 'Disable' }
 $configuration = @"
 <Configuration>
   <VGpu>Disable</VGpu>
-  <Networking>Disable</Networking>
+  <Networking>$network</Networking>
   <MemoryInMB>3072</MemoryInMB>
   <AudioInput>Disable</AudioInput>
   <ClipboardRedirection>Disable</ClipboardRedirection>
@@ -24,6 +27,6 @@ $configuration = @"
   <LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Kit\sandbox-bootstrap.ps1</Command></LogonCommand>
 </Configuration>
 "@
-$configPath = Join-Path $kit 'offline-acceptance.wsb'
+$configPath = Join-Path $kit "$Mode-acceptance.wsb"
 [IO.File]::WriteAllText($configPath,$configuration,[Text.UTF8Encoding]::new($false))
 Write-Output $configPath

@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 const output=process.argv[2]||'C:\\Results';
+const online=process.argv[3]==='online';
 const mark=phase=>fs.appendFileSync(path.join(output,'progress.log'),new Date().toISOString()+' '+phase+'\n');
 const installed=path.dirname(process.execPath),asar=path.join(installed,'resources','app.asar');
 const load=relative=>import(pathToFileURL(path.join(asar,relative)));
@@ -14,7 +15,7 @@ const {withElectronLifecycle}=await load('desktop/modules/electron-lifecycle.mjs
 const profile=path.join(process.env.APPDATA,'wucheng-ecommerce-erp-v2');
 const registryFile=path.join(process.env.APPDATA,'LingtuIntegrations','registry.json');
 const services=new ServiceManager({registryFile});
-const evidence={environment:'Windows Sandbox',networking:'disabled by WSB configuration',
+const evidence={environment:'Windows Sandbox',networking:online?'enabled, public GitHub downloads':'disabled by WSB configuration',
   noSystemNode:spawnSync('where.exe',['node'],{windowsHide:true}).status!==0,
   noBrowserCache:!fs.existsSync(path.join(process.env.LOCALAPPDATA,'ms-playwright')),
   noBusinessSource:!fs.existsSync(path.join(process.env.USERPROFILE,'Documents','ChatGPT')),
@@ -22,17 +23,23 @@ const evidence={environment:'Windows Sandbox',networking:'disabled by WSB config
 assert.ok(evidence.noSystemNode&&evidence.noBrowserCache&&evidence.noBusinessSource&&evidence.initialModules);
 const manager=new ModuleManager({root:path.join(profile,'modules'),hostVersion:'0.8.0',
   publicKeys:JSON.parse(fs.readFileSync(path.join(asar,'desktop/launcher/public-keys.json'),'utf8')),
-  fetchImpl:()=>{throw Error('Offline acceptance forbids downloads');},
+  ...(online?{}:{fetchImpl:()=>{throw Error('Offline acceptance forbids downloads');}}),
   onProgress:p=>{if(['queued','activating','installed','error'].includes(p.phase))mark(p.id+' '+p.phase+(p.error?' '+p.error:''));}});
 const options={services,dataRoot:path.join(profile,'module-data'),backupRoot:path.join(profile,'module-backups'),getInstalled:id=>manager.state().packages[id]};
 manager.lifecycle=withElectronLifecycle(createServiceLifecycle(options),options);
 let browser,app;
 try{
-  mark('verifying complete offline bundle');
-  const bundle=await manager.inspectOffline('C:\\Bundle\\LingtuModules-Complete-Offline.zip');
-  assert.equal(bundle.packages.length,7);
+  mark(online?'loading public module catalog':'verifying complete offline bundle');
+  let bundle;
+  if(online){
+    const response=await fetch('https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/modules-stable/catalog.json');
+    assert.equal(response.status,200);manager.setCatalog(await response.json());
+  }else{
+    bundle=await manager.inspectOffline('C:\\Bundle\\LingtuModules-Complete-Offline.zip');
+    assert.equal(bundle.packages.length,7);
+  }
   for(const id of ['overview','purchase','sales','warehouse','exporter']){
-    await manager.installOffline(bundle.token,id);
+    if(online)await manager.install(id);else await manager.installOffline(bundle.token,id);
     const c=await services.capabilities(id);assert.equal(c.maintenance,false);
     evidence.modules.push({id,version:c.version,healthy:true});
     if(id==='overview'){
@@ -68,7 +75,7 @@ try{
   const pid=app.process().pid;
   await Promise.race([app.close(),new Promise(r=>setTimeout(r,5000))]);
   let alive=true;try{process.kill(pid,0);}catch{alive=false;}assert.equal(alive,false);app=null;
-  await manager.discardOffline(bundle.token);
+  if(bundle)await manager.discardOffline(bundle.token);
   evidence.ok=true;
   fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(evidence,null,2));mark('PASS');
 }catch(error){

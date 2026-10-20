@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import fs from './native-fs.mjs';
 import path from 'node:path';
 import {createHash, verify} from 'node:crypto';
 import {pipeline} from 'node:stream/promises';

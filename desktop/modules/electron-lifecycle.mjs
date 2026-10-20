@@ -42,7 +42,7 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       const isLauncher=id==='warehouse'&&path.resolve(config.exe).toLowerCase()===path.resolve(process.execPath).toLowerCase();
       if(process.platform==='win32'&&!isLauncher){
         const probe=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',
-          '@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:LINGTU_CHECK_EXE }).Count'],
+          "$ErrorActionPreference='Stop'; @(Get-Process | Where-Object { $_.Path -eq $env:LINGTU_CHECK_EXE }).Count"],
           {env:{...process.env,LINGTU_CHECK_EXE:config.exe},encoding:'utf8',windowsHide:true,timeout:15000});
         if(probe.status!==0)throw fail('PROCESS_CHECK_FAILED','无法确认旧模块已退出');
         if(Number(probe.stdout.trim())>0)throw fail('LEGACY_APP_RUNNING','旧版窗口仍在运行，请退出对应软件后重试安装');

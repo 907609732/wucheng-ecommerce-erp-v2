@@ -34,6 +34,8 @@ jobs:
         run: node node_modules/electron/install.js
       - run: npm run test:desktop
       - run: npm run test:modules
+      - run: node tests/electron-package-extraction.mjs
+      - run: node tests/electron-process-guard.mjs
       - run: npm run test:launcher
       - run: node tests/desktop-mcp-smoke.mjs
       - run: npm run ai:inspect:tools
