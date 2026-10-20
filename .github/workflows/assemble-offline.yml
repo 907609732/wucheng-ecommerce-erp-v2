@@ -1,0 +1,34 @@
+name: Assemble verified offline bundle
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Download existing verified release files
+        shell: pwsh
+        run: |
+          $draft = gh release view v0.8.0 --json isDraft --jq '.isDraft'
+          if ($draft -ne 'true') { throw 'Only an unpublished draft can be assembled' }
+          New-Item -ItemType Directory -Force dist/modules,dist/launcher-release | Out-Null
+          gh release download modules-0.8.0 --pattern '*.zip' --pattern 'catalog.json' --dir dist/modules
+          if ($LASTEXITCODE -ne 0) { throw 'Module download failed' }
+          gh release download v0.8.0 --pattern '*.exe' --pattern '*.blockmap' --pattern 'latest.yml' --pattern 'SHA256SUMS.txt' --dir dist/launcher-release
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher download failed' }
+          if (!(Test-Path dist/launcher-release/CloudWarehouseInventorySync-Setup-0.8.0-x64.exe)) { throw 'Verified installer must be uploaded first' }
+          if (!(Test-Path dist/launcher-release/CloudWarehouseInventorySync-Portable-0.8.0-x64.exe)) { throw 'Verified portable must be uploaded first' }
+      - run: node scripts/assemble-published-offline.mjs
+      - run: node scripts/build-complete-offline.mjs
+      - run: node tests/complete-offline.mjs
+      - name: Upload assembled draft assets
+        run: gh release upload v0.8.0 dist/launcher-release/Lingtu-0.8.0-Complete-Offline-Windows-x64.zip dist/launcher-release/SHA256SUMS.txt --clobber
