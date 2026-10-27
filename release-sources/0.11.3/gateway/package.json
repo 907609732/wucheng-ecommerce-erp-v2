@@ -1,0 +1,11 @@
+{
+  "name": "lingtu-workbench-gateway",
+  "version": "0.11.2",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fastify": "5.12.5",
+    "@fastify/reply-from": "12.8.0",
+    "@fastify/cookie": "11.1.3"
+  }
+}

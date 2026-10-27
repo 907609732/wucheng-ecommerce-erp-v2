@@ -1,0 +1,6 @@
+{
+  "name": "wucheng-ecommerce-erp-v2",
+  "version": "0.11.3",
+  "type": "module",
+  "main": "main.mjs"
+}

@@ -1,0 +1,49 @@
+{
+  "format": "lingtu-purchase-only-update/v1",
+  "baselineVersion": "0.11.2",
+  "baselineAsarSha256": "411d06065c3c55414d8b0bbf2cfef9bbde2d14d4b7eab489fcae65d0ee976d2b",
+  "baselineCatalogSha256": "c23e85cf09cb3ebf51f794ad500b98eb8822f0fb456e70856c4cff58473d8c02",
+  "changedComponents": [
+    "purchase"
+  ],
+  "retained": [
+    {
+      "id": "browser-runtime",
+      "version": "1.61.0",
+      "sha256": "bd232bc724d4e4d30c17e93a3a84cecb11aee52a349fec894e96b2d1c6a7e898"
+    },
+    {
+      "id": "exporter",
+      "version": "0.4.0",
+      "sha256": "5e16fb7eca15a96e442a5abf16d14c4f73bbc2b36a86168a7118200f4488f1c3"
+    },
+    {
+      "id": "node-runtime",
+      "version": "24.18.0",
+      "sha256": "bc092d16d77ed7aad91e907a223b22820353ac63182822f38bf65b56541b2022"
+    },
+    {
+      "id": "overview",
+      "version": "1.6.0",
+      "sha256": "b9361f19ca99752c69ee8d2087f52a989394413c0ce26e73f2fabe274178ba02"
+    },
+    {
+      "id": "sales",
+      "version": "0.4.1",
+      "sha256": "725284a31f664796f1865015d7fbc16e60458aa88428c630eb54e1077bf64a6f"
+    },
+    {
+      "id": "warehouse",
+      "version": "0.9.0",
+      "sha256": "81a0a3bf1b866345c08b0a70e516d310bcfcc52b8ca367d876c7689458fb7a4a"
+    }
+  ],
+  "source": "installed verified artifacts; no concurrent unrelated workspace changes",
+  "launcherChanges": [
+    "desktop/launcher/catalog.json",
+    "desktop/launcher/package.json",
+    "package.json"
+  ],
+  "installedApplicationVersion": "0.11.2",
+  "launcherFirstPartyFilesVerified": 112
+}

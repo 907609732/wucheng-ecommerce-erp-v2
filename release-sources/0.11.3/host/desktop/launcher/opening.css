@@ -1,0 +1,34 @@
+.openingStatus {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 330px;
+  max-width: calc(100vw - 32px);
+  padding: 22px 26px;
+  border: 1px solid #cde3f2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 55px #18334a30;
+  pointer-events: none;
+}
+.openingStatus strong { display: block; font-size: 17px; color: #18334a; }
+.openingStatus p { margin: 6px 0; color: #46617a; }
+.openingStatus small { color: #7891a4; }
+.openingSpinner {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 3px solid #d5eaf6;
+  border-top-color: #177dc0;
+  border-radius: 50%;
+  animation: openingSpin .8s linear infinite;
+}
+@keyframes openingSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .openingSpinner { animation: none; border-color: #177dc0; }
+}

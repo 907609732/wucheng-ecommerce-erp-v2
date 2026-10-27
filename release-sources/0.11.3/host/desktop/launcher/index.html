@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>五成电子商务工作台</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="opening.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="../assets/lingtu-icon.png" alt=""><div><strong>五成电子商务工作台</strong><span>灵兔 · 按需扩展</span></div></div>
+    <div class="headerTools"><div id="personnelHeader" class="personnelHeader" hidden><span id="personnelLabel"></span><button id="personnelChange">重新选择身份</button></div><span id="connectionIndicator" class="connectionIndicator" data-state="checking" role="status" aria-live="polite">正在检查连接…</span><nav hidden><button id="home">首页</button><button id="logs">日志</button><button id="settings" hidden>扩展与设置</button><button id="help" hidden>使用说明</button></nav></div>
+  </header>
+  <aside id="toast" class="toast" aria-label="操作提示"><p id="message" role="status" aria-live="polite"></p><button id="messageClose" aria-label="关闭提示" title="关闭提示">×</button></aside>
+  <main id="personnelPanel" class="personnelPanel">
+    <div class="personnelIntro"><span class="eyebrow">开始工作</span><h1>这次以什么身份使用？</h1><p>选好身份，再进入工作台。无需注册或输入密码。</p></div>
+    <section class="personnelCards" aria-label="选择本次使用身份">
+      <button id="personnelBoss" class="personnelCard" data-role="boss"><span class="personnelSymbol" aria-hidden="true">主</span><strong>老板</strong><span>查看经营结果，核对销售资金和月报。</span><span class="personnelCardAction">以老板身份进入 →</span></button>
+      <button id="personnelEmployee" class="personnelCard" data-role="employee"><span class="personnelSymbol" aria-hidden="true">工</span><strong>员工</strong><span>按照月度任务，逐项整理和补齐销售资料。</span><span class="personnelCardAction">以员工身份进入 →</span></button>
+    </section>
+    <p id="personnelStatus" class="personnelHint" role="status" aria-live="polite">每次重新启动工作台时选择，也可以在右上角重新选择。</p>
+  </main>
+  <main id="homePanel" hidden>
+    <div class="intro"><div><span class="eyebrow">工作台</span><h1>今天的工作</h1></div><p>选择需要的模块。独立运行，本地保存，随时回来继续。</p></div>
+    <section id="cards" class="cards" aria-label="业务模块"></section>
+    <p class="hint">功能与运行环境随工作台一起提供；业务数据独立保存在原位置。</p>
+  </main>
+  <main id="settingsPanel" hidden>
+    <div class="sectionHeading"><div><h1>扩展与设置</h1><p>连接、模块和服务，统一管理。</p></div><div class="actions" hidden><button id="refresh">检查扩展更新</button><button id="offline">导入离线包</button></div></div>
+    <section id="connectionSettings" class="connectionCard" aria-label="统一连接">
+      <div class="connectionOverview"><strong>统一连接</strong><p id="connectionStatus" data-state="checking" role="status" aria-live="polite">正在检查连接…</p></div>
+      <p id="connectionDetails">检查结果会持续显示，并每 10 秒自动刷新。</p>
+      <div class="connectionBody"><div class="connectionFields"><label>运行方式<select id="connectionMode"><option value="standalone">单机</option><option value="server">主服务器</option><option value="client">客户端</option></select></label><label id="networkProviderLabel" hidden>连接方式<select id="networkProvider"><option value="embedded">内置私网连接（推荐）</option><option value="system">现有 Tailscale 客户端</option></select></label><label class="serverField">服务器地址<input id="serverUrl" type="url" placeholder="https://设备名.私网名.ts.net:8443" autocomplete="off"></label></div><div class="actions connectionActions"><button id="checkConnection">检查连接</button><button id="saveConnection" class="primary">保存并连接</button><details class="moduleMore"><summary aria-label="连接的更多操作">更多</summary><div class="moreActions"><button id="migrationOpen">旧账本迁移</button></div></details></div></div>
+      <p id="migrationStatus"></p>
+    </section>
+    <section class="moduleRow" id="privateNetworkPanel" hidden><div><strong>内置私网连接</strong><p id="privateNetworkStatus" role="status" aria-live="polite">首次使用请登录私网。</p><p>首次在官方登录页完成授权，之后打开工作台自动连接。客户端账本仍以主服务器为准。</p></div><div class="actions"><button id="privateNetworkLogin" class="primary">登录私网</button><button id="privateNetworkConnect">重新连接</button><button id="privateNetworkLogout">退出私网账号</button></div></section>
+    <div class="sectionLabel"><h2>功能状态</h2><p>随工作台统一更新，数据独立保存</p></div>
+    <section id="moduleList" aria-label="业务扩展列表"></section>
+    <details id="runtimeSettings" class="settingsFold"><summary><strong>运行环境</strong><span>随工作台提供的共享组件</span></summary><section id="runtimeList" aria-label="运行环境列表"></section></details>
+    <details id="advancedSettings" class="settingsFold"><summary><strong>更多设置</strong><span>启动、AI 接入、权限与后台服务</span></summary><div class="advancedContent">
+      <section class="moduleRow" id="startupSettings"><div><strong>启动与后台</strong><p>关闭窗口后留在托盘，业务后台继续运行。</p></div><label class="toggleLabel"><input id="startAtLogin" type="checkbox">登录 Windows 时启动工作台</label></section>
+      <section class="moduleRow" id="aiSettings"><div><strong>MCP 与 CLI</strong><p>全部业务共用工作台连接与权限；正式写入仍需确认。</p><details class="pathDetails"><summary>查看本机配置</summary><pre id="integrationConfig"></pre></details></div><div class="actions"><button id="copyMcp">复制 MCP 配置</button><button id="copyCli">复制 CLI 配置</button></div></section>
+      <section class="moduleRow" id="permissionSettings"><div><strong>成员权限</strong><p>按独立 Tailscale 身份授权，保存后生效。</p></div><button id="permissionsOpen">管理成员</button></section>
+      <section class="moduleRow"><div><strong id="workbenchVersion">工作台</strong><p id="hostUpdateStatus">全部功能随工作台统一更新。</p></div><div class="actions"><button id="hostUpdate">检查工作台更新</button><button id="hostInstall" class="primary" hidden>安装工作台更新</button></div></section>
+      <section class="moduleRow" aria-label="项目链接"><div><strong>项目链接</strong><p>源码、版本发布与灵兔官网。</p></div><div class="actions"><button id="openRepository" title="在浏览器中打开 GitHub 仓库">GitHub 仓库 ↗</button><button id="openWebsite" title="在浏览器中打开灵兔官网">灵兔官网 ↗</button></div></section>
+      <section class="serviceSection"><div class="sectionLabel"><h2>后台服务</h2><button id="serviceRefresh">刷新服务状态</button></div><div id="serviceList"></div></section>
+    </div></details>
+  </main>
+  <main id="logsPanel" hidden>
+    <div class="sectionHeading"><div><h1>日志与诊断</h1><p>查看最近发生的问题，复制日志或导出本地报告。</p></div><button id="logsBack">返回首页</button></div>
+    <section class="logCard"><div class="logTools"><label>模块<select id="logSource"><option value="all">全部模块</option><option value="workbench">工作台</option><option value="warehouse">云仓同步</option><option value="purchase">采购台</option><option value="sales">销售台</option><option value="overview">经营总览</option><option value="exporter">订单导出台</option><option value="gateway">业务网关</option><option value="network">私网连接</option></select></label><label>级别<select id="logLevel"><option value="any">全部级别</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select></label><input id="logQuery" placeholder="搜索错误码或关键词" aria-label="日志关键词" maxlength="100"><button id="logRefresh" class="primary">刷新日志</button><label class="toggleLabel"><input type="checkbox" id="logAuto">自动刷新</label></div>
+    <div class="logActions"><button id="logCopy">复制当前结果</button><button id="logExport">导出诊断报告</button><button id="logFolder">打开日志目录</button></div>
+    <p id="logStatus" role="status" aria-live="polite"></p><p id="logIssue" role="alert"></p><div id="logEntries" class="logEntries" aria-label="日志内容" tabindex="0"></div>
+    <p class="logPrivacy">常见凭据与本机路径已隐藏。报告只保存在你选择的位置，不自动上传；分享前请核对业务信息。旧业务模块显示现有日志，未启用日志的模块可能没有记录。</p></section>
+  </main>
+  <main id="deskPanel" hidden><div class="deskHeading"><button id="back">← 返回首页</button><strong id="deskTitle"></strong><span>页面切换后保留当前状态</span></div><div id="extensionFrame"></div></main>
+  <main id="cachePanel" hidden><button id="cacheBack">← 返回首页</button><h1>离线只读快照</h1><p id="cacheStatus"></p><p>当前不能提交、确认导入或执行采集。恢复连接后重新打开模块。</p><pre id="cacheData"></pre></main>
+  <div id="openingStatus" class="openingStatus" role="status" aria-live="polite" hidden>
+    <span class="openingSpinner" aria-hidden="true"></span>
+    <div><strong id="openingTitle"></strong><p>正在检查后台服务并加载页面，请稍候。</p><small id="openingSeconds" aria-hidden="true"></small></div>
+  </div>
+  <dialog id="installDialog">
+    <h2 id="installTitle"></h2><p id="installSummary"></p><ul id="dependencies"></ul>
+    <p>程序包不包含其他用户的数据，账本保存在本机。</p>
+    <footer><button id="dismissInstall">暂不下载</button><button id="confirmInstall" class="primary">下载并安装</button></footer>
+  </dialog>
+  <dialog id="helpDialog"><h2>使用说明</h2><p>首页直接打开业务功能，程序和运行环境随工作台统一提供。</p><p>经营收支总览位于首页「每月填写」第一项，独立于销售台。采购台左侧可打开历史订单导入。</p><p>在设置中统一检查并安装工作台更新。有采集、导入或保存任务时不能更新或停止服务。关闭工作台后，已启动的后台继续运行。</p><p>点击窗口关闭按钮后工作台留在托盘；从托盘可重新打开或退出，业务后台继续运行。重新安装工作台会继续接入原数据。</p><button id="closeHelp">知道了</button></dialog>
+  <dialog id="migrationDialog">
+    <h2 id="migrationTitle">旧账本安全迁移</h2><p id="migrationHint">将本机业务资料备份并上传到主服务器隔离暂存区。登录资料与密钥留在原电脑。</p>
+    <div class="actions"><button id="migrationStage">准备本机资料</button><input id="migrationBatchId" placeholder="已有迁移批次 ID"><button id="migrationRead">读取批次</button><button id="migrationList">待核对批次</button><button id="migrationRelease">取消来源封存准备</button></div>
+    <div id="migrationBatches"></div><div id="migrationRows"></div><pre id="migrationSummary"></pre><p id="migrationMessage" role="alert"></p>
+    <footer><button id="migrationClose">关闭</button><button id="migrationBack" hidden>返回逐项修改</button><button id="migrationSave" hidden>保存逐项选择</button><button id="migrationFirst" hidden>第一次确认：逐项已核对</button><button id="migrationSecond" hidden>第二次确认：整批一致</button><button id="migrationCommit" hidden>正式迁移并校验</button><button id="migrationRecover" hidden>处理中断维护</button><button id="migrationArchive" hidden>核对回执并封存本机旧账本</button></footer>
+  </dialog>
+  <dialog id="permissionsDialog"><h2>主服务器成员权限</h2><div id="permissionRows"></div><button id="permissionAdd">添加成员</button><p id="permissionMessage" role="alert"></p><footer><button id="permissionClose">关闭</button><button id="permissionSave">保存权限</button></footer></dialog>
+  <script src="connection-ui.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
