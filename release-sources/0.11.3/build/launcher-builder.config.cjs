@@ -52,7 +52,6 @@ module.exports={
       console.log(JSON.stringify({packagedCompleteSuite:true,version:catalog.suite.version,components:catalog.packages.map(({id,version})=>({id,version}))}));
     }
   },
-  win:{icon:path.join(root,'desktop/assets/lingtu-icon.png'),target:[{target:'nsis',arch:['x64']},{target:'portable',arch:['x64']}]},
-  nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:true,createStartMenuShortcut:true,shortcutName:'五成电子商务工作台',deleteAppDataOnUninstall:false},
-  portable:{artifactName:'CloudWarehouseInventorySync-Portable-${version}-${arch}.${ext}'}
+  win:{icon:path.join(root,'desktop/assets/lingtu-icon.png'),target:[{target:'nsis',arch:['x64']}]},
+  nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:true,createStartMenuShortcut:true,shortcutName:'五成电子商务工作台',deleteAppDataOnUninstall:false}
 };
