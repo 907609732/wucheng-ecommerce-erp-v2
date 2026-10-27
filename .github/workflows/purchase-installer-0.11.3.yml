@@ -1,0 +1,48 @@
+name: Verified purchase installer 0.11.3
+on:
+  push:
+    branches: [codex/purchase-release-0.11.3]
+    paths:
+      - .github/workflows/purchase-installer-0.11.3.yml
+      - release-sources/0.11.3/ci/**
+permissions:
+  contents: write
+concurrency:
+  group: verified-purchase-installer-0.11.3
+  cancel-in-progress: false
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Read frozen public build inputs
+        shell: pwsh
+        run: |
+          $purchaseInputArchive = Join-Path $env:RUNNER_TEMP 'Verified-Build-Inputs-0.11.3.zip'
+          gh release download 0.11.3 --repo 907609732/wucheng-ecommerce-erp-v2 --pattern Verified-Build-Inputs-0.11.3.zip --output $purchaseInputArchive
+          if ($LASTEXITCODE -ne 0) { throw 'Input download failed' }
+          if ((Get-FileHash -LiteralPath $purchaseInputArchive -Algorithm SHA256).Hash.ToLower() -ne '0a03ddc6422daf8bcbdd393c24f2d09b842c3486eaa2642e99680b0bc8d0f3bf') { throw 'Frozen input digest differs' }
+          $purchaseInputRoot = Join-Path $env:RUNNER_TEMP 'verified-purchase-inputs'
+          Expand-Archive -LiteralPath $purchaseInputArchive -DestinationPath $purchaseInputRoot
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "VERIFIED_INPUT_ROOT=$purchaseInputRoot"
+      - name: Install pinned public packaging tools
+        shell: pwsh
+        run: |
+          node -e "const f=require('fs');f.mkdirSync('ci-tools',{recursive:true});f.writeFileSync('ci-tools/package.json',JSON.stringify({private:true}));"
+          npm install --prefix ci-tools --ignore-scripts --no-audit --no-fund electron@44.4.5 electron-builder@26.15.3 playwright@1.61.0
+          if ($LASTEXITCODE -ne 0) { throw 'Tool install failed' }
+          node ci-tools/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Official Electron runtime install failed' }
+      - name: Build, verify isolated full suite, and upload installer only
+        shell: pwsh
+        run: |
+          node release-sources/0.11.3/ci/build-installer.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate verification failed; release remains a draft' }
