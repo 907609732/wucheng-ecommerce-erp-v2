@@ -81,3 +81,19 @@ test('only exact warehouse self-service capabilities permit editor without task 
   await assert.rejects(f.runtime.invokeTool(task.id,'erp_prepare',{module:'warehouse',capabilityId:'inventory.apply',input:{}}),{code:'CAPABILITY_DENIED'});await f.runtime.invokeTool(task.id,'erp_prepare',{module:'warehouse',capabilityId:'attendance.complete',input:{}});
   const {review}=await f.request('tasks.get',{taskId:task.id},self);assert.equal(review.canApprove,true);const args={taskId:task.id,reviewId:review.id,resultVersion:review.resultVersion,revision:review.revision};await assert.rejects(f.request('reviews.approve',args),{code:'TASK_PERMISSION_REQUIRED'});assert.equal((await f.request('reviews.approve',args,self)).task.status,'completed');assert.equal(commits,1);
 });
+
+test('paused engine finishes shutdown before resume and permits an explicit engine switch',async t=>{
+  let entered,executions=0;const started=new Promise(r=>entered=r);
+  const f=await setup(t,{engine:{run:async({signal})=>{executions++;entered();await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>setTimeout(()=>reject(Error('interrupted')),20),{once:true}));}}});await f.request('settings.save',{company:{model:'synthetic'}});const task=await f.create(),running=f.runtime.run(task.id);await started;
+  await f.request('tasks.control',{taskId:task.id,action:'pause'});await running;const resumed=await f.request('tasks.control',{taskId:task.id,action:'resume',engine:'hermes'});assert.equal(resumed.task.status,'queued');assert.equal(resumed.task.engine,'hermes');assert.equal(f.runtime.store.get('task',task.id).engineSession,null);assert.equal(executions,1);
+});
+
+test('lost permission save response reconciles from host receipt without writing twice',async t=>{
+  let writes=0,receipt;
+  const extensions={'permissions.inspect':async()=>({revision:'old',policy:{schemaVersion:1,users:{}}}),'permissions.save':async(input,ctx)=>{writes++;receipt={idempotencyKey:ctx.idempotencyKey,revision:'new'};throw Error('response lost after atomic policy write');},'permissions.receipt':async({idempotencyKey})=>({state:'completed',idempotencyKey,receipt})};
+  const f=await setup(t,{extensions}),task=await f.create();await f.prepare(task,'permissions.update',{policy:{schemaVersion:1,users:{}}});const pending=await f.approve(task);assert.equal(pending.task.status,'unknown');await assert.rejects(f.request('tasks.input',{taskId:task.id,text:'重新执行'}),{code:'OUTCOME_UNKNOWN'});const result=await f.request('tasks.control',{taskId:task.id,action:'resume'});assert.equal(result.task.status,'completed');assert.equal(writes,1);
+});
+
+test('system schedule write rolls back when its receipt cannot be saved',async t=>{
+  const f=await setup(t),task=await f.create();await f.prepare(task,'schedules.create',{goal:'查询',cron:'0 9 * * *',timezone:'Asia/Shanghai'});const insert=f.runtime.store.insert;f.runtime.store.insert=(kind,value)=>{if(kind==='system_receipt')throw Error('simulated crash before receipt');return insert(kind,value);};await f.approve(task);assert.equal(f.runtime.store.list('schedule').length,0);assert.equal(f.runtime.store.list('system_receipt').length,0);
+});

@@ -25,3 +25,10 @@ test('truncated or malformed model responses fail before any call is exposed',()
   assert.throws(()=>verifyCompanyResponse('data: {invalid}\n\n','text/event-stream'),{code:'MODEL_PROTOCOL_INVALID'});
   assert.equal(verifyCompanyResponse(complete([{id:'x',type:'function_call',name:allowed.name,arguments:'{}'}]),'text/event-stream'),true);
 });
+
+test('rejected model tool calls still count upstream usage, lost usage stays unknown',async()=>{
+  let mode='rejected';const observed=[];
+  const proxy=await openCompanyModelProxy({baseUrl:'https://company.example.invalid/v1',apiKey:'synthetic',onUsage:value=>observed.push(value),fetchImpl:async()=>new Response(JSON.stringify(mode==='rejected'?{status:'completed',output:[{type:'custom_tool_call',name:'apply_patch'}],usage:{total_tokens:19}}:{status:'completed',output:[]}),{headers:{'content-type':'application/json'}})});
+  const call=()=>fetch(proxy.baseUrl+'/responses',{method:'POST',headers:{authorization:'Bearer '+proxy.token,'content-type':'application/json'},body:JSON.stringify({tools:[allowed]})});
+  try{assert.equal((await call()).status,403);assert.equal(proxy.usage().totalTokens,19);assert.equal(observed[0].totalTokens,19);mode='unknown';assert.equal((await call()).status,200);assert.equal(proxy.usage(),undefined);}finally{await proxy.close();}
+});

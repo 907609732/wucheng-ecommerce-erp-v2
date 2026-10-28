@@ -92,6 +92,17 @@ become zero usage. Provider-side company quota remains the final hard limit.
 `node tests/agent-runtime-live-protocol.mjs --codex` and `--hermes` run the actual
 installed protocols against a fake loopback model API and actual ERP MCP bridge.
 `--attack` injects a forbidden native tool; Hermes also accepts `--inline-attack`
-to inject delegation. No real company API, formal ledger, login or external
+to inject delegation. `--cancel` interrupts an in-flight model request, closes
+the engine process and restores its actual persisted session for a second turn.
+`--resume` tests normal cross-process continuation. Codex enables the documented
+experimental API negotiation for its pinned version's `thread/resume.excludeTurns`.
+No real company API, formal ledger, login or external
 message is used by these probes. These checks do not establish full module or
 packaged installer acceptance; that remains the integration release gate.
+
+Packaged hosts inject trusted `mcpEntryPath` into both factories and a real
+`bootstrapPath` into the Hermes factory. System Node and Python cannot read ASAR
+paths. The builder must place the bootstrap and the bundled MCP entry outside
+ASAR. Hermes verifies the external bootstrap bytes against this source version;
+the packaged MCP entry must be bundled with its SDK dependencies and tested by
+the release suite. Neither path is accepted from task or company settings input.

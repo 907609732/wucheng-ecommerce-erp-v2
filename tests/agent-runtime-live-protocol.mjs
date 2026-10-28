@@ -11,12 +11,14 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'erp-agent-protocol-'));
 const requests=[],calls=[];
 const attack=process.argv.includes('--attack');
 let responseCount=0;
+let activeController,interruptPending=false;
 const server=createServer(async(req,res)=>{
   if(!['/v1/responses','/v1/chat/completions'].includes(req.url)){res.writeHead(404,{'content-type':'application/json'});res.end('{"error":"fixture endpoint unavailable"}');return;}
   if(req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({data:[{id:'gpt-5.4',object:'model'}]}));return;}
   let raw='';for await(const chunk of req)raw+=chunk;let input;try{input=JSON.parse(raw);}catch{res.writeHead(400);res.end('invalid body');return;}
   const names=(input.tools||[]).flatMap(t=>t.type==='namespace'?(t.tools||[]).map(x=>t.name+'.'+x.name):[t.name||t.function?.name||t.type]);requests.push({url:req.url,names});
   console.log(JSON.stringify({request:req.url,tools:names}));
+  if(interruptPending){interruptPending=false;setTimeout(()=>activeController.abort(),100);return;}
   for(const item of input.input||[])if(item.type==='function_call_output')console.log(JSON.stringify({toolOutput:item.output}));
   if(names.some(n=>/exec_command|shell|apply_patch|terminal|file_read|read_file|write_file|browser|computer|web_search|spawn_agent|view_image/.test(n))){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'ERP_TOOL_ISOLATION_FAILED: unapproved native tool',type:'invalid_request_error'}}));return;}
   if(req.url.includes('chat/completions')){
@@ -39,10 +41,15 @@ try{
   const engines=[];
   if(process.argv.includes('--codex'))engines.push(createCodexEngine({command:process.execPath,argsPrefix:[path.join(process.env.APPDATA,'npm/node_modules/@openai/codex/bin/codex.js')]}));
   if(process.argv.includes('--hermes')){const hermesRoot=path.join(process.env.LOCALAPPDATA,'hermes/hermes-agent');engines.push(createHermesEngine({python:path.join(hermesRoot,'venv/Scripts/python.exe'),root:hermesRoot,diagnostic:text=>process.stderr.write(text)}));}
-  for(const engine of engines){responseCount=0;const workingDirectory=path.join(root,engine.id,'work');fs.mkdirSync(workingDirectory,{recursive:true});const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120000);
-    try{const result=await engine.run({task,credentials,workingDirectory,profileDirectory:path.join(root,engine.id,'profile'),signal:controller.signal,invoke:async(name,input)=>{calls.push({engine:engine.id,name});return {capabilities:[{id:'sales.read',title:'合成账本查询',module:'sales',kind:'query'}]};},emit:(type,data)=>console.log(JSON.stringify({engine:engine.id,type,...data}))});assert.equal(fs.existsSync(path.join(workingDirectory,'forbidden-canary.txt')),false);console.log(JSON.stringify({engine:engine.id,result,attackCanaryAbsent:true}));}
-    catch(error){assert.equal(fs.existsSync(path.join(workingDirectory,'forbidden-canary.txt')),false);if(!(attack&&engine.id==='codex'))throw error;assert.equal(calls.length,0);console.log(JSON.stringify({engine:engine.id,rejected:error.code,attackCanaryAbsent:true}));}
-    finally{clearTimeout(timeout);}
+  for(const engine of engines){let session;const workingDirectory=path.join(root,engine.id,'work');fs.mkdirSync(workingDirectory,{recursive:true});
+    const rounds=process.argv.includes('--resume')||process.argv.includes('--cancel')?2:1;
+    for(let round=0;round<rounds;round++){
+      responseCount=0;interruptPending=round===0&&process.argv.includes('--cancel');const cancelling=interruptPending,controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120000);activeController=controller;
+      try{const result=await engine.run({task,session,credentials,workingDirectory,profileDirectory:path.join(root,engine.id,'profile'),signal:controller.signal,checkpoint:value=>session=value,invoke:async(name,input)=>{calls.push({engine:engine.id,name,round});return {capabilities:[{id:'sales.read',title:'合成账本查询',module:'sales',kind:'query'}]};},emit:(type,data)=>console.log(JSON.stringify({engine:engine.id,round,type,...data}))});assert.equal(fs.existsSync(path.join(workingDirectory,'forbidden-canary.txt')),false);console.log(JSON.stringify({engine:engine.id,round,result,attackCanaryAbsent:true}));}
+      catch(error){assert.equal(fs.existsSync(path.join(workingDirectory,'forbidden-canary.txt')),false);if(!cancelling&&!(attack&&engine.id==='codex'))throw error;assert.equal(calls.length,0);console.log(JSON.stringify({engine:engine.id,round,rejected:error.code||error.name,attackCanaryAbsent:true}));}
+      finally{clearTimeout(timeout);}
+      if(rounds>1)assert.ok(session?.threadId||session?.sessionId,'official engine checkpoint must survive process shutdown');
+    }
   }
   assert.ok(requests.length>0);if(!attack)assert.ok(calls.length>0,'installed engine must call the real MCP bridge');console.log(JSON.stringify({ok:true,requests:requests.length,calls}));
 }catch(error){console.error(error);throw error;}finally{server.closeAllConnections();await new Promise(r=>server.close(r));try{fs.rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}catch(error){console.error('Fixture cleanup pending: '+error.code);}}

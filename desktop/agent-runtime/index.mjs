@@ -123,18 +123,19 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       const current=store.get('task',taskId);if(current&&!['cancelled','paused','waiting_review','waiting_input','unknown'].includes(current.status)){store.update('task',taskId,{status:'paused',pauseReason:error.code||'ENGINE_FAILED',error:error.message});emit(taskId,'task.paused',{code:error.code||'ENGINE_FAILED',message:error.message});}
     }finally{jobs.delete(taskId);sessions.delete(taskId);resolveDone();}
   }
-  async function control(taskId,action,actor){
+  async function control(taskId,action,actor,{engine}={}){
     const task=taskFor(taskId,actor);
     if(action==='resume'){
       if(task.status==='unknown')return reconcile(task,actor);
       if(!['paused','failed','waiting_input'].includes(task.status))throw agentError('TASK_STATE_INVALID','当前任务不能继续执行',409);
+      if(engine!==undefined&&engine!==task.engine){if(!['codex','hermes'].includes(engine))throw agentError('ENGINE_INVALID','未知执行引擎');const model=settings.get().company.model;if(model&&engines[engine]?.supportedModels&&!engines[engine].supportedModels.includes(model))throw agentError('ENGINE_MODEL_UNSUPPORTED','此模型不兼容选定引擎',409);store.update('task',task.id,{engine,engineSession:null});emit(task.id,'engine.changed',{from:task.engine,to:engine,restoredFrom:'erp-checkpoint'});}
       if(task.review&&resultState(task.id)?.prepared?.length){store.update('task',task.id,{status:'waiting_review'});return {task:publicTask(store.get('task',task.id)),result:publicResult(resultState(task.id)),review:task.review};}
       store.update('task',task.id,{status:'queued'});if(autoStart)queueMicrotask(()=>run(task.id).catch(()=>{}));return {task:publicTask(store.get('task',task.id))};
     }
     if(!['pause','cancel'].includes(action))throw agentError('CONTROL_INVALID','未知任务控制操作');
     if(task.status==='committing'||task.status==='unknown')throw agentError('OUTCOME_UNKNOWN','提交中的结果须先核对回执，不能取消成未发生',409);
     if(['completed','cancelled'].includes(task.status))return {task:publicTask(task)};
-    store.update('task',task.id,{status:action==='pause'?'paused':'cancelled',...(action==='cancel'?{review:null}:{})});jobs.get(task.id)?.controller.abort();await sessions.get(task.id)?.cancel?.();emit(task.id,'task.'+(action==='pause'?'paused':'cancelled'));return {task:publicTask(store.get('task',task.id))};
+    store.update('task',task.id,{status:action==='pause'?'paused':'cancelled',...(action==='cancel'?{review:null}:{})});const job=jobs.get(task.id);job?.controller.abort();await sessions.get(task.id)?.cancel?.();await job?.done;emit(task.id,'task.'+(action==='pause'?'paused':'cancelled'));return {task:publicTask(store.get('task',task.id))};
   }
   async function approve(input,actor,trustedUi){
     if(!trustedUi||actor.channel&&actor.channel!=='ui')throw agentError('HUMAN_REVIEW_REQUIRED','请在结果页由有权限的人员确认',403);
@@ -193,7 +194,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');return createTask(payload,actor);}
     if(operation==='tasks.list')return {tasks:store.list('task').filter(t=>(actor.role==='admin'||t.ownerId===actor.id||t.assigneeId===actor.id)&&t.scope.modules.every(m=>allowedModule(actor,m))).map(publicTask)};
     if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:publicTask(task),events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
-    if(operation==='tasks.control')return control(payload.taskId,payload.action,actor);
+    if(operation==='tasks.control')return control(payload.taskId,payload.action,actor,payload);
     if(operation==='tasks.input'){
       const task=taskFor(payload.taskId,actor);if(task.status==='unknown')throw agentError('OUTCOME_UNKNOWN','请先核对提交回执，再补充新的要求',409);if(live.has(task.status))throw agentError('TASK_BUSY','请先暂停任务再补充要求',409);
       const text=String(payload.text||payload.goal||'').trim();if(!text||text.length>20000)throw agentError('INPUT_INVALID','请补充有效要求');
