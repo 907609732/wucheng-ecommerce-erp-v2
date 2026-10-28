@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createApp} from '../server.mjs';
+import {validateOrder} from '../lib/importer.mjs';
+
+test('local protocol authenticates callers and only browser review can commit a versioned draft',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-integration-http-')),{app,store,integration}=createApp({dataDir:dir});
+ const server=app.listen(0,'127.0.0.1');integration.attach(server);await new Promise(r=>server.once('listening',r));
+ t.after(async()=>{await new Promise(r=>server.close(r));store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const base='http://127.0.0.1:'+server.address().port+'/api/integration/v1',key=fs.readFileSync(path.join(dir,'.integration-key'),'utf8').trim();
+ const request=(route,method='GET',body,headers={Authorization:'Bearer '+key})=>fetch(base+route,{method,headers:{...headers,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+ assert.equal((await request('/orders','GET',null,{})).status,401);
+ assert.equal((await request('/capabilities','GET',null,{Origin:'https://other.example'})).status,403);
+ assert.equal((await request('/review-session','GET',null,{})).status,403);
+ const session=await request('/review-session','GET',null,{'Sec-Fetch-Site':'same-origin'}),nonce=(await session.json()).nonce;
+ const ui={Cookie:session.headers.get('set-cookie').split(';')[0],'x-review-token':nonce};
+ const o=store.insert(validateOrder({platform:'淘宝',account:'test',orderNo:'9000000000000000001',date:'2026-10-01',paidAt:'2026-10-01',status:'已完成',supplier:'test',amountCents:100,refundCents:0,items:[{title:'test',qty:1,unitPriceCents:100}]}));
+ let r=await request('/edits','POST',{type:'order',target:o.id,patch:{amountCents:200},reason:'核对原单金额'});assert.equal(r.status,200,await r.clone().text());const draft=await r.json();
+ assert.equal(store.get(o.id).amountCents,100);
+ assert.equal((await request('/edits/'+draft.id+'/commit','POST',{revision:draft.revision,confirm:true})).status,403);
+ r=await request('/edits/'+draft.id+'/commit','POST',{revision:draft.revision},ui);assert.equal(r.status,200,await r.clone().text());assert.equal(store.get(o.id).amountCents,200);
+ assert.equal((await request('/edits/'+draft.id+'/commit','POST',{revision:draft.revision},ui)).status,200);
+ const stale=await (await request('/edits','POST',{type:'order',target:o.id,patch:{note:'draft'},reason:'说明更正'})).json();
+ const pending=await(await request('/edits?state=draft')).json();assert.deepEqual(pending.drafts.map(d=>d.id),[stale.id]);
+ assert.equal((await(await request('/edits')).json()).drafts.length,2,'历史记录仍可查询');
+ store.update(o.id,{...store.get(o.id),note:'human edit'});
+ assert.equal((await request('/edits/'+stale.id+'/commit','POST',{revision:stale.revision},ui)).status,409);
+ assert.equal(store.get(o.id).note,'human edit');
+ for(const endpoint of ['review','confirm','commit'])assert.equal((await request('/transfers/unknown/'+endpoint,'POST',{confirm:true})).status,403);
+});

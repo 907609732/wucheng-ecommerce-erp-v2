@@ -1,0 +1,30 @@
+{
+  "name": "wucheng-sales-desk",
+  "version": "0.4.6",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "monthly": "node scripts/monthly.mjs",
+    "install:desktop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "csv-parse": "^7.0.3",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "tabulator-tables": "^6.3.1",
+    "@napi-rs/canvas": "^1.0.0"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {_electron as electron} from 'playwright';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-startup-'));
+const registry=path.join(root,'registry.json'),cloud=path.join(root,'warehouse-data');
+fs.mkdirSync(cloud,{recursive:true});fs.writeFileSync(path.join(cloud,'settings.json'),JSON.stringify({startAtLogin:true,scheduleEnabled:false,monthlySalesEnabled:false}));
+fs.writeFileSync(registry,JSON.stringify(Object.fromEntries(['warehouse','purchase','sales','overview','exporter'].map(id=>[id,{managed:true,root:path.join(root,id),dataDir:id==='warehouse'?cloud:path.join(root,'data',id),exe:path.join(root,id,'missing.exe')}]))));
+const exe=path.resolve(process.env.LAUNCHER_TEST_EXE||'node_modules/electron/dist/electron.exe'),source=process.env.LAUNCHER_TEST_EXE?[]:[path.resolve('desktop/launcher')];
+const env={...process.env,LINGTU_REGISTRY_PATH:registry,LINGTU_ISOLATED_TEST:'1',LINGTU_SKIP_BUNDLED_ACTIVATION:'1'};delete env.ELECTRON_RUN_AS_NODE;
+let app;
+try{
+ app=await electron.launch({executablePath:exe,args:[...source,'--hidden','--user-data-dir='+root],env});
+ const page=await app.firstWindow();await page.locator('#cards button').first().waitFor();
+ assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false,'Startup launch stays in tray');
+ assert.equal((await page.evaluate(()=>window.launcher.preferences())).startAtLogin,true,'Legacy choice migrates');
+ await page.evaluate(()=>window.launcher.savePreferences({startAtLogin:false}));
+ assert.equal(JSON.parse(fs.readFileSync(path.join(root,'launcher-settings.json'),'utf8')).startAtLogin,false);
+ await app.evaluate(({BrowserWindow})=>{BrowserWindow.getAllWindows()[0].show();BrowserWindow.getAllWindows()[0].close();});
+ assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),false);
+ await app.close();app=null;
+ app=await electron.launch({executablePath:exe,args:[...source,'--open-module=overview','--user-data-dir='+root],env});const second=await app.firstWindow();await second.locator('#cards button').first().waitFor();
+ await second.locator('#message').filter({hasText:'功能程序文件不完整'}).waitFor({state:'visible'});
+ await second.evaluate(()=>window.launcher.onNavigate(value=>window.shortcutRoute=value));
+ await app.evaluate(({app,BrowserWindow})=>{BrowserWindow.getAllWindows()[0].hide();app.emit('second-instance',{},['--open-module=purchase']);});
+ await second.waitForFunction(()=>window.shortcutRoute?.id==='purchase');
+ assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible()),true,'Legacy shortcut brings existing launcher forward');
+ assert.equal((await second.evaluate(()=>window.launcher.preferences())).startAtLogin,false,'New choice supersedes old legacy setting');
+ await app.close();app=null;
+ const headlessRoot=path.join(root,'headless');
+ const result=spawnSync(exe,[...source,'--cli','workbench','capabilities','--user-data-dir='+headlessRoot],{env,windowsHide:true,encoding:'utf8',timeout:30000});
+ assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout.trim()).ok,true);
+ assert.equal(fs.existsSync(path.join(headlessRoot,'launcher-settings.json')),false,'Headless does not initialize GUI preferences');
+ assert.equal(fs.existsSync(path.join(root,'host.json')),false,'Closing GUI removes host callback advertisement');
+ console.log(JSON.stringify({ok:true,legacyLoginChoiceMigrated:true,newDefaultCoveredByLauncherUi:true,hiddenLaunch:true,firstShortcutAfterReady:true,secondInstanceShortcut:true,closeToTray:true,savedChoiceSurvives:true,headlessNoGuiPreferenceWrites:true,scope:'isolated source profile; no Windows login items changed'}));
+}finally{if(app)await app.close();}

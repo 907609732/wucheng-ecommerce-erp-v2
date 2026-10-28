@@ -37,34 +37,35 @@ try{
   assert.equal(overview.unavailable,false);assert.equal(overview.totals.purchase,-12345*(beforeCount+1));
   console.log('two confirmations and overview passed');
   checks.push('packaged services: two browser confirmations, multi-item exact amount, overview reconciliation');
-  const env={...process.env,LINGTU_REGISTRY_PATH:report.registryFile};delete env.ELECTRON_RUN_AS_NODE;
+  const env={...process.env,LINGTU_ISOLATED_TEST:'1',LINGTU_SKIP_BUNDLED_ACTIVATION:'1',LINGTU_REGISTRY_PATH:report.registryFile};delete env.ELECTRON_RUN_AS_NODE;
   app=await electron.launch({executablePath:path.resolve('dist/launcher-release/win-unpacked/云仓库存同步.exe'),args:['--user-data-dir='+report.root],env});
   const page=await app.firstWindow();page.setDefaultTimeout(30000);page.on('pageerror',e=>errors.push(e.message));
   console.log('launcher window ready');
   const contents=id=>app.evaluate(({webContents},port)=>webContents.getAllWebContents().filter(w=>w.getURL().startsWith('http://127.0.0.1:'+port+'/')).map(w=>w.id),registry[id].port);
   const waitView=async id=>{for(let i=0;i<100;i++){if((await contents(id)).length)return;await new Promise(r=>setTimeout(r,100));}throw Error('Embedded view missing: '+id);};
-  await page.locator('#cards article').nth(1).getByRole('button',{name:'打开'}).click();await waitView('purchase');
+  await page.locator('[data-module=purchase]').getByRole('button',{name:'打开'}).click();await waitView('purchase');
   const purchaseId=(await contents('purchase'))[0];
   await app.evaluate(({webContents},id)=>webContents.fromId(id).executeJavaScript('window.__retained="yes"'),purchaseId);
-  await page.locator('#home').click();await page.locator('#cards article').nth(2).getByRole('button',{name:'打开'}).click();await waitView('sales');
-  await page.locator('#home').click();await page.locator('#cards article').nth(1).getByRole('button',{name:'打开'}).click();
+  await page.locator('#home').click();await page.locator('[data-module=sales]').getByRole('button',{name:'打开'}).click();await waitView('sales');
+  await page.locator('#home').click();await page.locator('[data-module=purchase]').getByRole('button',{name:'打开'}).click();
   assert.equal(await app.evaluate(({webContents},id)=>webContents.fromId(id).executeJavaScript('window.__retained'),purchaseId),'yes');
-  checks.push('three entries, embedded purchase and sales, retained state');
+  checks.push('four entries with overview first, embedded purchase and sales, retained state');
   console.log('embedded state retained');
   for(const [id,parent] of [['exporter','purchase'],['overview','sales']]){
     const state=JSON.parse(originalState);delete state.packages[id];fs.writeFileSync(stateFile,JSON.stringify(state));
     await page.locator('#settings').click();await page.locator('#home').click();
-    await page.locator('#cards article').nth(parent==='purchase'?1:2).getByRole('button',{name:'打开'}).click();await waitView(parent);
-    const parentId=(await contents(parent))[0];
-    await app.evaluate(({webContents},{parentId,id})=>webContents.fromId(parentId).executeJavaScript(`window.lingtuShell.open(${JSON.stringify(id)})`),{parentId,id});
-    await page.locator('#installDialog').waitFor({state:'visible'});
-    assert.match(await page.locator('#installSummary').textContent(),/下载.*MB/);
-    assert.ok((await page.locator('#dependencies li').count())>=1);
-    await page.locator('#dismissInstall').click();
+    if(id==='overview')assert.equal(await page.locator('[data-module=overview] button').isDisabled(),true);
+    else{
+      await page.locator(`[data-module=${parent}]`).getByRole('button',{name:'打开'}).click();await waitView(parent);
+      const parentId=(await contents(parent))[0];
+      await app.evaluate(({webContents},{parentId,id})=>webContents.fromId(parentId).executeJavaScript(`window.lingtuShell.open(${JSON.stringify(id)})`),{parentId,id});
+    }
+    if(id==='exporter')await page.locator('#message').filter({hasText:'程序文件不完整'}).waitFor({state:'visible'});
+    assert.equal(await page.locator('#installDialog').isVisible(),false,'Suite never offers individual downloads');
     fs.writeFileSync(stateFile,originalState);
   }
-  checks.push('purchase exporter and sales overview show first-use download confirmation');
-  console.log('secondary download dialogs passed');
+  checks.push('Missing suite files disable opening or show unified repair, never individual downloads');
+  console.log('unified repair states passed');
   await page.locator('#home').click();await page.screenshot({path:'dist/module-verification/launcher-installed.png'});
   const hostPid=app.process().pid;
   await Promise.race([app.close(),new Promise(r=>setTimeout(r,5000))]);

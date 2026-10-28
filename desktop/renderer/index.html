@@ -4,71 +4,46 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'">
-  <title>云仓库存同步</title>
+  <title>云仓同步 · 五成电子商务工作台</title>
   <link rel="icon" type="image/png" href="../assets/lingtu-icon.png">
   <link rel="stylesheet" href="../../node_modules/gridjs/dist/theme/mermaid.min.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="daily-work.css">
+  <link rel="stylesheet" href="../shared/loading-screen.css">
 </head>
-<body>
-  <section id="firstRunSetup" class="first-run-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
-    <div class="first-run-dialog">
-      <p class="eyebrow">FIRST RUN SETUP</p>
-      <h2 id="firstRunTitle">这台电脑怎么使用 ERP？</h2>
-      <p class="first-run-intro">只需要选择一次，之后仍可在“设置 → 运行模式”中修改。</p>
-      <div class="role-choice-grid" role="radiogroup" aria-label="本机角色">
-        <button class="role-choice" type="button" data-setup-mode="server" role="radio" aria-checked="false">
-          <strong>主服务器</strong><span>以这台电脑的数据为准，业务脚本都在这里运行。</span>
-        </button>
-        <button class="role-choice" type="button" data-setup-mode="client" role="radio" aria-checked="false">
-          <strong>客户端</strong><span>查看主服务器数据，并让主服务器执行预置任务。</span>
-        </button>
-        <button class="role-choice" type="button" data-setup-mode="standalone" role="radio" aria-checked="false">
-          <strong>单机使用</strong><span>数据和脚本只在当前电脑运行，不连接远程服务器。</span>
-        </button>
-      </div>
-      <div id="firstRunRemoteFields" class="first-run-fields hidden">
-        <label>远程访问地址<input id="firstRunServerUrl" type="url" value="https://erp.4444520.xyz" required></label>
-        <label id="firstRunOperatorField" class="hidden">允许远程执行的邮箱<input id="firstRunOperatorEmails" placeholder="多个邮箱用逗号分隔"></label>
-        <label id="firstRunAutostartField" class="check hidden"><input id="firstRunAutostart" type="checkbox" checked>登录 Windows 后自动启动主服务器</label>
-      </div>
-      <p id="firstRunMessage" class="save-message"></p>
-      <div class="first-run-actions"><button id="finishFirstRun" class="primary" type="button" disabled>保存并继续</button></div>
-    </div>
-  </section>
+<body data-loading-logo="../assets/lingtu-icon.png">
+<div class="lt-loading" data-variant="full" id="warehouseLoading" role="status" aria-live="polite" aria-busy="true">
+  <div class="lt-loading__logo"><img src="../assets/lingtu-icon.png" alt="" draggable="false"></div>
+  <div class="lt-loading__brand">五成电子商务工作台</div>
+  <div class="lt-loading__subtitle">菜鸟云仓同步</div>
+  <progress class="lt-loading__progress" aria-label="正在读取云仓配置…"></progress>
+  <div class="lt-loading__status">正在读取云仓配置…</div>
+  <div class="lt-loading__note">正在为您连接电商经营所需的业务能力</div>
+</div>
   <main class="shell">
     <header class="hero">
       <div class="hero-brand">
         <img class="hero-logo" src="../assets/lingtu-icon.png" alt="灵兔云仓" width="72" height="72">
         <div>
-        <p class="eyebrow">WUCHENG E-COMMERCE · ERP V2</p>
-        <h1>功能主页</h1>
-        <p class="subtitle">选择需要使用的功能。</p>
+        <p class="eyebrow">五成电子商务工作台</p>
+        <h1>云仓同步</h1>
+        <p class="subtitle">采集云仓库存、查看库存与销售趋势。</p>
         </div>
       </div>
-      <div class="hero-actions" aria-label="当前功能帮助与导航">
-        <button type="button" data-open-view="settings">设置与服务</button>
-        <button id="featureManualButton" type="button" aria-haspopup="dialog" aria-controls="featureHelpDialog" title="使用说明与技术原理">使用说明</button>
-        <button id="backHome" class="hidden" type="button">返回主页</button>
+      <div class="hero-actions" aria-label="页面导航">
+        <button id="backHome" type="button">返回工作台</button>
       </div>
     </header>
 
-    <section data-view-panel="home" id="featureHome">
-      <div class="feature-grid">
-        <button class="feature-card" data-open-view="dashboard"><span class="feature-number">01</span><strong>云仓同步</strong><span>库存采集、补货预警与云仓销售趋势</span><span class="feature-enter">进入功能 →</span></button>
-        <button class="feature-card" data-open-desk="purchase"><span class="feature-number">02</span><strong>采购台</strong><span>采购账本、历史订单核对与安全导入</span><span class="feature-enter">打开采购台 →</span></button>
-        <button class="feature-card" data-open-desk="sales"><span class="feature-number">03</span><strong>销售台</strong><span>销售账单、资金对账与经营收支总览</span><span class="feature-enter">打开销售台 →</span></button>
-      </div>
-    </section>
-    <div id="deskSwitcher" class="hidden desk-switcher"><button data-open-desk="purchase">采购台</button><button data-open-desk="sales">销售台</button><button data-open-desk="overview">经营收支总览</button></div>
-    <section id="extensionFrame" class="hidden extension-frame" aria-label="独立业务扩展"></section>
-
-    <nav class="view-tabs hidden" aria-label="页面导航">
+    <nav class="view-tabs" aria-label="页面导航">
       <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
       <button class="view-tab" type="button" data-view="inventory">商品库存</button>
       <button class="view-tab" type="button" data-view="sales">销售趋势</button>
-      <button class="view-tab" type="button" data-view="settings">设置</button>
+      <button class="view-tab" type="button" data-view="attendance">签到管理</button>
+      <button class="view-tab" type="button" data-view="settings">云仓设置</button>
     </nav>
-    <div data-view-panel="dashboard" class="hidden">
+    <div data-view-panel="dashboard">
+    <div id="dailyOverview"></div>
     <section class="summary-grid">
       <article class="summary-card"><span>运行状态</span><strong id="runState">空闲</strong></article>
       <article class="summary-card"><span>下次执行</span><strong id="nextRun">未启用</strong></article>
@@ -84,6 +59,8 @@
       <pre id="logs">等待运行…</pre>
     </section>
     </div>
+
+    <div data-view-panel="attendance" class="hidden"><div id="dailyManagement"></div></div>
 
     <div data-view-panel="inventory" class="hidden">
       <section class="inventory-summary-grid">
@@ -108,7 +85,7 @@
         </div>
         <p id="inventoryMessage" class="inventory-message">正在读取本地已校验库存…</p>
         <div id="inventoryGrid" class="inventory-grid"></div>
-        <p class="inventory-note">这里展示最新已导入的全部云仓 SKU；钉钉报告仍只发送符合现有补货预警条件的商品。</p>
+        <p class="inventory-note">默认按预警优先排序：严重 → 紧急 → 关注 → 正常；同级按可售天数、库存和 SKU 排序。钉钉发送库存预警或当日正常摘要。</p>
       </section>
     </div>
 
@@ -186,7 +163,6 @@
     </div>
 
     <div data-view-panel="settings" class="hidden">
-      <section class="panel"><div class="section-heading"><h2>本机扩展服务</h2><button id="refreshDeskServices" type="button">刷新状态</button></div><p>点击业务入口后启动；关闭主程序后后台继续运行。停止后台会使对应浏览器或手机入口暂时不可用。</p><div id="deskServiceList"></div></section>
     <section class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">SETTINGS</p><h2>设置</h2></div>
@@ -194,33 +170,21 @@
       </div>
       <p class="field-help">各分区可单独保存，未完成机器人配置也能先保存菜鸟账号。</p>
 
-      <form id="runtimeSettingsForm" class="settings-card">
-        <div class="settings-card-heading">
-          <div><h3>运行模式</h3><p>你的电脑作为主服务器；员工电脑作为客户端，所有业务脚本只在主服务器执行。</p></div>
-          <span id="runtimeConfigState" class="config-state">单机</span>
-        </div>
+      <section class="settings-card" id="featureHelpSettings">
+        <div class="settings-card-heading"><div><h3>使用说明</h3><p>选择需要了解的功能，查看操作说明与技术原理。</p></div></div>
         <div class="form-grid">
-          <label>本机角色
-            <select id="runtimeMode">
-              <option value="standalone">单机模式</option>
-              <option value="server">主服务器模式</option>
-              <option value="client">客户端模式</option>
-            </select>
-          </label>
-          <label>远程访问地址<input id="remoteServerUrl" type="url" value="https://erp.4444520.xyz" required></label>
-          <label id="remoteServerPortField">本地 API 端口<input id="remoteServerPort" type="number" min="1024" max="65535" value="17320" required></label>
-          <label id="remoteOperatorEmailsField">允许远程执行的邮箱<input id="remoteOperatorEmails" placeholder="多个邮箱用逗号分隔"></label>
+          <label>说明内容<select id="featureHelpTopic">
+            <option value="dashboard">运行概览</option>
+            <option value="inventory">商品库存</option>
+            <option value="sales">销售趋势</option>
+            <option value="attendance">签到管理</option>
+            <option value="settings">云仓设置</option>
+          </select></label>
         </div>
-        <p class="field-help">API 强制只监听 127.0.0.1；外部访问必须经过 Cloudflare Tunnel 和 Access。客户端只能调用预置任务，不能上传任意脚本。</p>
-        <div id="remoteClientActions" class="settings-actions hidden">
-          <div class="action-group"><button id="remoteLogin" type="button">登录主服务器</button><button id="testRemote" type="button">测试连接</button></div>
-          <p id="remoteTestMessage" class="save-message"></p>
-        </div>
-        <div class="settings-actions">
-          <p id="runtimeSaveMessage" class="save-message"></p>
-          <button class="primary" type="submit">保存运行模式</button>
-        </div>
-      </form>
+        <div class="settings-actions"><button id="featureManualButton" type="button" aria-haspopup="dialog" aria-controls="featureHelpDialog" title="使用说明与技术原理">使用说明</button></div>
+      </section>
+
+      <div class="daily-connection-card"><h3>连接由工作台统一管理</h3><p>Tailscale 连接、服务器及成员权限统一在外层工作台设置。采集任务在主服务器执行；员工使用自己的工作台身份访问。</p><button type="button" id="dailyBackToWorkbench">返回工作台设置连接</button><p id="legacyConnectionNotice" class="daily-error-note hidden">检测到旧版客户端配置，请返回工作台使用 Tailscale 连接；此处不再设置旧版远程地址。</p></div>
 
       <form id="accountSettingsForm" class="settings-card server-only-settings">
         <div class="settings-card-heading">
@@ -283,7 +247,7 @@
       </form>
 
       <form id="automationSettingsForm" class="settings-card server-only-settings">
-        <div class="settings-card-heading"><div><h3>自动任务</h3><p>本机每日直发，不依赖服务器、SSH 或 WSL。</p></div></div>
+        <div class="settings-card-heading"><div><h3>自动任务</h3><p>由主服务器执行每日采集与群同步。请保持服务器在线。</p></div></div>
         <div class="form-grid">
           <label>每天执行时间<input id="scheduleTime" type="time" required></label>
           <label>每月销量执行时间<input id="monthlySalesTime" type="time" required></label>
@@ -306,19 +270,19 @@
         </div>
         <div class="maintenance-grid">
           <article class="summary-card"><span>登录状态</span><strong id="loginState">待刷新</strong></article>
-          <article class="summary-card"><span>软件更新</span><strong id="updateState">未检查</strong></article>
+          <article class="summary-card" data-standalone-update><span>软件更新</span><strong id="updateState">未检查</strong></article>
         </div>
         <div class="actions">
           <button id="refreshLogin" type="button">登录 / 刷新菜鸟状态</button>
           <button id="openData" type="button">打开数据目录</button>
           <button id="openLogs" type="button">打开日志目录</button>
           <button class="repository-link" id="openRepository" type="button" title="在默认浏览器中打开 GitHub 仓库">GitHub 仓库 <span aria-hidden="true">↗</span></button>
-          <button id="checkUpdate" type="button">检查更新</button>
-          <button class="primary hidden" id="installUpdate">重启并安装更新</button>
+          <button id="checkUpdate" type="button" data-standalone-update>检查更新</button>
+          <button class="primary hidden" id="installUpdate" data-standalone-update>重启并安装更新</button>
         </div>
       </section>
 
-      <section class="settings-card">
+      <section class="settings-card" id="cloudAiRuntime">
         <div class="settings-card-heading">
           <div><h3>AI Runtime</h3><p>同一核心支持源码、CLI、本地 stdio MCP、便携版与安装版，可供脚本和 AI 客户端调用。</p></div>
           <span class="config-state ready">已启用</span>
@@ -333,7 +297,7 @@
         <p class="field-help">同一核心支持源码、CLI、MCP、便携版和安装版；AI 可导出脱敏 Debug Bundle。扩展代码必须由用户显式信任，写入型 action 仍需二次确认。</p>
       </section>
 
-      <section class="settings-card">
+      <section class="settings-card" data-standalone-update>
         <div class="settings-card-heading">
           <div><h3>在线升级</h3><p>正式发布版从公开 GitHub Release 下载更新，无需内置访问凭据。</p></div>
           <span class="config-state" id="updateCredentialState">检测中</span>
@@ -368,13 +332,14 @@
       <button type="button" data-feature-help-mode="principle" aria-pressed="false">技术原理</button>
     </nav>
     <div id="featureHelpBody" class="feature-help-body" tabindex="0" aria-label="功能说明正文"></div>
-    <p class="feature-help-footer">说明随当前功能切换，本地离线可读。阅读不会启动采集、下载或修改业务数据。</p>
+    <p class="feature-help-footer">可在云仓设置中选择各功能的说明，本地离线可读。阅读不会启动采集、下载或修改业务数据。</p>
   </dialog>
   <script src="../../node_modules/gridjs/dist/gridjs.production.min.js"></script>
   <script src="../../node_modules/echarts/dist/echarts.min.js"></script>
   <script src="feature-help-content.js"></script>
   <script src="feature-help.js"></script>
   <script src="renderer.js"></script>
-  <script src="local-desks.js"></script>
+  <script type="module" src="../shared/loading-screen-auto.mjs"></script>
+  <script type="module" src="daily-work-entry.mjs"></script>
 </body>
 </html>

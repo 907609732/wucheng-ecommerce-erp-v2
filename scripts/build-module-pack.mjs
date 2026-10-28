@@ -54,7 +54,7 @@ try {
     if (manifest.name !== packageNames[id]) throw Error('Unexpected workspace package identity');
     version = manifest.version; entry = 'server.mjs'; kind = 'service';
     dependencies = [{id: 'node-runtime', range: '>=24.18.0 <25'}];
-    const entries = ['package.json', 'package-lock.json', 'server.mjs', 'lib', 'public'];
+    const entries = ['package.json', 'package-lock.json', 'server.mjs', 'lib', 'public',...(fs.existsSync(path.join(workspace,'workbench-manifest.json'))?['workbench-manifest.json']:[])];
     // Source allowlist only: no data/, originals, attachments, config or credentials.
     for (const name of entries) fs.cpSync(path.join(workspace, name), path.join(stage, name), {
       recursive: true, dereference: false, filter: file => {
@@ -83,9 +83,16 @@ try {
         if(!fs.existsSync(file))throw Error('Build requires the public OCR model: '+language);
         fs.copyFileSync(file,path.join(target,language+'.traineddata'));
       }
-      const license=await fetch('https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE',{signal:AbortSignal.timeout(30000)});
-      if(!license.ok)throw Error('Cannot obtain OCR model redistribution license');
-      fs.writeFileSync(path.join(target,'LICENSE'),await license.text());
+      const cachedLicense=path.resolve('build/public/tessdata-fast-LICENSE'),proof=cachedLicense+'.provenance.json';
+      if(fs.existsSync(cachedLicense)&&fs.existsSync(proof)){
+        const provenance=JSON.parse(fs.readFileSync(proof,'utf8'));
+        if(provenance.repository!=='tesseract-ocr/tessdata_fast'||provenance.path!=='LICENSE'||await digest(cachedLicense)!==provenance.sha256)throw Error('Cached OCR license provenance mismatch');
+        fs.copyFileSync(cachedLicense,path.join(target,'LICENSE'));
+      }else{
+        const license=await fetch('https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE',{signal:AbortSignal.timeout(30000)});
+        if(!license.ok)throw Error('Cannot obtain OCR model redistribution license');
+        fs.writeFileSync(path.join(target,'LICENSE'),await license.text());
+      }
     }
     // Production dependencies are resolved from the lockfile in clean staging,
     // never copied from a developer's node_modules.
@@ -113,7 +120,7 @@ try {
   for (const file of files) zip.addFile(file.file, file.relative);
   zip.end();
   await pipeline(zip.outputStream, fs.createWriteStream(archivePath));
-  const spec = {id, version, hostRange: '>=0.8.0 <1.0.0', platform: 'win32', arch: 'x64', kind, entry, dependencies,
+  const spec = {id, version, hostRange: '>=0.9.0 <1.0.0', platform: 'win32', arch: 'x64', kind, entry, dependencies,
     archive, bytes: fs.statSync(archivePath).size, unpackedBytes: files.reduce((sum, file) => sum + file.size, 0),
     sha256: await digest(archivePath),
     url: `https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/${tag}/${archive}`};

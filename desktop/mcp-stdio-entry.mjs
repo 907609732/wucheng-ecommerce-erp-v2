@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { serveInventoryMcp } from "./mcp-server.mjs";
+import { serveInventoryMcp,serveWorkbenchMcp } from "./mcp-server.mjs";
+import {randomUUID} from 'node:crypto';
 
 const appExe = process.env.CAINIAO_ASSISTANT_EXE || process.execPath;
 const appPath = process.env.CAINIAO_ASSISTANT_APP_PATH || "";
@@ -8,6 +9,7 @@ const version = process.env.CAINIAO_ASSISTANT_VERSION || "0.0.0";
 
 function cleanChildEnvironment() {
   const env = { ...process.env };
+  env.WORKBENCH_CLIENT_CHANNEL='mcp';
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.CAINIAO_ASSISTANT_EXE;
   delete env.CAINIAO_ASSISTANT_APP_PATH;
@@ -49,7 +51,25 @@ function invokeCli(args) {
   });
 }
 
-serveInventoryMcp({
+if(process.env.WORKBENCH_MCP_BROKER==='1'){
+  if(typeof process.send!=='function')throw Error('工作台 MCP 需要可信的父进程 IPC 通道');
+  const pending=new Map();
+  process.on('message',message=>{
+    if(message?.type!=='workbench:response')return;
+    const request=pending.get(message.id);if(!request)return;
+    pending.delete(message.id);clearTimeout(request.timer);
+    if(message.ok)request.resolve(message.value);
+    else request.reject(Object.assign(Error(message.error?.message||'工作台操作失败'),{code:message.error?.code}));
+  });
+  process.on('disconnect',()=>process.exit(0));
+  const dispatch=request=>new Promise((resolve,reject)=>{
+    if(!process.connected)return reject(Error('工作台 MCP 调度通道已关闭'));
+    const id=randomUUID(),timer=setTimeout(()=>{pending.delete(id);reject(Object.assign(Error('工作台调用未及时返回，请查询任务结果后再试'),{code:'WORKBENCH_OUTCOME_UNKNOWN'}));},180000);
+    pending.set(id,{resolve,reject,timer});
+    process.send({type:'workbench:request',id,request},error=>{if(error){clearTimeout(timer);pending.delete(id);reject(error);}});
+  });
+  serveWorkbenchMcp({version,dispatch,onClose:()=>process.exit(0)});
+}else serveInventoryMcp({
   version,
   getStatus: async () => (await invokeCli(["status"])).status,
   getLogs: async (limit) => (await invokeCli(["logs", `--limit=${limit}`])).lines || [],

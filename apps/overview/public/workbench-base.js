@@ -1,0 +1,14 @@
+/* Prefix transport for the independently usable desktop UI. */
+(()=>{
+ const m=location.pathname.match(/^\/apps\/([a-z]+)\//);if(!m)return;const module=m[1],base='/apps/'+module+'/',api='/apps/'+module,nativeFetch=window.fetch.bind(window);
+ const resolve=value=>{if(typeof value!=='string'||!value.startsWith('/')||value.startsWith('//')||value.startsWith('/apps/')||value.startsWith('/api/workbench/'))return value;return value.startsWith('/api/')?api+value:base+value.slice(1);};
+ let session;const getSession=()=>session||(session=nativeFetch('/api/workbench/v1/session',{credentials:'same-origin'}).then(async r=>{if(!r.ok)throw Error('工作台会话已过期，请重新打开');return r.json();}).catch(e=>{session=null;throw e;}));
+ window.fetch=async(input,init={})=>{const raw=input instanceof Request?input.url:input,url=typeof raw==='string'?resolve(raw):raw;const method=String(init.method||input?.method||'GET').toUpperCase(),headers=new Headers(init.headers||input?.headers||{});if(!['GET','HEAD','OPTIONS'].includes(method)){const s=await getSession();headers.set('X-Workbench-CSRF',s.csrfToken);headers.set('X-Workbench-Channel','ui');if(!headers.has('Idempotency-Key'))headers.set('Idempotency-Key',crypto.randomUUID());}return nativeFetch(input instanceof Request?new Request(url,input):url,{...init,headers,credentials:'same-origin'});};
+ const attr=Element.prototype.setAttribute;Element.prototype.setAttribute=function(name,value){return attr.call(this,name,['href','src','action','poster'].includes(name)?resolve(value):value);};
+ for(const [type,name]of [[HTMLImageElement,'src'],[HTMLScriptElement,'src'],[HTMLLinkElement,'href'],[HTMLAnchorElement,'href'],[HTMLFormElement,'action'],[HTMLIFrameElement,'src']]){const descriptor=Object.getOwnPropertyDescriptor(type.prototype,name);if(descriptor?.set)Object.defineProperty(type.prototype,name,{...descriptor,set(value){descriptor.set.call(this,resolve(value));}});}
+ const fix=node=>{if(node.nodeType!==1)return;for(const el of [node,...node.querySelectorAll('[href],[src],[action],[poster]')])for(const name of ['href','src','action','poster'])if(el.hasAttribute(name)){const old=el.getAttribute(name),value=resolve(old);if(old!==value)attr.call(el,name,value);}};
+ new MutationObserver(records=>{for(const r of records)if(r.type==='childList')for(const n of r.addedNodes)fix(n);else if(r.target.nodeType===1)fix(r.target);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['href','src','action','poster']});
+ document.addEventListener('click',e=>{const a=e.target.closest?.('a[href]');if(a){const raw=a.getAttribute('href'),url=resolve(raw);if(url!==raw)attr.call(a,'href',url);}},true);
+ const open=window.open.bind(window);window.open=(url,...args)=>open(resolve(url),...args);
+ window.workbenchTransport={module,uiBase:base,apiBase:api,resolve,getSession};
+})();

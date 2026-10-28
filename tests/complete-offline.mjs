@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {ModuleManager} from '../desktop/modules/module-manager.mjs';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-complete-offline-'));
-const manager=new ModuleManager({root,hostVersion:'0.8.0',publicKeys:JSON.parse(fs.readFileSync('desktop/launcher/public-keys.json','utf8')),
+const hostVersion=JSON.parse(fs.readFileSync('desktop/launcher/package.json','utf8')).version;
+const manager=new ModuleManager({root,hostVersion,publicKeys:JSON.parse(fs.readFileSync('desktop/launcher/public-keys.json','utf8')),
   fetchImpl:()=>{throw Error('Offline verification forbids network');}});
 const inspected=await manager.inspectOffline(path.resolve('dist/modules/LingtuModules-Complete-Offline.zip'));
 assert.equal(inspected.packages.length,7);

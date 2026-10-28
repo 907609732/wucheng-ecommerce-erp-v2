@@ -3,7 +3,10 @@
     "wucheng-ecommerce-erp-v2": {
       "type": "stdio",
       "command": "node_modules/electron/dist/electron.exe",
-      "args": [".", "--mcp-stdio"],
+      "args": [
+        "desktop/launcher",
+        "--mcp-stdio"
+      ],
       "cwd": ".",
       "connectionTimeout": 15000,
       "requestTimeout": 30000

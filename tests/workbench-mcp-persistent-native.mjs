@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {Client} from '@modelcontextprotocol/client';
+import {StdioClientTransport} from '@modelcontextprotocol/client/stdio';
+
+test('actual Electron hosts the official MCP SDK and reuses one dispatcher for repeated tools',{timeout:30000},async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-mcp-native-'));
+  const runtime=pathToFileURL(path.resolve('desktop/shared/workbench-mcp-runtime.mjs')).href;
+  const dispatcher=pathToFileURL(path.resolve('desktop/shared/workbench-dispatcher.mjs')).href;
+  const fixture=path.join(root,'main.mjs');
+  fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({name:'isolated-workbench-mcp-native',version:'1.0.0',type:'module',main:'main.mjs'}));
+  fs.writeFileSync(fixture,`import {app} from 'electron';import {startWorkbenchMcpRuntime} from ${JSON.stringify(runtime)};import {createWorkbenchDispatcher} from ${JSON.stringify(dispatcher)};app.whenReady().then(()=>{let calls=0;const dispatch=createWorkbenchDispatcher({version:'0.11.0-fixture',executeLegacy:async request=>{calls++;if(request.command==='status')return {ok:true,status:{pid:process.pid,brokerPid:runtime.child.pid,calls}};if(request.command==='capabilities')return {ok:true,capabilities:{apiVersion:'1.0.0'}};if(request.command==='extensions')return {ok:true,extensions:[{id:'lingtu.desks'}]};if(request.command==='extension-call'&&request.action==='status')return {ok:true,response:[{extension:'purchase',status:'stopped',version:'fixture',root:'private-fixture',pid:1}]};throw Object.assign(Error('Fixture refuses business writes'),{code:'FIXTURE_READ_ONLY'});}});const runtime=startWorkbenchMcpRuntime({version:'0.11.0-fixture',dispatch,onClose:code=>app.exit(code)});});`);
+  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+  const transport=new StdioClientTransport({command:path.resolve('node_modules/electron/dist/electron.exe'),args:[root,'--user-data-dir='+path.join(root,'profile')],env,stderr:'pipe'});
+  let stderr='';transport.stderr?.on('data',chunk=>{stderr+=chunk;});
+  const client=new Client({name:'persistent-native-fixture',version:'1.0.0'});
+  t.after(async()=>{await client.close();if(stderr.trim())t.diagnostic(stderr);fs.rmSync(root,{recursive:true,force:true});});
+  await client.connect(transport);
+  const names=(await client.listTools()).tools.map(tool=>tool.name);
+  for(const name of ['workbench_status','workbench_capabilities','workbench_modules','workbench_query','workbench_tasks','workbench_prepare','inventory_status','inventory_extension_call'])assert(names.includes(name));
+  const read=async name=>{const response=await client.callTool({name,arguments:{}});assert(!response.isError);return JSON.parse(response.content.find(c=>c.type==='text').text);};
+  const a=await read('workbench_status'),b=await read('workbench_status'),old=await read('inventory_status');
+  assert.equal(a.status.pid,b.status.pid);assert.equal(a.status.pid,old.pid);assert.equal(b.status.calls,a.status.calls+1);assert.equal(old.calls,b.status.calls+1);
+  assert.equal(a.status.brokerPid,b.status.brokerPid);assert.equal(a.status.brokerPid,old.brokerPid);assert.notEqual(a.status.pid,a.status.brokerPid);
+  const capabilities=await read('workbench_capabilities');assert.equal(capabilities.capabilities.workbench.persistentDispatcher,true);
+  const modules=await read('workbench_modules');assert.equal(modules.modules[0].root,undefined);
+  const denied=await client.callTool({name:'workbench_prepare',arguments:{module:'purchase',params:{source:{}},confirmSideEffect:false}});
+  assert.equal(denied.isError,true);assert.match(denied.content[0].text,/SIDE_EFFECT_CONFIRMATION_REQUIRED/);
+});

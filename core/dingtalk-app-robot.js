@@ -16,7 +16,7 @@ export async function sendDingTalkAppRobotMessage({
     const response = await axios.post(
       DINGTALK_GROUP_MESSAGE_URL,
       buildDingTalkAppRobotGroupPayload({ robotCode, conversationId, msgKey, msgParam }),
-      { headers: { "x-acs-dingtalk-access-token": accessToken } }
+      { headers: { "x-acs-dingtalk-access-token": accessToken }, timeout:15000 }
     );
     return response.data;
   } catch (error) {
@@ -29,7 +29,7 @@ async function getDingTalkAppAccessToken({ clientId, clientSecret }) {
     const response = await axios.post(DINGTALK_ACCESS_TOKEN_URL, {
       appKey: clientId,
       appSecret: clientSecret
-    });
+    }, {timeout:15000});
     const accessToken = String(response.data?.accessToken || "").trim();
     if (!accessToken) throw new Error("钉钉未返回 accessToken");
     return accessToken;

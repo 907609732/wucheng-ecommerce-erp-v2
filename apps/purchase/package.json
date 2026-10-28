@@ -1,0 +1,41 @@
+{
+  "name": "purchase-desk",
+  "version": "1.8.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check server.mjs && node --check lib/app-info.mjs && node --check lib/usage.mjs && node --check lib/updater.mjs && node --check lib/importer.mjs && node --check lib/store.mjs && node --check public/app.js && node --check public/orders.js && node --check public/classification.mjs && node --check public/classification-ui.js && node --check lib/month-locks.mjs && node --check public/month-locks.js && node --check lib/import-review.mjs && node --check public/import-results.js && node --check lib/source-images.mjs && node --check lib/image-download.mjs && node --check lib/order-images.mjs && node --check public/order-images.js && node --check public/order-image-preview.js && node --check public/order-attributes.mjs && node --check public/order-attributes-ui.js && node --check public/order-query.mjs && node --check lib/audit-log.mjs && node --check public/audit-values.mjs && node --check public/audit-log.js && node --check lib/addresses.mjs && node --check lib/order-attachments.mjs && node --check lib/suppliers.mjs && node --check public/shipments.mjs && node --check public/address-parse.mjs && node --check public/contact-forms.js && node --check public/directories.js && node --check lib/mobile-access.mjs && node --check public/mobile.js && node --check public/mobile-admin.js && node --check public/mobile-query.js && node --check public/supplier-management.js && node --check public/tailscale-indicator.js && node --check lib/supplier-management.mjs && node --check lib/tailscale.mjs && node --check lib/task-center.mjs && node --check public/task-center.js && node --check public/task-cards.js && node --check lib/purchase-personnel.mjs && node --check lib/task-assignment.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.11",
+    "address-parse": "1.2.19",
+    "archiver": "^7.0.1",
+    "chart.js": "^4.5.0",
+    "csv-parse": "^7.0.3",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "flatpickr": "4.6.13",
+    "ipaddr.js": "1.9.1",
+    "jszip": "3.10.2",
+    "multer": "^2.0.2",
+    "pdfjs-dist": "^6.4.299",
+    "qrcode": "1.5.4",
+    "saxes": "5.0.1",
+    "sharp": "^0.35.5",
+    "tabulator-tables": "^6.6.1",
+    "tesseract.js": "^6.0.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
+  "devDependencies": {
+    "jsqr": "1.4.0",
+    "pngjs": "5.0.0"
+  }
+}

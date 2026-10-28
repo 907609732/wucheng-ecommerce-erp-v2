@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {spawnSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const runFile=promisify(execFile);
+const copyData=(source,target,filter=()=>true)=>fs.promises.cp(source,target,{recursive:true,filter:async file=>{
+  if((await fs.promises.lstat(file)).isSymbolicLink())throw fail('UNSAFE_DATA_PATH','数据目录包含链接，需要先核对真实位置');
+  return filter(file);
+}});
 import {atomicJson} from './module-manager.mjs';
 import {fail, inside} from './package-format.mjs';
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -41,26 +47,23 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       // points to this launcher itself. It is not a legacy cloud worker.
       const isLauncher=id==='warehouse'&&path.resolve(config.exe).toLowerCase()===path.resolve(process.execPath).toLowerCase();
       if(process.platform==='win32'&&!isLauncher){
-        const probe=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',
-          "$ErrorActionPreference='Stop'; @(Get-Process | Where-Object { $_.Path -eq $env:LINGTU_CHECK_EXE }).Count"],
-          {env:{...process.env,LINGTU_CHECK_EXE:config.exe},encoding:'utf8',windowsHide:true,timeout:15000});
-        if(probe.status!==0)throw fail('PROCESS_CHECK_FAILED','无法确认旧模块已退出');
+        let probe;try{probe=await runFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',
+          "$ErrorActionPreference='Stop'; @(Get-Process | Where-Object { $_.Path -and ($_.Path -eq $env:LINGTU_CHECK_EXE -or ($env:LINGTU_CHECK_PACKAGE_ROOT -and $_.Path.StartsWith($env:LINGTU_CHECK_PACKAGE_ROOT,[System.StringComparison]::OrdinalIgnoreCase))) }).Count"],
+          {env:{...process.env,LINGTU_CHECK_EXE:config.exe,LINGTU_CHECK_PACKAGE_ROOT:config.managed&&config.root?path.dirname(config.root)+path.sep:''},encoding:'utf8',windowsHide:true,timeout:15000});}
+        catch{throw fail('PROCESS_CHECK_FAILED','无法确认旧模块已退出');}
         if(Number(probe.stdout.trim())>0)throw fail('LEGACY_APP_RUNNING','旧版窗口仍在运行，请退出对应软件后重试安装');
       }
       const directory=path.join(backupRoot,id+'-'+randomUUID());
-      fs.mkdirSync(directory,{recursive:true});
+      await fs.promises.mkdir(directory,{recursive:true});
       // The cloud profile also contains the launcher's own state. Back up only
       // cloud-owned entries, never recursively copy the module store into itself.
       const entries=id==='warehouse'?['workspace','settings.json','secrets.bin','Partitions','Network','Local State','Local Storage','Session Storage','IndexedDB','Preferences','Secure Preferences']:
-        (fs.existsSync(config.dataDir)?fs.readdirSync(config.dataDir).filter(n=>!['SingletonLock','SingletonCookie','SingletonSocket','lockfile','.integration-runtime.json'].includes(n)):[]);
+        (fs.existsSync(config.dataDir)?(await fs.promises.readdir(config.dataDir)).filter(n=>!['SingletonLock','SingletonCookie','SingletonSocket','lockfile','.integration-runtime.json'].includes(n)):[]);
       const present=[];
       for(const name of entries){
         const source=inside(config.dataDir,name);
         if(!fs.existsSync(source))continue;
-        fs.cpSync(source,inside(directory,name),{recursive:true,filter:file=>{
-          if(fs.lstatSync(file).isSymbolicLink())throw fail('UNSAFE_DATA_PATH','数据目录包含链接，无法安全备份');
-          return true;
-        }});
+        await copyData(source,inside(directory,name));
         present.push(name);
       }
       const backup={directory,dataDir:config.dataDir,entries:present,ownedEntries:entries,hadProfile:fs.existsSync(config.dataDir),
@@ -82,17 +85,21 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       if(!running(cap)||!cap.maintenance||cap.version!==candidate.version)throw fail('HEALTH_CHECK_FAILED','模块未进入安全检查状态');
       const config=services.config(candidate.id);
       const ledger=path.join(config.dataDir,candidate.id==='warehouse'?'workspace/data/erp.sqlite':'orders.sqlite');
-      if(candidate.id==='exporter'&&!fs.existsSync(ledger))throw fail('MISSING_LEDGER','导出台账本未创建');
+      if(!fs.existsSync(ledger))throw fail('MISSING_LEDGER','功能主账本未创建，不能激活');
       if(fs.existsSync(ledger)){
-        const check=spawnSync(config.exe,['--input-type=module','-e',
+        try{await runFile(config.exe,['--input-type=module','-e',
           "import {DatabaseSync} from 'node:sqlite';const d=new DatabaseSync(process.argv[1],{readOnly:true});if(d.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')process.exit(2);d.close();",
-          ledger],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',windowsHide:true,timeout:30000});
-        if(check.status!==0)throw fail('DATABASE_CHECK_FAILED','模块账本完整性检查失败');
+          ledger],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',windowsHide:true,timeout:30000});}
+        catch{throw fail('DATABASE_CHECK_FAILED','模块账本完整性检查失败');}
       }
     },
     async complete(candidate){
-      await services.request(candidate.id,'/maintenance/activate',{method:'POST',body:{confirm:true}});
       const registry=readRegistry(services.registryFile);
+      let cap=await services.capabilities(candidate.id);
+      if(!running(cap)&&registry[candidate.id]?.root===candidate.root&&registry[candidate.id]?.maintenance===false)return;
+      if(!running(cap))cap=await services.ensure(candidate.id);
+      if(cap.version!==candidate.version)throw fail('HEALTH_CHECK_FAILED','待放行的功能版本发生变化');
+      if(cap.maintenance!==false)await services.request(candidate.id,'/maintenance/activate',{method:'POST',body:{confirm:true}});
       registry[candidate.id].maintenance=false;
       registry[candidate.id].allowInitialize=false;
       atomicJson(services.registryFile,registry);
@@ -109,7 +116,7 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       for(const name of b.ownedEntries){
         const target=inside(b.dataDir,name);
         if(fs.existsSync(target))fs.renameSync(target,target+'.failed-'+randomUUID());
-        if(b.entries.includes(name))fs.cpSync(inside(b.directory,name),target,{recursive:true});
+        if(b.entries.includes(name))await copyData(inside(b.directory,name),target);
       }
       const registry=readRegistry(services.registryFile);
       registry[journal.id]=b.previousRegistry||b.previousConfig;

@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path desktop/launcher/catalog.json)) { throw "Publish signed module packages before the launcher" }
-      - name: Build pure launcher Windows release
+      - name: Build complete workbench Windows installer
         run: npm run launcher:build
       - name: Verify packaged launcher
         env:
@@ -60,8 +60,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title $tag --generate-notes --verify-tag
           }
-          $assets = Get-ChildItem dist/launcher-release -File | Where-Object {
-            $_.Name -match '\.(exe|yml|blockmap)$' -and $_.Name -ne 'builder-debug.yml'
+          $assetNames = @(
+            "CloudWarehouseInventorySync-Setup-$version-x64.exe",
+            "CloudWarehouseInventorySync-Setup-$version-x64.exe.blockmap",
+            'latest.yml'
+          )
+          $assets = foreach ($name in $assetNames) {
+            $file = Join-Path 'dist/launcher-release' $name
+            if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release artifact: $name" }
+            Get-Item -LiteralPath $file
           }
           $existingAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
           foreach ($asset in $assets) {
@@ -75,7 +82,6 @@ jobs:
           $remoteAssets = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
           foreach ($required in @(
             "CloudWarehouseInventorySync-Setup-$version-x64.exe",
-            "CloudWarehouseInventorySync-Portable-$version-x64.exe",
             "CloudWarehouseInventorySync-Setup-$version-x64.exe.blockmap",
             'latest.yml'
           )) {
@@ -87,6 +93,6 @@ jobs:
         with:
           name: windows-release
           path: |
-            dist/launcher-release/*.exe
+            dist/launcher-release/*Setup*.exe
             dist/launcher-release/*.yml
             dist/launcher-release/*.blockmap

@@ -1,0 +1,4 @@
+.openingStatus[hidden]{display:none!important}
+.openingStatus .lt-loading__status{display:grid;gap:6px}
+.openingStatus #openingTitle{font:inherit;color:inherit}
+.openingStatus #openingSeconds{font-size:11px;color:#8294ad}

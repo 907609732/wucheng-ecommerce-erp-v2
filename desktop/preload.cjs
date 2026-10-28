@@ -1,13 +1,10 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("inventoryApp", {
-  deskStatus:()=>ipcRenderer.invoke('desks:status'),
-  openDesk:payload=>ipcRenderer.invoke('desks:open',payload),
-  hideDesks:()=>ipcRenderer.invoke('desks:hide'),
-  deskBounds:bounds=>ipcRenderer.invoke('desks:bounds',bounds),
-  stopDesk:id=>ipcRenderer.invoke('desks:stop',id),
-  deskLogs:id=>ipcRenderer.invoke('desks:logs',id),
-  onDeskNavigate:callback=>{const fn=(_e,value)=>callback(value);ipcRenderer.on('desks:navigate',fn);return()=>ipcRenderer.removeListener('desks:navigate',fn);},
+  getDailyStatus: () => ipcRenderer.invoke('warehouse-daily:get'),
+  dailyAction: payload => ipcRenderer.invoke('warehouse-daily:action', payload),
+  saveDailyConfig: payload => ipcRenderer.invoke('warehouse-daily:config', payload),
+  saveReminderSettings: payload => ipcRenderer.invoke('warehouse-daily:reminder-settings', payload),
   getBranding: () => ipcRenderer.invoke("branding:get"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   getAbout: () => ipcRenderer.invoke("app:about"),

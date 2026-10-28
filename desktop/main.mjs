@@ -1,5 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, session, shell, dialog } from "electron";
-import {installDeskViews} from './local-desks.mjs';
+import { app, BrowserWindow, ipcMain, safeStorage, shell, dialog } from "electron";
 import {installBundledDesks} from './shared/install-desks.mjs';
 import {startCloudControl} from './modules/cloud-control.mjs';
 import { spawn } from "node:child_process";
@@ -25,23 +24,46 @@ import { parseCliRequest } from "./shared/ai-interface.mjs";
 import { diagnosticHealth, redactDiagnosticValue, sanitizeDiagnosticText, searchDiagnosticLines } from "./shared/diagnostics.mjs";
 import { createRuntimeCapabilities } from "./shared/runtime-contract.mjs";
 import { discoverExtensions, invokeTrustedExtension, normalizeTrustedExtensionIds } from "./shared/extensions.mjs";
-import { canonicalUserDataPath, requestedUserDataPath } from "./shared/user-data-path.mjs";
+import { requestedUserDataPath } from "./shared/user-data-path.mjs";
+import { getWorkbenchLocation } from "./shared/workbench-location.mjs";
 import { readCainiaoInventory } from "./shared/inventory-store.mjs";
+import {createWarehouseDaily,expectedInventoryDate} from '../core/erp/warehouse-daily.js';
+import {normalizeReminderSettings,reminderChannelStates,createWarehouseReminderSenders} from './shared/warehouse-reminder-senders.mjs';
 import { readMonthlySalesDashboard } from "./shared/monthly-sales-store.mjs";
 import { createUpdater } from "./updater.mjs";
 import { terminateProcessTree } from "./shared/task-process.mjs";
 import { mergeScheduledTasks, queueAfterTaskResult } from "./shared/task-schedule.mjs";
 import { externalLink } from "./shared/external-links.mjs";
-import { createRemoteService } from "./shared/remote-service.mjs";
 import { CHANGELOG } from './shared/changelog.mjs';
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 import brandingModule from "./shared/branding.cjs";
 
 const { buildBranding } = brandingModule;
 
-const stableUserDataPath = requestedUserDataPath(process.argv) || canonicalUserDataPath(app.getPath("appData"));
+let startupLocation;
+try {
+  startupLocation = getWorkbenchLocation(app.getPath("appData"), {
+    explicitProfile: requestedUserDataPath(process.argv), registryFile: process.env.LINGTU_REGISTRY_PATH
+  });
+} catch (error) {
+  if (process.argv.includes("--cli") || process.argv.includes("--mcp-stdio")) {
+    process.stderr.write("工作台数据位置需要核对：" + error.message + "\n");
+  } else {
+    await app.whenReady();
+    dialog.showErrorBox("工作台数据位置需要核对", error.message);
+  }
+  process.exit(1);
+}
+const stableUserDataPath = startupLocation.profile;
+if (!process.env.LINGTU_REGISTRY_PATH) process.env.LINGTU_REGISTRY_PATH = startupLocation.registryFile;
 fs.mkdirSync(stableUserDataPath, { recursive: true });
 app.setPath("userData", stableUserDataPath);
+// Business files may move without changing Chromium's encrypted login profile.
+if(process.env.LINGTU_AUTH_PROFILE_DIR){
+  const authProfile=path.resolve(process.env.LINGTU_AUTH_PROFILE_DIR);
+  if(!fs.existsSync(authProfile))throw Error('原认证目录不存在，已阻止初始化空登录环境');
+  app.setPath('sessionData',authProfile);
+}
 
 const desktopDir = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = path.join(desktopDir, "preload.cjs");
@@ -70,10 +92,31 @@ let mcpBridgeChild = null;
 let cachedSettings = null;
 let cachedSecrets = null;
 let remoteService = null;
-let remoteLoginWindow = null;
-const managedCloud = process.env.LINGTU_MANAGED_MODULE === '1';
+const managedCloud = process.env.LINGTU_MANAGED_MODULE === '1' || process.argv.includes('--managed-module=warehouse');
 let managedMaintenance = managedCloud && process.env.LINGTU_MAINTENANCE === '1';
 let cloudControl = null;
+let warehouseDaily = null;
+let reminderTimer = null;
+let reminderWork = 0;
+const localDailyActor={id:'local-admin',login:'local-admin',name:'本机管理员',role:'admin',local:true,channel:'ui'};
+function dailyService() {
+  if(!warehouseDaily)warehouseDaily=createWarehouseDaily({databasePath:inventoryDatabasePath(),senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});
+  return warehouseDaily;
+}
+async function dailyStatus(actor=localDailyActor) {
+  assertDailyAvailable();
+  const value=await dailyService().status(actor);
+  if(actor.local)value.reminderSettings={...normalizeReminderSettings(readSettings().warehouseReminders),secretFlags:Object.fromEntries(['smtpPassword','aliyunAccessKeyId','aliyunAccessKeySecret'].map(key=>[key,Boolean(cachedSecrets?.[key])]))};
+  return value;
+}
+async function dailyRemind(actor,payload) {
+  assertDailyAvailable();
+  reminderWork++;
+  try{return await dailyService().remind(actor,payload);}finally{reminderWork--;}
+}
+function assertDailyAvailable(){
+  if(managedMaintenance||fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Error('云仓正在维护，请完成维护后再操作签到管理');
+}
 
 function appDataDir() {
   return path.join(app.getPath("userData"), "workspace");
@@ -92,32 +135,13 @@ function inventoryDatabasePath() {
 }
 
 function runtimeMode() {
-  return readSettings().runtimeMode;
+  // The managed warehouse is a host service. Network role and Tailscale
+  // configuration belong to the outer workbench, not the module's old config.
+  return managedCloud ? 'server' : readSettings().runtimeMode;
 }
 
-function remoteServerBaseUrl() {
-  const value = readSettings().remoteServerUrl;
-  if (!value) throw new Error("尚未配置主服务器地址");
-  return value;
-}
-
-async function remoteRequest(pathname, options = {}) {
-  const url = new URL(pathname, `${remoteServerBaseUrl()}/`).toString();
-  const response = await session.defaultSession.fetch(url, {
-    method: options.method || "GET",
-    headers: { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}) },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-    credentials: "include",
-    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
-    redirect: "follow"
-  });
-  const contentType = String(response.headers.get("content-type") || "");
-  if (!contentType.includes("application/json")) {
-    throw new Error("需要先登录主服务器");
-  }
-  const payload = await response.json();
-  if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `主服务器返回 HTTP ${response.status}`);
-  return payload.data ?? payload;
+async function remoteRequest() {
+  throw new Error('旧版远程连接已停用，请从工作台 Tailscale 入口打开云仓');
 }
 
 function notifyRemoteConnection(connected, message, health = null) {
@@ -223,6 +247,7 @@ function readBuildInfo() {
 function readSettings() {
   try {
     const settings = normalizeSettings(JSON.parse(fs.readFileSync(settingsPath(), "utf8")));
+    if(managedCloud)settings.runtimeMode='server';
     cachedSettings = settings;
     return settings;
   } catch {
@@ -298,7 +323,7 @@ async function publicSettings() {
   const firstRun = !fs.existsSync(settingsPath()) || readSettings().firstRunPending === true;
   const settings = readSettings();
   const secrets = await readSecrets();
-  return { ...settings, firstRun, secretFlags: secretFlags(secrets) };
+  return { ...settings, runtimeMode:runtimeMode(), firstRun:false, legacyClient:!managedCloud&&settings.runtimeMode==='client', secretFlags: secretFlags(secrets) };
 }
 
 function appendLog(message, level = "info") {
@@ -339,7 +364,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 680,
-    title: branding.productName,
+    title: '云仓同步 · 五成电子商务工作台',
     icon: path.join(desktopDir, "assets", "lingtu-icon.png"),
     backgroundColor: "#f4f1ec",
     show: !process.argv.includes("--hidden"),
@@ -352,7 +377,6 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(rendererPath, managedCloud ? {query:{module:'warehouse'}} : {});
-  installDeskViews(mainWindow,{notify:message=>appendLog(message,'warning')});
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("close", (event) => {
@@ -414,6 +438,7 @@ function currentBranding() {
 }
 
 async function startProcess(kind, trigger = "manual", options = {}, context = {}) {
+  if(fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Object.assign(Error('账本正在迁移维护，恢复并核对完成前不能执行任务'),{code:'MODULE_MAINTENANCE'});
   if (runningChild || runningTaskPromise) throw new Error("已有任务正在运行，请等待完成");
   const definition = taskDefinition(kind, options);
   const settings = readSettings();
@@ -424,11 +449,18 @@ async function startProcess(kind, trigger = "manual", options = {}, context = {}
     : validateCainiaoSettings(settings, flags);
   if (!validation.ok) throw new Error(validation.errors.join("；"));
   const scriptPath = path.join(app.getAppPath(), "core", definition.scriptName);
+  if(kind==='sync'&&!fs.existsSync(inventoryDatabasePath())){
+    process.env.ERP_DATA_DIR=path.dirname(inventoryDatabasePath());
+    const {getDb}=await import('../core/erp/db.js');getDb();
+  }
   const releaseTaskLock = acquireTaskLock(kind);
   const startedAt = new Date().toISOString();
+  let syncRunId='';
+  try{if(kind==='sync')syncRunId=dailyService().beginRun({expectedSourceDate:process.env.CAINIAO_EXPECTED_SOURCE_DATE||process.env.CAINIAO_INVENTORY_QUERY_DATE||expectedInventoryDate()});}
+  catch(error){releaseTaskLock();throw error;}
   const logStart = recentLog.length;
   runningKind = kind;
-  const triggerLabel = trigger === "schedule" ? "定时" : (trigger === "remote" ? "远程" : "手动");
+  const triggerLabel = trigger === "schedule" ? "定时" : (["remote","tailscale"].includes(trigger) ? "远程" : "手动");
   const actorLabel = context.requestedBy ? `，发起人 ${context.requestedBy}` : "";
   appendLog(`启动${definition.label}（${triggerLabel}${actorLabel}）…`);
 
@@ -436,11 +468,12 @@ async function startProcess(kind, trigger = "manual", options = {}, context = {}
   try {
     child = spawn(process.execPath, [scriptPath, ...definition.args], {
       cwd: appDataDir(),
-      env: buildEnvironment(settings, secrets, kind),
-      windowsHide: false,
+      env: {...buildEnvironment(settings, secrets, kind),...(syncRunId?{WAREHOUSE_SYNC_RUN_ID:syncRunId}:{})},
+      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
   } catch (error) {
+    if(syncRunId)dailyService().updateRun(syncRunId,{error:'采集进程未启动',finishedAt:new Date().toISOString()});
     releaseTaskLock();
     runningKind = "";
     throw error;
@@ -461,6 +494,7 @@ async function startProcess(kind, trigger = "manual", options = {}, context = {}
   child.once("close", (code) => {
     const cancelled = stopRequestedPid === child.pid;
     const success = code === 0 && !cancelled;
+    if(syncRunId)dailyService().updateRun(syncRunId,{finishedAt:new Date().toISOString(),...(!success?{error:cancelled?'任务已中止':'本次同步未完成，请查看运行日志'}:{})});
     appendLog(
       cancelled ? "当前任务已由用户强制中止。" : (success ? "任务执行完成。" : `任务已停止，退出码 ${code ?? "未知"}。`),
       success ? "success" : (cancelled ? "info" : "error")
@@ -786,14 +820,15 @@ async function interfaceStatus() {
 }
 
 function configureLoginItem(settings) {
-  if (!app.isPackaged) return;
+  if(managedCloud)return; // The workbench owns the sole login startup entry.
+  if (!app.isPackaged || process.env.LINGTU_ISOLATED_TEST === '1') return;
   const openAtLogin = Boolean(settings.startAtLogin);
   app.setLoginItemSettings({
     openAtLogin,
     enabled: openAtLogin,
     name: "云仓库存同步",
     path: process.execPath,
-    args: ["--hidden"]
+    args: managedCloud ? ['--hidden','--managed-module=warehouse','--user-data-dir='+app.getPath('userData')] : ['--hidden']
   });
 }
 
@@ -888,73 +923,44 @@ async function stopRemoteService() {
 
 async function configureRemoteService() {
   await stopRemoteService();
-  const settings = readSettings();
-  if (settings.runtimeMode !== "server") return;
-  remoteService = createRemoteService({
-    host: "127.0.0.1",
-    port: settings.remoteServerPort,
-    requireAccessIdentity: true,
-    operatorEmails: settings.remoteOperatorEmails,
-    getHealth: async () => ({ version: app.getVersion(), running: Boolean(runningChild || runningTaskPromise) }),
-    getInventory: async () => readCainiaoInventory(inventoryDatabasePath()),
-    getMonthlySales: async (filters) => localMonthlySales(filters),
-    getTaskState: async () => {
-      const { logPath: _logPath, ...state } = emitState();
-      return state;
-    },
-    startTask: async (kind, trigger, options, actor) => startProcess(kind, trigger, options, actor),
-    stopTask: async () => stopCurrentTask()
-  });
-  try {
-    const address = await remoteService.start();
-    appendLog(`主服务器 API 已启动：${address}（仅本机回环）`, "success");
-  } catch (error) {
-    remoteService = null;
-    appendLog(`主服务器 API 启动失败：${error.message}`, "error");
-    throw error;
-  }
+  // Legacy Cloudflare listeners are retired. The outer workbench owns the
+  // authenticated Tailscale gateway and starts this module as a host service.
 }
 
 function openRemoteLogin() {
-  if (runtimeMode() !== "client") throw new Error("只有客户端模式需要登录主服务器");
-  if (remoteLoginWindow && !remoteLoginWindow.isDestroyed()) {
-    remoteLoginWindow.show();
-    remoteLoginWindow.focus();
-    return { opened: true };
-  }
-  remoteLoginWindow = new BrowserWindow({
-    width: 860,
-    height: 720,
-    parent: mainWindow || undefined,
-    title: "登录主服务器",
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
-  });
-  remoteLoginWindow.setMenuBarVisibility(false);
-  remoteLoginWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  const expectedOrigin = new URL(remoteServerBaseUrl()).origin;
-  let loginCompleted = false;
-  remoteLoginWindow.webContents.on("did-finish-load", async () => {
-    if (loginCompleted || !remoteLoginWindow || remoteLoginWindow.isDestroyed()) return;
-    try {
-      if (new URL(remoteLoginWindow.webContents.getURL()).origin !== expectedOrigin) return;
-      const health = await remoteRequest("/api/v1/health");
-      loginCompleted = true;
-      notifyRemoteConnection(true, "主服务器登录成功", health);
-      setTimeout(() => {
-        if (remoteLoginWindow && !remoteLoginWindow.isDestroyed()) remoteLoginWindow.close();
-      }, 500);
-    } catch {
-      // The target page can finish before Access has written the application cookie.
-    }
-  });
-  remoteLoginWindow.loadURL(remoteServerBaseUrl()).catch((error) => {
-    notifyRemoteConnection(false, `登录页面打开失败：${error.message}`);
-  });
-  remoteLoginWindow.on("closed", () => { remoteLoginWindow = null; });
-  return { opened: true };
+  throw new Error('连接与登录由工作台 Tailscale 设置统一管理');
 }
 
 ipcMain.handle("settings:get", async () => publicSettings());
+ipcMain.handle('warehouse-daily:get', async event => {
+  if(event.sender!==mainWindow?.webContents)throw Error('无权访问工作记录');
+  if(runtimeMode()==='client')throw Error('请从工作台 Tailscale 入口打开云仓');
+  return dailyStatus();
+});
+ipcMain.handle('warehouse-daily:action', async (event,payload={}) => {
+  if(event.sender!==mainWindow?.webContents)throw Error('无权操作工作记录');
+  assertDailyAvailable();
+  if(payload.action==='remind')return dailyRemind(localDailyActor,payload);
+  return dailyService().action(localDailyActor,payload);
+});
+ipcMain.handle('warehouse-daily:config', (event,payload={}) => {
+  if(event.sender!==mainWindow?.webContents)throw Error('无权修改员工设置');
+  assertDailyAvailable();
+  return dailyService().configure(localDailyActor,payload);
+});
+ipcMain.handle('warehouse-daily:reminder-settings', async (event,payload={}) => {
+  if(event.sender!==mainWindow?.webContents||runtimeMode()==='client')throw Error('提醒凭据只能在主机设置');
+  assertDailyAvailable();
+  const warehouseReminders=normalizeReminderSettings(payload.settings||{}),secrets={...await readSecrets()};
+  for(const key of ['smtpPassword','aliyunAccessKeyId','aliyunAccessKeySecret']){
+    if(payload.clearSecrets?.includes(key))delete secrets[key];
+    else if(String(payload.secrets?.[key]||'').trim())secrets[key]=String(payload.secrets[key]).trim();
+  }
+  await encryptSecrets(secrets);
+  const settings={...readSettings(),warehouseReminders};
+  fs.writeFileSync(settingsPath(),JSON.stringify(settings,null,2)+'\n','utf8');cachedSettings=settings;
+  return {ok:true};
+});
 ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("app:about", () => ({ version: app.getVersion(), build: readBuildInfo(), changelog: CHANGELOG }));
 ipcMain.handle("secrets:get-editable", async (event) => {
@@ -982,6 +988,7 @@ ipcMain.handle("settings:save", async (_event, payload = {}) => {
 });
 ipcMain.handle("settings:save-section", async (_event, payload = {}) => {
   const section = String(payload.section || "");
+  if(section==='runtime')throw Error('连接与运行角色由工作台 Tailscale 设置统一管理');
   const validators = {
     runtime: validateRuntimeSettings,
     account: validateCainiaoSettings,
@@ -1090,6 +1097,7 @@ function cliHelp() {
 }
 
 async function sendLatestValidInventoryReport() {
+  if(fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Object.assign(Error('账本正在迁移维护，当前不能发送报告'),{code:'MODULE_MAINTENANCE'});
   const settings = readSettings();
   const secrets = await readSecrets();
   const validation = validateDingTalkSettings(settings, secretFlags(secrets));
@@ -1267,9 +1275,34 @@ app.whenReady().then(async () => {
     configurationWarmError = error;
   }
   if (managedCloud) {
+    if(!fs.existsSync(inventoryDatabasePath())){
+      if(process.env.LINGTU_ALLOW_INITIALIZE!=='1')throw Object.assign(Error('原云仓账本不存在，已阻止创建空账本'),{code:'MISSING_LEDGER'});
+      process.env.ERP_DATA_DIR=path.dirname(inventoryDatabasePath());
+      const {getDb}=await import('../core/erp/db.js');
+      getDb(); // Real ERP schema and migrations; only explicit first installation.
+    }
     cloudControl = await startCloudControl({
       root: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion(),
-      busy: () => !!runningChild || !!runningTaskPromise,
+      busy: () => !!runningChild || !!runningTaskPromise || reminderWork>0,
+      migration: {databasePath:inventoryDatabasePath(),dataDir:app.getPath('userData')},
+      business: {
+        getDailyStatus: actor => dailyStatus(actor),
+        dailyAction: (actor,payload) => dailyService().action(actor,payload),
+        saveDailyConfig: (actor,payload) => dailyService().configure(actor,payload),
+        remindDaily: (actor,payload) => dailyRemind(actor,payload),
+        getInventory: async () => readCainiaoInventory(inventoryDatabasePath()),
+        getMonthlySales: async filters => localMonthlySales(filters),
+        getTaskState: async () => {
+          const {logPath:_localPath,...state}=emitState(),secrets=Object.values(await readSecrets()).filter(v=>typeof v==='string'&&v.length>=5);
+          const start=recentLog.findLastIndex(r=>/启动.*（/.test(r.line)),logs=recentLog.slice(Math.max(0,start)).slice(-100).map(r=>({level:r.level,line:sanitizeDiagnosticText(r.line,secrets).replace(/[A-Z]:[\\/][^\r\n"'<>]+/gi,'[主机路径]')}));
+          const waiting=!state.running&&logs.some(r=>/未登录|登录.*(?:失效|过期)|验证码|扫码|需要.*登录|login.*(?:required|expired)/i.test(r.line));
+          return {...state,logs,phase:waiting?'waiting-host-action':state.running?'running':'idle',...(waiting?{state:'waiting-host-action',message:'等待主服务器人工处理：请在主机完成登录、验证码或平台授权后重试'}:{})};
+        },
+        startTask: async (kind,trigger,options,actor) => startProcess(kind,trigger,options,actor),
+        stopTask: async () => stopCurrentTask(),
+        requestLogin: async actor => startProcess('login','tailscale',{},actor),
+        sendLatestValid: async actor => sendLatestValidInventoryReport(actor)
+      },
       activate: async () => {
         if (managedMaintenance) { managedMaintenance = false; configureSchedule(); await configureRemoteService(); }
       },
@@ -1289,6 +1322,12 @@ app.whenReady().then(async () => {
   });
   if (!managedCloud) updater.initialize();
   configureSchedule();
+  reminderTimer=setInterval(async()=>{
+    if(reminderWork||managedMaintenance||fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json'))||!fs.existsSync(inventoryDatabasePath()))return;
+    reminderWork++;
+    try{await dailyService().tick();}catch{appendLog('员工自动提醒检查失败，请核对签到管理配置','error');}finally{reminderWork--;}
+  },30000);
+  reminderTimer.unref();
   try {
     await configureRemoteService();
   } catch {

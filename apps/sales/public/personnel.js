@@ -1,0 +1,7 @@
+const employeeViews=new Set(['tasks','freight','manual','sources','imports']);
+export const identityNames={boss:'老板',employee:'员工'};
+export function selectedSalesRole(personnel){return personnel?.selected&&['boss','employee'].includes(personnel.role)?personnel.role:null;}
+export function canOpenSalesView(personnel,view){const role=selectedSalesRole(personnel);return role==='boss'||role==='employee'&&employeeViews.has(view);}
+export function personnelCoverageDatasets(personnel,datasets){return Object.entries(datasets).filter(([key])=>selectedSalesRole(personnel)!=='employee'||['operations','expense'].includes(key));}
+export function salesIdentityFromURL(value){const url=new URL(value);const role=url.searchParams.get('identity');return ['boss','employee'].includes(role)?role:null;}
+export function personnelChoiceMarkup(){return `<section class="personnel-picker"><span class="page-kicker">SALES DESK</span><h2>今天以哪个身份处理销售台？</h2><p>选好身份，直接进入自己的任务。</p><div class="personnel-choices"><button type="button" class="personnel-choice" data-personnel-role="employee"><span class="personnel-choice-icon" aria-hidden="true">▤</span><strong>我是员工</strong><small>导入账单、补齐经营和费用资料</small><span class="personnel-choice-link">进入我的任务 →</span></button><button type="button" class="personnel-choice" data-personnel-role="boss"><span class="personnel-choice-icon" aria-hidden="true">≋</span><strong>我是老板</strong><small>核对资金、检查月报、锁定交付</small><span class="personnel-choice-link">进入我的任务 →</span></button></div><p class="personnel-picker-note">这两个入口只区分工作分工，无需注册或填写密码。</p></section>`;}

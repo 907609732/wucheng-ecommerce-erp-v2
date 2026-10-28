@@ -11,10 +11,37 @@ export const AI_TOOLS = Object.freeze([
   "cainiao_refresh_login"
 ]);
 
+export const WORKBENCH_TOOLS = Object.freeze([
+  'workbench_status', 'workbench_capabilities', 'workbench_modules',
+  'workbench_query', 'workbench_tasks', 'workbench_prepare'
+]);
+
+const workbenchActions = new Set(['status','capabilities','modules','query','tasks','prepare']);
+const moduleIds = new Set(['warehouse','purchase','sales','overview','exporter']);
+function cliObject(values) {
+  const encoded=values.find(value=>value.startsWith('--params-base64='))?.slice(16);
+  const plain=values.find(value=>value.startsWith('--params-json='))?.slice(14);
+  if(encoded!==undefined&&plain!==undefined)throw Error('请只使用一种 JSON 参数格式');
+  const text=encoded!==undefined?Buffer.from(encoded,'base64url').toString('utf8'):plain;
+  if(text===undefined)return {};
+  if(Buffer.byteLength(text,'utf8')>65536)throw Error('工作台参数过大');
+  let object;try{object=JSON.parse(text);}catch{throw Error('工作台参数不是有效的 JSON');}
+  if(!object||typeof object!=='object'||Array.isArray(object))throw Error('工作台参数必须是 JSON 对象');
+  return object;
+}
+
 export function parseCliRequest(args = []) {
   const values = args.map((value) => String(value));
   const command = String(values[0] || "help").toLowerCase();
   if (["help", "--help", "-h"].includes(command)) return { command: "help" };
+  if(command==='workbench'){
+    const action=String(values[1]||'help').toLowerCase();
+    if(!workbenchActions.has(action))throw Error('工作台命令支持 status、capabilities、modules、query、tasks、prepare');
+    const module=values.find(value=>value.startsWith('--module='))?.slice(9);
+    if(module!==undefined&&!moduleIds.has(module))throw Error('未知工作台模块');
+    if(['query','tasks','prepare'].includes(action)&&!module)throw Error('请提供 --module=<模块标识>');
+    return {command,action,...(module?{module}:{}),params:cliObject(values),confirmSideEffect:values.includes('--confirm-side-effect')};
+  }
   if (command === "status") return { command };
   if (command === "capabilities") return { command };
   if (command === "doctor") return { command };

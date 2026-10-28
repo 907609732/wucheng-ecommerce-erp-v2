@@ -16,7 +16,7 @@ const cli=args=>{
 };
 const status=cli(['--cli','status']);assert.equal(status.status,0);assert.equal(status.data.ok,true);
 const missing=cli(['--cli','extension-call','--id=lingtu.desks','--action=query','--params-json={"desk":"purchase","kind":"orders"}']);
-assert.equal(missing.status,1);assert.equal(missing.data.code,'MODULE_NOT_INSTALLED');
+assert.equal(missing.status,1);assert.ok(['MODULE_NOT_INSTALLED','SUITE_SETUP_REQUIRED'].includes(missing.data.code));
 const transport=new StdioClientTransport({command:exe,args:['--mcp-stdio','--user-data-dir='+root],env,stderr:'pipe'});
 const client=new Client({name:'isolated-launcher-check',version:'1.0.0'});
 try{

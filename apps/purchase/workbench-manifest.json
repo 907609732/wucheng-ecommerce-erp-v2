@@ -1,0 +1,1535 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/address-parse.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/address-parse.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/addresses",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/addresses"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/addresses",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/addresses"
+    },
+    {
+      "module": "purchase",
+      "method": "DELETE",
+      "path": "/api/addresses/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:DELETE:/api/addresses/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "PUT",
+      "path": "/api/addresses/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PUT:/api/addresses/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/admin/password",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/admin/password"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/app-info",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/app-info"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/attachments",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/attachments"
+    },
+    {
+      "module": "purchase",
+      "method": "DELETE",
+      "path": "/api/attachments/:id",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:DELETE:/api/attachments/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/attachments/:id",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/attachments/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/attachments/:id/thumb",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/attachments/:id/thumb"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/backup",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/backup"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/backup/:file",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/backup/:file"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/bootstrap",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/bootstrap"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/classification-export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/classification-export"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/dashboard",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/dashboard"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/export"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/health",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/health"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/images/:assetId",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/images/:assetId"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/import/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/import/:id/commit"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/import/:id/remap",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/import/:id/remap"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/import/preview",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/import/preview"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/capabilities",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/capabilities"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/edits",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/edits"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/edits",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/edits"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/edits/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/edits/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/edits/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/edits/:id/commit"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/exporter/open",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/exporter/open"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/maintenance/activate",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/maintenance/activate"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/open",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/open"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/orders",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/orders"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/review-session",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:GET:/api/integration/v1/review-session"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/stop",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/stop"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/transfers",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/transfers"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/transfers",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/transfers"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/transfers/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/transfers/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "PUT",
+      "path": "/api/integration/v1/transfers/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PUT:/api/integration/v1/transfers/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/transfers/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/transfers/:id/commit"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/transfers/:id/confirm",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/transfers/:id/confirm"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/transfers/:id/review",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/transfers/:id/review"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/transfers/:id/rollback",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/transfers/:id/rollback"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/transfers/:id/verification",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/transfers/:id/verification"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/backup",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/workbench/migration/backup"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/commit",
+      "kind": "confirmation",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/workbench/migration/commit"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/export",
+      "kind": "download",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/workbench/migration/export"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/files/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/workbench/migration/files/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/maintenance",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/workbench/migration/maintenance"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/preview",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/workbench/migration/preview"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/restore",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/integration/v1/workbench/migration/restore"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/verify/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/workbench/migration/verify/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/operations",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/workbench/operations"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/month-confirmations",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/month-confirmations"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/month-confirmations",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/month-confirmations"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/month-confirmations/cancel",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/month-confirmations/cancel"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/month-confirmations/cancel-batch",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/month-confirmations/cancel-batch"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/month-confirmations/confirm-batch",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/month-confirmations/confirm-batch"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/month-confirmations/history",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/month-confirmations/history"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/month-confirmations/preview",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/month-confirmations/preview"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/monthly-export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/monthly-export"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/ocr",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/ocr"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/ocr/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/ocr/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/ocr/text",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/ocr/text"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/order-logs",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/order-logs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/order-logs/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/order-logs/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/order-logs/rollback",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/order-logs/rollback"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/order-logs/rollback-preview",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/order-logs/rollback-preview"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/orders",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/orders"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/orders",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/orders"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/orders/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/orders/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "PUT",
+      "path": "/api/orders/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PUT:/api/orders/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/orders/:id/attachments",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/orders/:id/attachments"
+    },
+    {
+      "module": "purchase",
+      "method": "PATCH",
+      "path": "/api/orders/:id/classification",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PATCH:/api/orders/:id/classification"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/orders/:id/history",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/orders/:id/history"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/orders/:id/images/:imageId/cache",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/orders/:id/images/:imageId/cache"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/orders/:id/images/prepare",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/orders/:id/images/prepare"
+    },
+    {
+      "module": "purchase",
+      "method": "PATCH",
+      "path": "/api/orders/:id/note",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PATCH:/api/orders/:id/note"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/orders/:id/supplements",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/orders/:id/supplements"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/orders/attributes/batch",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/orders/attributes/batch"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/orders/classification/batch",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/orders/classification/batch"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/personnel",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/personnel"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/personnel",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/personnel"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/personnel/session",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/personnel/session"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/personnel/session",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/personnel/session"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/source/:id",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/source/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/supplier-management",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/supplier-management"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/supplier-management",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/supplier-management"
+    },
+    {
+      "module": "purchase",
+      "method": "PUT",
+      "path": "/api/supplier-management/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PUT:/api/supplier-management/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/supplier-management/:id/history",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/supplier-management/:id/history"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/supplier-management/choices",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/supplier-management/choices"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/suppliers",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/suppliers"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/task-board",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/task-board"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/task-board/action",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/task-board/action"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/tasks",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/tasks"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/tasks",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/tasks"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/template",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/template"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/upgrade/check",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/upgrade/check"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/app.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/app.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/appearance.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/appearance.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/audit-log.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/audit-log.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/audit-log.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/audit-log.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/audit-values.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/audit-values.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/classification-ui.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/classification-ui.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/classification.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/classification.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/classification.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/classification.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/contact-forms.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/contact-forms.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/delivery-required.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/delivery-required.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/directories.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/directories.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/import-guides.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/import-guides.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/import-results.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/import-results.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/import-rules.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/import-rules.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/index.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/index.html"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/integration-edits.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/integration-edits.html"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/integration-edits.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/integration-edits.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/integration-review.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/integration-review.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/integration-review.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/integration-review.html"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/integration-review.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/integration-review.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/loading-logo.png",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/loading-logo.png"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/loading-screen-auto.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/loading-screen-auto.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/loading-screen.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/loading-screen.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/loading-screen.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/loading-screen.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile-admin.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile-admin.html"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile-admin.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile-admin.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile-query.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile-query.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile.html"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/mobile.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/mobile.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/month-locks.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/month-locks.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/month-locks.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/month-locks.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/month-picker.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/month-picker.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/month-picker.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/month-picker.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/ocr-files.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/ocr-files.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-attributes-ui.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-attributes-ui.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-attributes.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-attributes.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-form-view.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-form-view.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-form.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-form.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-image-preview.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-image-preview.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-images.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-images.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-images.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-images.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-number.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-number.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/order-query.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/order-query.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/orders.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/orders.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/orders.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/orders.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/phone",
+      "kind": "ui",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/phone"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/settings-layout.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/settings-layout.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/shipments.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/shipments.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/source-details.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/source-details.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/source-details.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/source-details.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/style.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/style.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/supplier-management.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/supplier-management.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/supplier-picker.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/supplier-picker.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/surface-theme.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/surface-theme.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/tailscale-indicator.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/tailscale-indicator.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/task-cards.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/task-cards.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/task-cards.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/task-cards.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/task-center.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/task-center.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/task-center.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/task-center.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/upload-limits.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/upload-limits.mjs"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/address-parse.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/address-parse.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/chart.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/chart.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/flatpickr.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/flatpickr.min.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/flatpickr.min.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/flatpickr.min.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/LICENSE.md",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/LICENSE.md"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/monthSelect.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/monthSelect.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/monthSelect.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/monthSelect.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/flatpickr/zh.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/flatpickr/zh.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/tabulator.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/tabulator.css"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/vendor/tabulator.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/vendor/tabulator.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/workbench-base.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/workbench-base.js"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/workbench-theme.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/workbench-theme.css"
+    }
+  ]
+}

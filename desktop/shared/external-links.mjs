@@ -1,5 +1,6 @@
 export const EXTERNAL_LINKS = Object.freeze({
-  repository: "https://github.com/907609732/wucheng-ecommerce-erp-v2"
+  repository: "https://github.com/907609732/wucheng-ecommerce-erp-v2",
+  website: "https://lttlt.top"
 });
 
 export function externalLink(name) {

@@ -1,12 +1,16 @@
 import { chromium } from 'playwright';
+import { browserLaunchOptions } from './browser-launch.js';
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { importInventoryFile } from './erp/importers.js';
 import { getInventoryReport, buildInventoryMarkdown } from './erp/reports.js';
-import { sendInventoryDingTalkMarkdown } from './dingtalk.js';
+import { sendInventoryDingTalkMarkdown, inventoryDeliveryAccepted } from './dingtalk.js';
 import { rootDir } from './config.js';
+import {createHash} from 'node:crypto';
+import {getDb} from './erp/db.js';
+import {createWarehouseDaily,expectedInventoryDate} from './erp/warehouse-daily.js';
 import {
   findLatestPriorCainiaoFile,
   previousBusinessDate,
@@ -250,7 +254,7 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
   fs.mkdirSync(downloadDir, { recursive: true });
 
   const chrome = await chromium.launch({
-    ...(process.env.LINGTU_BROWSER_PATH ? {executablePath:process.env.LINGTU_BROWSER_PATH} : {channel:'chrome'}),
+    ...browserLaunchOptions(),
     headless: false,
     args: ['--disable-blink-features=AutomationControlled', '--no-proxy-server'],
   });
@@ -557,22 +561,25 @@ async function exportWithSingleAuthRecovery() {
   }
 }
 
-export async function main() {
+async function synchronizeInventory(daily, runId) {
   // 1. 从菜鸟导出
   const file = await exportWithSingleAuthRecovery();
   if (!file || !fs.existsSync(file)) {
     throw new Error('没有下载到新的库存文件，已停止后续本地导入和钉钉通知。');
   }
+  daily.updateRun(runId, {collectedAt:new Date().toISOString(),collectionStatus:'success',fileHash:createHash('sha256').update(fs.readFileSync(file)).digest('hex')});
 
   // 2. 发布前先验证原始文件。失败时不能修改本地 ERP 或发送钉钉。
   console.log('\n🔐 正在校验库存数据...');
-  const strictSourceDate = process.env.CAINIAO_EXPECTED_SOURCE_DATE || "";
+  const strictSourceDate = process.env.CAINIAO_EXPECTED_SOURCE_DATE || process.env.CAINIAO_INVENTORY_QUERY_DATE || expectedInventoryDate();
   const preliminary = validateCainiaoInventoryFile({ file, expectedSourceDate: strictSourceDate, minRows: 10 });
   const previousFile = preliminary.sourceDate
     ? findLatestPriorCainiaoFile({ dir: downloadDir, currentFile: file, sourceDate: preliminary.sourceDate })
     : '';
   const validation = validateCainiaoInventoryFile({ file, expectedSourceDate: strictSourceDate, previousFile, minRows: 10 });
   recordInventoryValidation(validation);
+  const validationId=Number(getDb().prepare("SELECT MAX(id) AS id FROM inventory_data_validations WHERE warehouse_id='cainiao'").get().id);
+  daily.updateRun(runId, {sourceDate:validation.sourceDate,validationId,rowCount:validation.rowCount,totalQuantity:validation.totalQuantity,validationStatus:validation.ok?'success':'failed',validatedAt:new Date().toISOString()});
   if (!validation.ok) {
     throw new Error(`库存数据校验失败，已禁止同步和钉钉发送：${validation.errors.join('；')}`);
   }
@@ -589,6 +596,7 @@ export async function main() {
     snapshotDate,
   });
   console.log('✅ 导入完成:', result);
+  daily.updateRun(runId, {importedAt:new Date().toISOString()});
 
   // 保留历史库存快照，用于跨日验真和审计；仅停用当前快照已经不存在的 SKU。
   console.log('\n🧹 更新库存主数据...');
@@ -608,15 +616,28 @@ export async function main() {
 
   // 5. 发送钉钉
   console.log('\n📤 发送钉钉消息...');
+  daily.updateRun(runId,{deliveryStatus:'unknown'});
   const markdown = buildInventoryMarkdown('table');
   const dingResult = await sendInventoryDingTalkMarkdown({
     title: markdown.title,
-    text: markdown.text,
-    shouldNotify: markdown.shouldNotify,
+    text: markdown.shouldNotify ? markdown.text : `### 云仓每日同步完成\n\n来源日期：${validation.sourceDate}\n\n已采集并校验入库 ${validation.rowCount} 个 SKU，库存合计 ${validation.totalQuantity}。当前无严重缺货预警，请负责人登录工作台核对并确认任务。`,
+    shouldNotify: true,
   });
+  const accepted=inventoryDeliveryAccepted(dingResult);
+  daily.updateRun(runId, {deliveryStatus:dingResult?.skipped?'skipped':accepted?'accepted':'unknown',...(accepted?{sentAt:new Date().toISOString()}:{}),deliveryReceipt:JSON.stringify(dingResult).slice(0,2000)});
+  if(!accepted&&!dingResult?.skipped)throw Error('钉钉未返回可核对的受理记录，请检查群和服务商发送记录');
   console.log('✅ 钉钉发送结果:', dingResult);
 
   console.log('\n🎉 全流程完成');
+}
+
+export async function main() {
+  getDb();
+  const daily=createWarehouseDaily({databasePath:path.join(process.env.ERP_DATA_DIR||path.join(rootDir,'data'),'erp.sqlite')});
+  const runId=process.env.WAREHOUSE_SYNC_RUN_ID||daily.beginRun({expectedSourceDate:process.env.CAINIAO_EXPECTED_SOURCE_DATE||process.env.CAINIAO_INVENTORY_QUERY_DATE||expectedInventoryDate()});
+  try {await synchronizeInventory(daily,runId);}
+  catch(error){daily.updateRun(runId,{error:'本次同步未完成，请查看主机运行日志',finishedAt:new Date().toISOString()});throw error;}
+  finally{daily.close();}
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';

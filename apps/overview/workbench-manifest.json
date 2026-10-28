@@ -1,0 +1,716 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/audit",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/audit"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/backups",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/backups"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/backups/:name",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/backups/:name"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/backups/restore",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/backups/restore"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/bills",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/bills"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/bills",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/bills"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/bills/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/bills/:id"
+    },
+    {
+      "module": "overview",
+      "method": "PUT",
+      "path": "/api/bills/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:PUT:/api/bills/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/bills/:id/payments",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/bills/:id/payments"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/bills/:id/void",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/bills/:id/void"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/bootstrap",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/bootstrap"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/authorization",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/authorization"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/cainiao/connection",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/cainiao/connection"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/connection",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/connection"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/cainiao/download-jobs",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/cainiao/download-jobs"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/download-jobs",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/download-jobs"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/cainiao/download-jobs/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/cainiao/download-jobs/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/download-jobs/:id/cancel",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/download-jobs/:id/cancel"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/download-jobs/:id/open-folder",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/download-jobs/:id/open-folder"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/cainiao/download-jobs/:id/resume",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/cainiao/download-jobs/:id/resume"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/cainiao/files/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/cainiao/files/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/coverage",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/coverage"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/dashboard",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/dashboard"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/details",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/details"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/export"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/freight/export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/freight/export"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/health",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/health"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/imports/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/imports/:id/commit"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/imports/:id/original",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/imports/:id/original"
+    },
+    {
+      "module": "overview",
+      "method": "DELETE",
+      "path": "/api/imports/:id/preview",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:DELETE:/api/imports/:id/preview"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/imports/:id/remap",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/imports/:id/remap"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/imports/preview",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/imports/preview"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/bills",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/bills"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/capabilities",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/capabilities"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/dashboard",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/dashboard"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/edits",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/edits"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/edits",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:POST:/api/integration/v1/edits"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/edits/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/edits/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/edits/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/edits/:id/commit"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/maintenance/activate",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/maintenance/activate"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/open",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/open"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/overview",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/overview"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/review-session",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:GET:/api/integration/v1/review-session"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/stop",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/stop"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/backup",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/workbench/migration/backup"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/commit",
+      "kind": "confirmation",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/workbench/migration/commit"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/export",
+      "kind": "download",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/workbench/migration/export"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/files/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/workbench/migration/files/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/maintenance",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/workbench/migration/maintenance"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/preview",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/workbench/migration/preview"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/restore",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/integration/v1/workbench/migration/restore"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/verify/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/workbench/migration/verify/:id"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/operations",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/integration/v1/workbench/operations"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/overview",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/overview"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/payments/:id/void",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/payments/:id/void"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/snapshots",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/snapshots"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/snapshots/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/snapshots/:id"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/source-classification",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/source-classification"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/source-records",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/source-records"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/source/:source/:id/original",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/source/:source/:id/original"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/templates/:kind",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/templates/:kind"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/app.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/app.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/cainiao.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/cainiao.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/dashboard.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/dashboard.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/freight.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/freight.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/index.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/index.html"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/integration-edits.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/integration-edits.html"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/integration-edits.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/integration-edits.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/integration-review.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/integration-review.css"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/loading-logo.png",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/loading-logo.png"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/loading-screen-auto.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/loading-screen-auto.mjs"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/loading-screen.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/loading-screen.css"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/loading-screen.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/loading-screen.mjs"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/style.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/style.css"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/vendor/chart.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/vendor/chart.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/vendor/tabulator.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/vendor/tabulator.css"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/vendor/tabulator.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/vendor/tabulator.js"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/workbench-base.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/workbench-base.js"
+    }
+  ]
+}

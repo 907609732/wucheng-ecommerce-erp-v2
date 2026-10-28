@@ -1,4 +1,8 @@
 const api = window.inventoryApp;
+const managedWarehouse = new URLSearchParams(location.search).get('module') === 'warehouse';
+document.body.classList.toggle('managed-cloud', managedWarehouse);
+document.getElementById('backHome').textContent = managedWarehouse ? '返回工作台' : '关闭云仓窗口';
+if (managedWarehouse) document.querySelector('#maintenanceCard .settings-card-heading p').textContent = '登录状态、云仓数据与日志目录。模块更新和后台服务统一在工作台管理。';
 let configured = false;
 let inventoryGrid = null;
 let inventoryReport = null;
@@ -11,13 +15,9 @@ let annualSalesChart = null;
 let salesChartResizeObserver = null;
 let selectedSalesSku = "";
 let activeRuntimeMode = "standalone";
-let firstRunMode = "";
 const salesLegendSelection = { monthly: {}, annual: {} };
 const byId = (id) => document.getElementById(id);
 const fields = {
-  runtimeMode: byId("runtimeMode"),
-  remoteServerUrl: byId("remoteServerUrl"),
-  remoteServerPort: byId("remoteServerPort"),
   cainiaoUsername: byId("cainiaoUsername"),
   scheduleTime: byId("scheduleTime"),
   monthlySalesTime: byId("monthlySalesTime"),
@@ -145,36 +145,6 @@ function formatInventoryUpdatedAt(value) {
     : new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
-function toggleRuntimeFields() {
-  const mode = fields.runtimeMode.value;
-  const client = mode === "client";
-  byId("runtimeConfigState").textContent = mode === "server" ? "主服务器" : (client ? "客户端" : "单机");
-  byId("runtimeConfigState").classList.toggle("ready", mode !== "standalone");
-  byId("remoteServerPortField").classList.toggle("hidden", client);
-  byId("remoteOperatorEmailsField").classList.toggle("hidden", client);
-  byId("remoteClientActions").classList.toggle("hidden", !client);
-  document.querySelectorAll(".server-only-settings").forEach((item) => item.classList.toggle("hidden", client));
-  byId("runNow").textContent = client ? "让主服务器同步并发送" : "立即同步并发送";
-  byId("refreshLogin").textContent = client ? "登录主服务器" : "登录 / 刷新菜鸟状态";
-}
-
-function selectFirstRunMode(mode) {
-  firstRunMode = mode;
-  document.querySelectorAll("[data-setup-mode]").forEach((button) => {
-    const selected = button.dataset.setupMode === mode;
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-checked", String(selected));
-  });
-  const remote = mode === "client" || mode === "server";
-  byId("firstRunRemoteFields").classList.toggle("hidden", !remote);
-  byId("firstRunOperatorField").classList.toggle("hidden", mode !== "server");
-  byId("firstRunAutostartField").classList.toggle("hidden", mode !== "server");
-  byId("finishFirstRun").disabled = !mode;
-  byId("firstRunMessage").textContent = mode === "client"
-    ? "保存后会打开 Cloudflare Access 登录窗口。"
-    : (mode === "server" ? "主服务器只监听本机，公网访问必须经过 Cloudflare。" : "");
-}
-
 function formatQuantity(value) {
   if (value == null) return "--";
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(Number(value));
@@ -190,7 +160,13 @@ function escapeHtml(value) {
 }
 
 function filteredInventoryItems() {
-  const items = inventoryReport?.items || [];
+  const priority = { critical: 0, urgent: 1, warning: 2, ok: 3 };
+  const days = item => Number.isFinite(item.sellableDays) ? item.sellableDays : Infinity;
+  const items = [...(inventoryReport?.items || [])].sort((a, b) =>
+    (priority[a.stockAlert?.level] ?? 4) - (priority[b.stockAlert?.level] ?? 4)
+    || days(a) - days(b)
+    || Number(a.quantity || 0) - Number(b.quantity || 0)
+    || String(a.sku).localeCompare(String(b.sku), 'zh-CN'));
   if (inventoryFilter === "critical") return items.filter((item) => item.stockAlert.level === "critical");
   if (inventoryFilter === "alert") return items.filter((item) => item.stockAlert.level !== "ok");
   return items;
@@ -213,12 +189,12 @@ function renderInventoryGrid() {
       {
         name: "预警",
         width: "180px",
-        sort: { compare: (a, b) => ({ critical: 0, urgent: 1, warning: 2, ok: 3 }[a.level] - { critical: 0, urgent: 1, warning: 2, ok: 3 }[b.level]) },
-        formatter: (cell) => gridjs.html(`<span class="stock-pill ${cell.level}">${cell.label}</span>`)
+        sort: { compare: (a, b) => (({ critical: 0, urgent: 1, warning: 2, ok: 3 }[a?.level] ?? 4) - ({ critical: 0, urgent: 1, warning: 2, ok: 3 }[b?.level] ?? 4)) },
+        formatter: (cell) => gridjs.html(`<span class="stock-pill ${escapeHtml(cell.level)}">${escapeHtml(cell.label)}</span>`)
       }
     ],
     data,
-    sort: true,
+    sort: { multiColumn: false, columns: [{ index: 4, direction: 1 }] },
     search: true,
     pagination: { enabled: true, limit: 50, summary: true },
     language: {
@@ -506,14 +482,13 @@ function applyRemoteConnection(state) {
   byId("loginState").textContent = connected ? "主服务器已连接" : "主服务器未登录";
   byId("statusBadge").textContent = connected ? "已连接" : "未连接";
   byId("statusBadge").className = `status ${connected ? "ready" : ""}`;
-  if (state?.message) showSaveResult("remoteTestMessage", state.message, !connected);
+  if (state?.message) appendLog({ line: state.message });
 }
 
 function hydrateSettings(settings) {
   activeRuntimeMode = settings.runtimeMode;
   configured = settings.runtimeMode === "client" || (hasAccount(settings) && hasRobot(settings));
   for (const [key, input] of Object.entries(fields)) input[input.type === "checkbox" ? "checked" : "value"] = settings[key];
-  byId("remoteOperatorEmails").value = (settings.remoteOperatorEmails || []).join(", ");
   document.querySelector(`input[name="deliveryMode"][value="${settings.deliveryMode}"]`).checked = true;
   byId("cainiaoPassword").placeholder = settings.secretFlags.cainiaoPassword ? "密码已加密保存" : "请输入密码";
   byId("dingtalkClientId").placeholder = settings.secretFlags.dingtalkClientId ? "Client ID 已加密保存" : "请输入 Client ID";
@@ -524,7 +499,8 @@ function hydrateSettings(settings) {
   setConfigState("accountConfigState", hasAccount(settings));
   setConfigState("robotConfigState", hasRobot(settings));
   toggleDeliveryFields();
-  toggleRuntimeFields();
+  byId("legacyConnectionNotice").classList.toggle("hidden", settings.runtimeMode !== "client");
+  document.querySelectorAll(".server-only-settings").forEach(item => item.classList.toggle("hidden", settings.runtimeMode === "client"));
 }
 
 function showSaveResult(id, message, error = false) {
@@ -549,12 +525,11 @@ async function saveSection(section, settings, secrets, messageId) {
 
 async function load() {
   const [settings, secrets, integration, branding, about] = await Promise.all([api.getSettings(), api.getEditableSecrets(), api.getIntegration(), api.getBranding(), api.getAbout()]);
-  document.title = branding.productName;
+  document.title = '云仓同步 · 五成电子商务工作台';
   hydrateSettings(settings);
   hydrateSecrets(secrets);
   hydrateIntegration(integration);
   hydrateAbout(about);
-  byId("firstRunSetup").classList.toggle("hidden", !settings.firstRun);
   try {
     applyState(await api.getState());
     if (settings.runtimeMode === "client") applyRemoteConnection({ connected: true, message: "主服务器连接成功" });
@@ -562,7 +537,7 @@ async function load() {
     appendLog({ line: `主服务器尚未连接：${error.message}` });
     applyRemoteConnection({ connected: false, message: error.message });
   }
-  applyUpdateState(await api.getUpdateState());
+  if (!managedWarehouse) applyUpdateState(await api.getUpdateState());
   const logs = await api.getLogs();
   for (const item of logs) appendLog(item);
 }
@@ -581,14 +556,13 @@ async function refreshSettings() {
 }
 
 function navigateView(view) {
-  const titles = { home: '功能主页', dashboard: '云仓库存同步', inventory: '云仓库存同步', sales: '云仓库存同步', settings: '公共设置' };
+  const titles = { dashboard: '云仓同步', inventory: '云仓同步', sales: '云仓同步', attendance: '签到管理', settings: '云仓设置' };
   if (!titles[view]) return;
   document.querySelectorAll('.view-tab').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));
-  document.querySelector('.view-tabs').classList.toggle('hidden', !['dashboard', 'inventory', 'sales'].includes(view));
-  byId('backHome').classList.toggle('hidden', view === 'home');
+  document.querySelector('.view-tabs').classList.remove('hidden');
   document.querySelector('h1').textContent = titles[view];
-  document.querySelector('.subtitle').textContent = view === 'home' ? '选择需要使用的功能。' : view === 'settings' ? '管理运行模式、账号、同步计划与软件更新。' : '采集、校验并通过企业应用机器人发送到钉钉。';
+  document.querySelector('.subtitle').textContent = view === 'settings' ? '管理菜鸟账号、同步计划与钉钉提醒；连接统一由工作台设置。' : '采集、校验并通过企业应用机器人发送到钉钉。';
   if (view !== 'settings') hideAllSecrets();
   if (view === 'inventory') loadInventory();
   if (view === 'sales') {
@@ -602,7 +576,8 @@ function navigateView(view) {
 }
 document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.view)));
 document.querySelectorAll('[data-open-view]').forEach(button => button.addEventListener('click', () => navigateView(button.dataset.openView)));
-byId('backHome').addEventListener('click', () => navigateView('home'));
+byId('backHome').addEventListener('click', () => window.close());
+byId('dailyBackToWorkbench').addEventListener('click', () => window.close());
 
 document.querySelectorAll("[data-sales-scope]").forEach((button) => button.addEventListener("click", () => {
   monthlySalesScope = button.dataset.salesScope;
@@ -624,62 +599,6 @@ document.querySelectorAll("[data-secret-target]").forEach((button) => button.add
 window.addEventListener("blur", hideAllSecrets);
 
 document.querySelectorAll('input[name="deliveryMode"]').forEach((input) => input.addEventListener("change", toggleDeliveryFields));
-fields.runtimeMode.addEventListener("change", toggleRuntimeFields);
-document.querySelectorAll("[data-setup-mode]").forEach((button) => button.addEventListener("click", () => selectFirstRunMode(button.dataset.setupMode)));
-byId("finishFirstRun").addEventListener("click", async () => {
-  if (!firstRunMode) return;
-  const button = byId("finishFirstRun");
-  const message = byId("firstRunMessage");
-  button.disabled = true;
-  message.classList.remove("error");
-  message.textContent = "正在保存…";
-  try {
-    const settings = await api.saveSettingsSection({
-      section: "runtime",
-      settings: {
-        runtimeMode: firstRunMode,
-        remoteServerUrl: byId("firstRunServerUrl").value,
-        remoteServerPort: 17320,
-        remoteOperatorEmails: byId("firstRunOperatorEmails").value.split(/[,;\n]/).map((value) => value.trim()).filter(Boolean),
-        startAtLogin: firstRunMode === "server" && byId("firstRunAutostart").checked
-      },
-      secrets: {}
-    });
-    hydrateSettings(settings);
-    byId("firstRunSetup").classList.add("hidden");
-    if (firstRunMode === "client") await api.loginRemoteServer();
-  } catch (error) {
-    message.textContent = error.message;
-    message.classList.add("error");
-    button.disabled = false;
-  }
-});
-byId("runtimeSettingsForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  saveSection("runtime", {
-    runtimeMode: fields.runtimeMode.value,
-    remoteServerUrl: fields.remoteServerUrl.value,
-    remoteServerPort: Number(fields.remoteServerPort.value),
-    remoteOperatorEmails: byId("remoteOperatorEmails").value.split(/[,;\n]/).map((value) => value.trim()).filter(Boolean)
-  }, {}, "runtimeSaveMessage");
-});
-byId("remoteLogin").addEventListener("click", async () => {
-  try {
-    await api.loginRemoteServer();
-    showSaveResult("remoteTestMessage", "请在新窗口完成 Cloudflare Access 登录");
-  } catch (error) {
-    showSaveResult("remoteTestMessage", error.message, true);
-  }
-});
-byId("testRemote").addEventListener("click", async () => {
-  showSaveResult("remoteTestMessage", "正在测试…");
-  try {
-    await api.testRemoteServer();
-    showSaveResult("remoteTestMessage", "连接成功");
-  } catch (error) {
-    showSaveResult("remoteTestMessage", error.message, true);
-  }
-});
 byId("accountSettingsForm").addEventListener("submit", (event) => {
   event.preventDefault();
   saveSection("account", { cainiaoUsername: fields.cainiaoUsername.value }, {
@@ -795,10 +714,7 @@ window.addEventListener("resize", () => {
   monthlySalesChart?.resize();
   annualSalesChart?.resize();
 });
-load().then(() => {
-  if (new URLSearchParams(location.search).get('module') === 'warehouse') {
-    navigateView('dashboard');
-    byId('backHome').textContent='返回启动台';
-    byId('backHome').addEventListener('click',event=>{event.stopImmediatePropagation();window.close();},true);
-  }
-}).catch((error) => appendLog({ line: `初始化失败：${error.message}` }));
+// Select the business page before any account or remote-service initialization.
+// A failed initialization must never reveal a second launcher homepage.
+navigateView('dashboard');
+load().catch((error) => appendLog({ line: `初始化失败：${error.message}` })).finally(() => byId("warehouseLoading")?.remove());

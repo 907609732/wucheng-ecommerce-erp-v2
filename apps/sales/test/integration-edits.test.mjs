@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {openStore} from './helpers.mjs';
+import {addLedger} from '../lib/ledger.mjs';
+import {installSalesEdits} from '../lib/integration-edits.mjs';
+test('reviewed sales edits retain cents, audit, idempotency and transaction boundaries',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-reviewed-edit-')),s=openStore(dir);t.after(()=>{s.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const api=installSalesEdits({router:{get(){},post(){}},requireReview(){}},s);
+ const row=addLedger(s,{shop_id:'offline',date:'2026-10-01',kind:'sale',amount:'123.45',external_id:'test-1'});
+ const d=api.create({type:'ledger',target:row.id,patch:{amountCents:13579},reason:'核对收据'});
+ assert.equal(d.proposed.amount,13579);assert.equal(s.get('SELECT amount FROM ledger WHERE id=?',row.id).amount,12345);
+ await assert.rejects(api.commit(d.id,d.revision,''),/确认/);
+ const result=await api.commit(d.id,d.revision,'ui');assert.equal(result.verified,true);assert.equal(result.record.amount,13579);
+ assert.deepEqual(await api.commit(d.id,d.revision,'ui'),result);
+ const stale=api.create({type:'ledger',target:row.id,patch:{note:'proposed'},reason:'test'});
+ s.run('UPDATE ledger SET note=? WHERE id=?','manual',row.id);await assert.rejects(api.commit(stale.id,stale.revision,'ui'),/变化/);
+ assert.equal(s.get('SELECT note FROM ledger WHERE id=?',row.id).note,'manual');
+ assert.throws(()=>s.transaction(()=>{s.transaction(()=>s.run('UPDATE ledger SET amount=1 WHERE id=?',row.id));throw Error('rollback');}),/rollback/);
+ assert.equal(s.get('SELECT amount FROM ledger WHERE id=?',row.id).amount,13579);
+});

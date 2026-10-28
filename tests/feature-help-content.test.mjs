@@ -10,7 +10,7 @@ vm.runInNewContext(fs.readFileSync(path.join(root, 'desktop/renderer/feature-hel
 const guides = context.window.erpFeatureHelpContent;
 
 test('every navigable view has separate usable manual and principle content', () => {
-  assert.deepEqual(Object.keys(guides).sort(), ['home', 'dashboard', 'inventory', 'sales', 'settings'].sort());
+  assert.deepEqual(Object.keys(guides).sort(), ['dashboard', 'inventory', 'sales', 'attendance', 'settings'].sort());
   for (const [view, guide] of Object.entries(guides)) {
     assert.ok(guide.title && guide.summary && guide.sources.length, view);
     for (const mode of ['manual', 'principle']) {

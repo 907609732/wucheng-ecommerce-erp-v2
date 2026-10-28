@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import {sanitizeDiagnosticText} from './shared/diagnostics.mjs';
 
 function result(value, isError = false) {
   return {
@@ -10,8 +11,7 @@ function result(value, isError = false) {
 }
 
 function safeError(error) {
-  return String(error?.message || error || "未知错误")
-    .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED]");
+  return sanitizeDiagnosticText(error?.message || error || '未知错误');
 }
 
 export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagnostics, searchDebugLogs, getCapabilities, exportDebugBundle, listExtensions, callExtension, runSync, refreshLogin, onClose }) {
@@ -104,7 +104,7 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
     if (!confirmSend) return result({ error: "需要 confirmSend=true 才能执行同步和钉钉发送" }, true);
     try {
       const task = await runSync();
-      return result({ ...task, logs: task.logs.slice(-100) }, !task.success);
+      return result({ ...task, logs: (Array.isArray(task.logs)?task.logs:[]).slice(-100) }, task.success === false || task.ok === false);
     } catch (error) {
       return result({ error: safeError(error) }, true);
     }
@@ -119,7 +119,7 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
     if (!confirmOpenBrowser) return result({ error: "需要 confirmOpenBrowser=true 才能打开登录窗口" }, true);
     try {
       const task = await refreshLogin();
-      return result({ ...task, logs: task.logs.slice(-100) }, !task.success);
+      return result({ ...task, logs: (Array.isArray(task.logs)?task.logs:[]).slice(-100) }, task.success === false || task.ok === false);
     } catch (error) {
       return result({ error: safeError(error) }, true);
     }
@@ -132,5 +132,49 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
 export function serveInventoryMcp(options) {
   const handle = serveStdio(() => createInventoryMcpServer(options));
   console.error(`云仓库存同步 MCP ${options.version} 已通过 stdio 启动`);
+  return handle;
+}
+
+// The launcher retains this server and dispatcher in its headless process.
+// No request-level Electron CLI process or new listening port is created.
+export function createWorkbenchMcpServer({version,dispatch,onClose}){
+  if(typeof dispatch!=='function')throw TypeError('A persistent workbench dispatcher is required');
+  const run=async request=>{
+    const response=await dispatch(request);
+    if(response?.ok===false)throw Object.assign(Error(response.error||'工作台操作失败'),{code:response.code});
+    return response;
+  };
+  const server=createInventoryMcpServer({version,onClose,
+    getStatus:async()=>(await run({command:'status'})).status,
+    getLogs:async limit=>(await run({command:'logs',limit})).lines||[],
+    getDiagnostics:async()=>(await run({command:'doctor'})).diagnostics,
+    searchDebugLogs:async options=>(await run({command:'debug-logs',...options})).lines||[],
+    getCapabilities:async()=>(await run({command:'workbench',action:'capabilities'})).capabilities,
+    exportDebugBundle:async()=>{const r=await run({command:'debug-bundle'});return {path:r.path,sha256:r.sha256,size:r.size,bundle:r.bundle};},
+    listExtensions:async()=>{const r=await run({command:'extensions'});return {directory:r.directory,extensions:r.extensions||[]};},
+    callExtension:async({extensionId,action,params,confirmSideEffect})=>(await run({command:'extension-call',id:extensionId,action,params,confirmSideEffect})).response,
+    runSync:()=>run({command:'sync',confirmed:true}),refreshLogin:()=>run({command:'login',confirmed:true})
+  });
+  const invoke=action=>async args=>{
+    try{
+      const response=await dispatch({command:'workbench',action,...args});
+      return result(response?.ok===false?{...response,error:safeError(response.error)}:response,response?.ok===false);
+    }catch(error){return result({ok:false,code:error.code||'WORKBENCH_REQUEST_FAILED',error:safeError(error)},true);}
+  };
+  const read={readOnlyHint:true,destructiveHint:false,openWorldHint:false};
+  const module=z.enum(['warehouse','purchase','sales','overview','exporter']);
+  const object=z.record(z.string(),z.json()).default({});
+  server.registerTool('workbench_status',{description:'读取电商工作台的统一连接及业务状态，不写账。',inputSchema:z.object({}),annotations:read},invoke('status'));
+  server.registerTool('workbench_capabilities',{description:'发现工作台版本、模块及 MCP/CLI 能力。正式入账需要两次界面确认。',inputSchema:z.object({}),annotations:read},invoke('capabilities'));
+  server.registerTool('workbench_modules',{description:'查询五个内置业务模块的版本和运行状态，不自动安装或更新。',inputSchema:z.object({}),annotations:read},invoke('modules'));
+  server.registerTool('workbench_query',{description:'通过所属模块受控接口只读查询；支持 kind、id、query 或已登记 API path，不允许任意文件、SQL 或命令。',inputSchema:z.object({module,params:object}),annotations:read},invoke('query'));
+  server.registerTool('workbench_tasks',{description:'只读查询云仓当前采集任务或历史订单采集任务；不会启动采集。params.id 可指定导出台任务。',inputSchema:z.object({module:z.enum(['warehouse','exporter']),params:object}),annotations:read},invoke('tasks'));
+  server.registerTool('workbench_prepare',{description:'按用户本次确认整理采购导入或业务编辑草稿，不正式写账；不能替代两次界面确认。',inputSchema:z.object({module:z.enum(['purchase','sales','overview']),params:object,confirmSideEffect:z.boolean().default(false)}),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},invoke('prepare'));
+  return server;
+}
+
+export function serveWorkbenchMcp(options){
+  const handle=serveStdio(()=>createWorkbenchMcpServer(options));
+  console.error(`五成电子商务工作台 MCP ${options.version} 已通过 stdio 启动（常驻调度）`);
   return handle;
 }
