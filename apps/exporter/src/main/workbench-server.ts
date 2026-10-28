@@ -1,3 +1,4 @@
+import {installExporterAgentRoutes} from './agent-routes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
@@ -99,5 +100,6 @@ export function installExporterWorkbench(router:any,store:Store,options:{dataDir
     if(handlers.busy())throw fail('任务正在运行，不能清理',409,'SERVICE_BUSY');
     store.clear(platformById(q.params.platform).id as PlatformId);handlers.changed();return {ok:true,revision:dataSet().revision};
   }));
+  installExporterAgentRoutes(router,{store,handlers,key,binding:dataSet,guard,cleanTask,platformById,transferSnapshot,dataDir:options.dataDir});
   return {protocolVersion:1};
 }

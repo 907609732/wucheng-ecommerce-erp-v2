@@ -1,3 +1,4 @@
+import {signAgentApproval,agentDigest,approvalHeaders} from '../src/main/agent-approval.mjs';
 import {afterEach,describe,expect,it} from 'vitest';
 import {createRequire} from 'node:module';
 import fs from 'node:fs';
@@ -22,10 +23,10 @@ async function api(){
   const workbench=installExporterWorkbench(integration.router,store,{dataDir:dir,version:'0.2.0',getDataSetIdentity,handlers:{busy:()=>false,changed:()=>{},invoke:(name,...args)=>{calls.push(name);if(name==='start')return store.create(args[0] as any);if(name==='executionLogs')return [];},exportFile:async(_input,directory)=>{const file=path.join(directory,'orders.csv');fs.writeFileSync(file,'orderId\n12345678901234567890');return {path:file,count:1,missing:0};},transfer:async(id,actor)=>({batchId:'batch-'+id,route:'/apps/purchase/integration-review.html?batch=test',actor:actor.id})}});
   integration.state.workbench=workbench;installWorkbenchMigration(integration,{db:store.db,dir},(_facade:any,options:any)=>createWorkbenchMigration(store,options),{dataDir:dir,sourceInstance:'target'});integration.finish();const server=app.listen(0,'127.0.0.1');fixtureData.server=server;await new Promise<void>(resolve=>server.once('listening',resolve));
   const port=(server.address() as any).port,base='http://127.0.0.1:'+port,key=provisionWorkbenchKey(dir),token=fs.readFileSync(path.join(dir,'.integration-key'),'utf8').trim();
-  async function request(route:string,{method='GET',body,role='admin',channel='ui',canRunTasks=false,requestId=randomUUID(),actorPatch={}}:any={}){
-    const requestPath='/api/integration/v1/workbench'+route,now=Date.now();
+  async function request(route:string,{method='GET',body,role='admin',channel='ui',canRunTasks=false,requestId=randomUUID(),actorPatch={},extraHeaders={}}:any={}){
+    const requestPath='/api/integration/v1'+(route.startsWith('/agent/')?'':'/workbench')+route,now=Date.now();
     const actor:WorkbenchActor={v:1,id:'tailscale:tester@example.test',login:'tester@example.test',role,modules:['exporter','purchase'],canRunTasks,channel,sessionId:'session-test',requestId,issuedAt:now,expiresAt:now+30000,module:'exporter',method,path:requestPath,...actorPatch};
-    const response=await fetch(base+requestPath,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...signWorkbenchActor(actor,key)},body:body===undefined?undefined:JSON.stringify(body)});
+    const response=await fetch(base+requestPath,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...signWorkbenchActor(actor,key),...extraHeaders},body:body===undefined?undefined:JSON.stringify(body)});
     const result=response.headers.get('content-type')?.includes('json')?await response.json():await response.text();return {status:response.status,result};
   }
   return {...fixtureData,calls,request,key};
@@ -86,4 +87,19 @@ describe('exporter historical migration',()=>{
   it('rejects stale revisions and rolls back failed count verification',async()=>{
     const source=fixture(),target=fixture(),task=source.store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});source.store.update(task.id,{count:99,status:'paused'});const migration=createWorkbenchMigration(target.store,{canCommit:()=>true}),bundle=createWorkbenchMigration(source.store).exportSnapshot(),preview=migration.preview(bundle),input={bundle,revision:preview.revision,selections:[{kind:'task-history',sourceId:task.id,action:'add'}]};await expect(migration.commit({...input,revision:'stale'},{role:'admin',id:'tester'})).rejects.toThrow('变化');await expect(migration.commit(input,{role:'admin',id:'tester'})).rejects.toThrow('数量');expect(target.store.tasks()).toHaveLength(0);await expect(createWorkbenchMigration(target.store).commit(input,{role:'admin',id:'tester'})).rejects.toThrow('确认凭据');
   });
+});
+
+describe('Agent exporter review boundary',()=>{
+ it('prepares actual task evidence, rejects forged approval and viewer mutations',async()=>{
+ const {store,request,key}=await api();const task=store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});
+ const prepared=await request('/agent/prepare',{method:'POST',channel:'mcp',body:{capabilityId:'export',input:{taskId:task.id,format:'csv'}}});
+ expect(prepared.status).toBe(200);expect(prepared.result.evidence[0].task.id).toBe(task.id);expect(prepared.result.dataSetId).toBeTruthy();
+ const denied=await request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:prepared.result,taskId:'agent-task'}});expect(denied.status).toBe(403);
+ const p={...prepared.result,id:'result-1',version:1},now=Date.now(),proof=signAgentApproval({v:1,approvalId:'approval-1',actorId:'tailscale:tester@example.test',module:'exporter',capabilityId:p.capabilityId,taskId:'agent-task',resultId:p.id,resultVersion:p.version,dataSetId:p.dataSetId,revision:p.revision,changeDigest:agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes}),idempotencyKey:'idem-1',issuedAt:now,expiresAt:now+30000},key);
+ const commit=()=>request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:p,taskId:'agent-task',idempotencyKey:'idem-1'},extraHeaders:approvalHeaders(proof)});
+ const committed=await commit();expect(committed.status).toBe(200);expect(committed.result.receipt.state).toBe('completed');expect(committed.result.receipt.result.fileId).toBeTruthy();expect((await commit()).result).toEqual(committed.result);
+
+ expect((await request('/agent/prepare',{method:'POST',role:'viewer',body:{capabilityId:'pause',input:{taskId:task.id}}})).status).toBe(403);
+ expect((await request('/agent/prepare',{method:'POST',body:{capabilityId:'clear',input:{platform:'taobao',confirmed:true}}})).status).toBe(400);
+ });
 });
