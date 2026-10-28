@@ -17,6 +17,7 @@ const safeDate=value=>{try{return dateValue(value);}catch{return '';}};
 
 export function openOrderTransfers(store,{afterWrite,afterCommit}={}){
   const {db,dir}=store;let committing=false;
+  const agentAuthorizations=new WeakSet();
   db.exec(`CREATE TABLE IF NOT EXISTS integration_transfers(
     id TEXT PRIMARY KEY,source_hash TEXT UNIQUE NOT NULL,source_json TEXT NOT NULL,
     decisions_json TEXT NOT NULL DEFAULT '{}',state TEXT NOT NULL DEFAULT 'draft',
@@ -143,10 +144,16 @@ export function openOrderTransfers(store,{afterWrite,afterCommit}={}){
     db.prepare('UPDATE integration_transfers SET receipt=?,updated_at=? WHERE id=?').run(hash(receipt),now(),id);event(id,'review.second',{revision,session});
     return {receipt};
   }
-  async function commit(id,receipt,session,actor){
+  async function commit(id,receipt,session,actor,authorization){
     const initial=get(id);if(initial.state==='committed')return initial.result?.postVerified||initial.result?.recoveryRequired?initial.result:completeVerification(id,initial.result);
     if(committing)throw fail('另一批正在保存，请稍后重试',409,'IMPORT_BUSY');
-    const check=()=>{const d=get(id),p=preview(id);if(!session||d.review_session!==session||!receipt||d.receipt!==hash(receipt)||d.expires_at<Date.now()||p.revision!==d.review?.revision||!p.canConfirm)throw fail('确认已失效，请重新进行两次核对',409,'REVIEW_CHANGED');return p;};
+    const check=()=>{const d=get(id),p=preview(id);
+      if(agentAuthorizations.has(authorization)){
+        const {prepared,ctx}=authorization;assertAgentCommit(prepared,ctx);
+        if(prepared.transferId!==id||prepared.sourceDigest!==d.source_hash||prepared.transferRevision!==p.revision||!p.canConfirm||p.state==='rolled_back')throw fail('中央复核后来源、决策或订单已变化，请重新准备',409,'REVIEW_CHANGED');
+        return p;
+      }
+      if(!session||d.review_session!==session||!receipt||d.receipt!==hash(receipt)||d.expires_at<Date.now()||p.revision!==d.review?.revision||!p.canConfirm)throw fail('确认已失效，请重新进行两次核对',409,'REVIEW_CHANGED');return p;};
     committing=true;
     try{
       check();
@@ -172,12 +179,41 @@ export function openOrderTransfers(store,{afterWrite,afterCommit}={}){
         result={id,ok:true,verified:false,transactionVerified:true,postVerified:false,summary:p.total,backup:backupFile,sourceDigest:initial.source_hash,revision:p.revision,orders:written.map(({id,action},i)=>({id,action,orderNo:p.rows[i].orderNo,reason:action==='skip'?'与原记录一致，或已确认保留原值':'明细、字段与金额已逐项校验'})),checkedAt:now()};
         db.prepare("UPDATE integration_transfers SET state='committed',result_json=?,updated_at=? WHERE id=?").run(JSON.stringify(result),now(),id);
         if(/^[a-f0-9]{64}$/.test(initial.source.task.accountKey||''))db.prepare('INSERT INTO integration_accounts VALUES(?,?,?) ON CONFLICT(platform,identity) DO UPDATE SET account=excluded.account').run(p.platform,initial.source.task.accountKey,p.account);
-        event(id,'commit.verified',{...result,actor:actor||null});
+        event(id,'commit.verified',{...result,actor:actor||null,...(agentAuthorizations.has(authorization)?{agentApproval:{approvalId:authorization.ctx.verifiedApproval.approvalId,taskId:authorization.ctx.taskId,resultId:authorization.ctx.resultId,resultVersion:authorization.ctx.resultVersion,idempotencyKey:authorization.ctx.idempotencyKey}}:{})});
       });
       afterCommit?.({db,id});
       return completeVerification(id,result);
     }catch(e){event(id,'commit.failed',{code:e.code||'FAILED',message:e.message});throw e;}
     finally{committing=false;}
+  }
+  function agentActor(ctx){
+    const actor=ctx?.actor;if(!actor?.id||!actor.modules?.includes('purchase')||!['admin','editor'].includes(actor.role))throw fail('当前人员不能提交采购核对',403,'AGENT_ACTOR_REQUIRED');return actor;
+  }
+  function assertAgentCommit(prepared,ctx){
+    const actor=agentActor(ctx),claims=ctx.verifiedApproval;
+    if(!prepared||prepared.actorId!==actor.id||prepared.taskId!==ctx.taskId||!claims||claims.v!==1||claims.actorId!==actor.id||claims.module!=='purchase'||claims.capabilityId!=='transfer.commit'||claims.taskId!==ctx.taskId||claims.resultId!==ctx.resultId||claims.resultVersion!==ctx.resultVersion||claims.idempotencyKey!==ctx.idempotencyKey||!Number.isFinite(claims.expiresAt)||claims.expiresAt<=Date.now())throw fail('需要与本次人员和结果匹配的中央审批授权',403,'AGENT_APPROVAL_REQUIRED');
+  }
+  function saveAgent(id,input,ctx){
+    agentActor(ctx);const decisions=input?.decisions,source=get(id).source;
+    if(!decisions||Array.isArray(decisions)||Object.keys(decisions).some(k=>!['account','rows'].includes(k))||typeof decisions.account!=='string'||decisions.account.length>200||!decisions.rows||typeof decisions.rows!=='object'||Array.isArray(decisions.rows))throw fail('账号及逐单核对决策格式无效');
+    const ids=new Set(source.orders.map(o=>o.id));
+    for(const [orderNo,row]of Object.entries(decisions.rows)){
+      if(!ids.has(orderNo)||!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(k=>!['refundCents','refundEvidence','fields','classification'].includes(k)))throw fail('核对决策包含不属于本来源批次的订单或字段');
+      if(row.refundCents!==undefined&&!money(row.refundCents)||row.refundEvidence!==undefined&&(typeof row.refundEvidence!=='string'||row.refundEvidence.length>2000))throw fail('退款金额须为非负整数分，核对依据最多2000字');
+      if(row.fields!==undefined&&(!row.fields||typeof row.fields!=='object'||Array.isArray(row.fields)||Object.entries(row.fields).some(([k,v])=>!mutable.includes(k)||k==='classification'||!['keep','source'].includes(v))))throw fail('字段决策仅允许保留原值或采用来源值');
+    }
+    return save(id,input);
+  }
+  function prepareAgent(id,input,ctx){
+    const actor=agentActor(ctx),p=preview(id),d=get(id);
+    if(!ctx.taskId||input?.revision!==p.revision||!p.canConfirm||!['draft','reviewed'].includes(p.state))throw fail('本批仍有问题、已结束或版本变化，请重新核对',409,'REVIEW_CHANGED');
+    return {summary:`正式导入 ${p.total.new} 笔、更新 ${p.total.update} 笔、保留 ${p.total.skip} 笔采购订单`,scope:{transferId:id,platform:p.platform,account:p.account,from:p.task.from,to:p.task.to},blocks:[{type:'table',rows:p.rows.map(r=>({orderNo:r.orderNo,action:r.action,proposed:r.proposed,differences:r.differences,warnings:r.warnings}))}],evidence:[{transferId:id,sourceTaskId:p.task.id,sourceDigest:d.source_hash,transferRevision:p.revision,total:p.total}],changes:p.rows.filter(r=>r.action!=='skip').map(r=>({action:r.action,orderNo:r.orderNo,before:r.existing?clean(r.existing):null,after:clean(r.proposed)})),issues:p.rows.flatMap(r=>r.warnings.map(message=>({blocking:false,orderNo:r.orderNo,message}))),commitData:{transferId:id,transferRevision:p.revision,sourceDigest:d.source_hash,actorId:actor.id,taskId:ctx.taskId}};
+  }
+  async function commitAgent(id,prepared,ctx){
+    assertAgentCommit(prepared,ctx);if(prepared.transferId!==id||get(id).source_hash!==prepared.sourceDigest)throw fail('中央审批来源批次不符',409,'REVIEW_CHANGED');
+    const authorization={prepared,ctx};agentAuthorizations.add(authorization);
+    try{const result=await commit(id,null,null,ctx.actor,authorization);const {backup,...safe}=result;return {...safe,backupAvailable:!!backup};}
+    finally{agentAuthorizations.delete(authorization);}
   }
   function completeVerification(id,result){
       const mismatches=verify(id);
@@ -224,6 +260,6 @@ export function openOrderTransfers(store,{afterWrite,afterCommit}={}){
     });
     return {id,rolledBack:true};
   }
-  return {create,preview,save,review,confirm,commit,rollback,verify,busy:()=>committing,
+  return {create,preview,save,review,confirm,commit,prepareAgent,commitAgent,saveAgent,rollback,verify,busy:()=>committing,
     list:()=>db.prepare('SELECT id,state,created_at,updated_at,result_json FROM integration_transfers ORDER BY created_at DESC LIMIT 100').all().map(r=>({...r,result:r.result_json?JSON.parse(r.result_json):null,result_json:undefined}))};
 }
