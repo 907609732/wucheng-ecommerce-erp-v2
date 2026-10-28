@@ -1,0 +1,5 @@
+import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';import{verifyImports,auditStage}from'../scripts/agent-beta-package-audit.mjs';
+function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'beta-package-'));fs.writeFileSync(path.join(root,'package.json'),'{}');return root;}
+test('relative imports resolve inside isolated package',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),"import './child.mjs';");fs.writeFileSync(path.join(r,'child.mjs'),'export const x=1');assert.equal(verifyImports(r,['entry.mjs']).checkedFiles,2);});
+test('imports that escape package are rejected',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),"import '../../../desktop/agent-runtime/approval.mjs';");assert.throws(()=>verifyImports(r,['entry.mjs']),/escapes/);});
+test('missing runtime, engines and dependency contract block stage',()=>{const r=fixture();assert.throws(()=>auditStage(r));fs.writeFileSync(path.join(r,'agent-beta-resources.json'),JSON.stringify({format:'agent-beta-resources/v1'}));assert.throws(()=>auditStage(r),/engine descriptor/);});
