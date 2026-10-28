@@ -7,3 +7,4 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .followup-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}.followup-tools button{margin:0}.followup-tools .file-button{font-size:12px;margin:0}.followup .attachment-list{padding:8px 0 0}.followup:has(input[type=file]:focus-visible) .file-button{outline:3px solid #63afe5;outline-offset:2px}
 .connection-review{margin-top:20px;padding:18px;border:1px solid #bcd8eb;border-radius:10px;background:#f3f9fd;scroll-margin-top:85px}.connection-review h3{margin-top:16px;font-size:13px}.connection-review ul{margin:7px 0 12px;padding-left:20px;overflow-wrap:anywhere}.connection-review .actions{flex-wrap:wrap}.connection-review .actions button{max-width:100%}
+.result-history-label{font-size:12px;margin-bottom:16px}.result-history-label select{font-size:12px;max-width:100%}#task-reference{user-select:all}#company-model-hint{grid-column:1/-1}

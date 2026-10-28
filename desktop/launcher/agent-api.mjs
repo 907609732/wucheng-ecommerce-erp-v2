@@ -32,6 +32,14 @@ export function scheduleCron(frequency, time, custom = '') {
   return `${Number(match[2])} ${Number(match[1])} ${suffix}`;
 }
 
+export function readableSchedule(cron) {
+  const parts=String(cron || '').trim().split(/\s+/);
+  const frequency=parts.length===5 && {'* * *':'daily','* * 1-5':'weekdays','* * 1':'weekly','1 * *':'monthly'}[parts.slice(2).join(' ')];
+  if(!frequency || !/^\d{1,2}$/.test(parts[0]) || !/^\d{1,2}$/.test(parts[1]) || Number(parts[0])>59 || Number(parts[1])>23)return {frequency:'custom',time:'09:00',label:String(cron || '')};
+  const time=parts[1].padStart(2,'0')+':'+parts[0].padStart(2,'0');
+  return {frequency,time,label:({daily:'每天',weekdays:'工作日',weekly:'每周一',monthly:'每月 1 日'}[frequency])+' '+time};
+}
+
 export function reviewBinding(detail) {
   const review = detail?.review;
   if (!review?.id || !detail?.task?.id || review.resultVersion == null || review.revision == null) return null;
