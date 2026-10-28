@@ -4,7 +4,7 @@ import {provisionWorkbenchKey,verifyWorkbenchActor} from './workbench-actor.mjs'
 import {migrationInstance} from './workbench-migration-core.mjs';
 const loopback=new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
 const safe=new Set(['GET','HEAD','OPTIONS']);
-const agentEndpoint=route=>/^\/api\/integration\/v1\/agent\/(?:binding|query|prepare|commit|(?:files|receipts)\/:[A-Za-z_]+)$/.test(route);
+const agentEndpoint=route=>/^\/api\/integration\/v1\/agent\/(?:binding|query|prepare|commit|files\/upload\/(?:start|part|finish)|(?:files|receipts)\/:[A-Za-z_]+)$/.test(route);
 const localOnly=/\/(?:backups?|restore|mobile-admin|phone|settings\/secrets|settings\/password|admin\/password|admin-password|upgrades?|updates?|stop|maintenance|workbench\/migration)(?:\/|$)|\/integration\/v1\/(?:open|stop|maintenance)|\/api\/(?:settings|data-dir|filesystem)(?:\/|$)/;
 const task=/\/(?:jobs|download-jobs|run|sync|start|collect|retry|resume)(?:\/|$)/;
 const confirmation=/\/(?:review-session|review|confirm|commit|rollback|lock|unlock|void)(?:\/|$)/;

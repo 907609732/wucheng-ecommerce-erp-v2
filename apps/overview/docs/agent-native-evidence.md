@@ -19,11 +19,13 @@
 | import | 保留原件、真实创建/维护账单、读回行数和摘要；agent-http 测试 file-stage→预览→中央复核→987 分实账→持久回执 |
 | coverage、snapshot-create | 月报修订与领域验证后写入；agent-actions/core/dashboard 测试过期修订、零数据条件、快照读回 |
 | restore-copy | restoreBackup 校验清单、CRC、SHA256、SQLite 完整性和引用原件，只创建独立副本；agent-actions/core/cainiao 测试真实恢复和损坏拒绝 |
-| file-stage | 无需复核，真实原件入任务库，绑定人员+任务并校验摘要；agent-http 测试跨任务拒绝 |
+| files.stage | 无需复核，仅接受当前任务attachmentId；可信主机核对size/SHA后分片上传，返回模块file ID。内部file-stage Base64兼容能力不向模型公开；agent-files测试50MiB、1MiB分片、断线跨重启续传、跨人员/任务拒绝、完整摘要及元数据冲突 |
 | backup | 无需复核，真实 ZIP 和带摘要下载产物；agent-http 测试下载字节 SHA256、老板降权和跨人员下载拒绝 |
 | cainiao-start、cainiao-stop、cainiao-resume | 无需财务复核，执行原下载管理器；agent-http 测试已登录账号、真实任务/空报表完成、停止、断线继续拒绝，费用账本不变 |
 
 安全与并发证据：`agent-http` 包含无签名人员、伪造/错人证明、篡改差异、源变化、员工权限、相同幂等重试、重启回执、持有 Agent 事务时旧接口被拒绝。`agent-transaction` 使用真实 SQLite 事务、预先持有的原生 statement、已运行后台任务、并行请求、嵌套写入、回滚、BEGIN 被另连接锁住以及 detached 异步任务，验证 owner 隔离和后续独立请求可正常持久化。
+
+附件闭环证据：`agent-files` 将当前任务真实CSV附件经公开ID接收→分片HTTP传输→managed file ID→中央复核导入1234分→真实原件/Excel/备份HTTP流式下载→中央任务目录真实文件→registerArtifact登记。缺download桥接明确失败。下载块保留类型，只返回中央产物ID及描述，不把模块URL当作交付结果。
 
 ## 菜鸟至销售运费的边界
 
