@@ -59,3 +59,9 @@ test('9MiB chunk upload survives restart, binds owner and offsets, verifies full
  assert.throws(()=>restored.uploadPart({...base,offset:0,dataBase64:buffer.toString('base64')},ctx()),/8MiB/);
  assert.throws(()=>restored.uploadPart({filename:'bad.bin',totalBytes:3,offset:0,dataBase64:'YWJj',sha256:'0'.repeat(64)},ctx()),/完整文件摘要不符/);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_files').get().n,1);
 });
+
+test('unrecognized spreadsheet retains preview ID and field instructions for explicit remapping',async t=>{
+ const {files}=fixture(t),raw=Buffer.from('业务号,业务日,合作方,物料,支付数\nREMAP001,2026-06-06,供应商,螺丝,12.34\n'),file=put(files,raw,'自定义表格.csv');
+ const first=await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信',account:'映射测试'},ctx());assert.ok(first.data.previewId);assert.equal(first.data.summary.ready,0);assert.ok(first.data.issues.length);assert.equal(first.data.fields.amount.label,'实付金额');
+ const second=await files.ops['import.remap'].execute({previewId:first.data.previewId,headerRow:1,mapping:{orderNo:0,date:1,supplier:2,title:3,amount:4},amountMode:'order'},ctx());assert.equal(second.data.summary.ready,1,JSON.stringify(second.data));assert.equal(second.data.orders[0].amountCents,1234);
+});

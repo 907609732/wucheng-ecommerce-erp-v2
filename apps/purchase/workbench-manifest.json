@@ -229,6 +229,33 @@
     {
       "module": "purchase",
       "method": "POST",
+      "path": "/api/integration/v1/agent/files",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/agent/files"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/agent/files/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/agent/files/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/agent/files/:id/download",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/agent/files/:id/download"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
       "path": "/api/integration/v1/agent/prepare",
       "kind": "write",
       "remote": true,

@@ -90,7 +90,7 @@ export function detectMapping(headers){
   for(const a of f.aliases){const i=headers.findIndex(h=>norm(h)===norm(a));if(i>=0){mapping[key]=String(i);break;}}
  }return mapping;
 }
-export async function readTable(buffer,name,sheetName){
+export async function readTable(buffer,name,sheetName,{headerRow}={}){
  let sheets=[];
  if(/\.csv$/i.test(name)){
   let txt=new TextDecoder('utf-8',{fatal:false}).decode(buffer);if(txt.includes('\ufffd'))txt=new TextDecoder('gb18030').decode(buffer);
@@ -107,6 +107,7 @@ export async function readTable(buffer,name,sheetName){
  if(s.rows.length>50001)throw Error('单次最多导入 50,000 行');
  let headerIndex=0,best=-1;
  s.rows.slice(0,20).forEach((row,i)=>{const score=Object.keys(detectMapping(row)).length;if(score>best){best=score;headerIndex=i;}});
+ if(headerRow!==undefined){if(!Number.isInteger(headerRow)||headerRow<1||headerRow>s.rows.length)throw Error('表头行号无效');headerIndex=headerRow-1;}
  const headers=s.rows[headerIndex].map((x,i)=>String(x||`未命名列 ${i+1}`));
  return {sheets:sheets.map(s=>s.name),sheet:s.name,headers,headerRow:headerIndex+1,rows:s.rows.slice(headerIndex+1).map((cells,i)=>({row:headerIndex+i+2,cells})).filter(r=>r.cells.some(v=>v!==''&&v!=null)),mapping:detectMapping(headers)};
 }

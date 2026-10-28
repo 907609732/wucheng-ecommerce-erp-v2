@@ -1,17 +1,60 @@
-# 采购 Agent 能力覆盖（开发中）
+# 采购 Agent 全能力清单
 
-工厂：`lib/agent-adapter.mjs:createPurchaseAgentAdapter({transport})`。
-transport 采用总控冻结的 `(moduleId,route,{method,body,ctx,signal,approval,idempotencyKey})`。
-模块服务：`lib/agent-service.mjs`；业务映射：`lib/agent-operations.mjs`。
+工厂：`lib/agent-adapter.mjs:createPurchaseAgentAdapter({transport})`；采用冻结的 `transport(moduleId,route,{method,body,ctx,signal,approval,idempotencyKey})`。接口 `/api/integration/v1/agent/*`。
 
-## 已接入领域
-订单详情/列表/统计、原件来源索引、审计及补充历史、供应商历史、地址、分派任务、月度确认预览及历史、附件索引、文字识别、OCR状态；审批后订单新建修改、批量属性/分类、供应商/地址维护、任务流转、月度确认、审计回滚、暂存附件删除。
+业务映射 `lib/agent-operations.mjs`，文件/OCR `lib/agent-files.mjs`，服务端同源AJV参数校验 `lib/agent-schemas.mjs`。原界面及其业务路由全部保留，实际接口允许清单在 `workbench-manifest.json`。
 
-## 尚待完成，禁止宣称全覆盖
-文件附件上传/下载、表格预览映射提交、OCR文件识别与原件入账、来源图片提取缓存、报表下载、管理员取消月锁。需要持久化暂存、明确来源证据、跨重启恢复和原业务规则验收。
+| 能力ID | 真实业务 | 调用 | 授权 | 必需参数 |
+|---|---|---|---|---|
+| orders | 采购订单与详情 | query | 自动准备/只读 |  |
+| dashboard | 采购支出统计 | query | 自动准备/只读 | year |
+| sources | 导入来源与原件 | query | 自动准备/只读 |  |
+| audit | 订单审计与补充来源 | query | 自动准备/只读 |  |
+| suppliers | 供应商与历史 | query | 自动准备/只读 |  |
+| addresses | 收货地址 | query | 自动准备/只读 |  |
+| tasks | 月度任务与分派 | query | 自动准备/只读 | month |
+| months | 月度确认与历史 | query | 自动准备/只读 | month |
+| attachments | 订单附件与图片 | query | 自动准备/只读 | id |
+| export | 采购报表导出 | query | 自动准备/只读 |  |
+| ocr.text | 识别采购文字 | query | 自动准备/只读 | text |
+| ocr.status | 识别进度与结果 | query | 自动准备/只读 | jobId |
+| import.preview | 读取表格导入核对结果 | query | 自动准备/只读 | previewId |
+| files.get | 读取已上传原件的文件ID、摘要及下载链接 | query | 自动准备/只读 | fileId |
+| files.upload | 上传采购原件并取得受控文件ID | prepare | 自动准备/只读 | filename, dataBase64 |
+| files.upload.part | 分片上传大原件并按摘要校验后取得文件ID | prepare | 自动准备/只读 | filename, totalBytes, offset, dataBase64, sha256 |
+| attachment.stage | 将原件暂存为订单附件 | prepare | 自动准备/只读 | fileId |
+| import.analyze | 识别Excel或CSV字段并生成导入核对表 | prepare | 自动准备/只读 | fileId, platform |
+| import.remap | 调整原件工作表与字段映射并重新核对 | prepare | 自动准备/只读 | previewId |
+| ocr.start | 使用本地真实OCR识别图片或PDF原件 | prepare | 自动准备/只读 | fileIds |
+| ocr.commit | 核对识别结果后保存采购单及所有原件 | prepare | 中央审批 | jobId, order |
+| transfers | 查询导出台传入的历史订单核对批次 | query | 自动准备/只读 |  |
+| transfer.verify | 复核历史订单导入批次与当前订单差异 | query | 自动准备/只读 | id |
+| transfer.save | 补齐采集账号退款依据及冲突字段取值 | prepare | 自动准备/只读 | id, revision, decisions |
+| transfer.commit | 中央审批后正式导入采集订单 | prepare | 中央审批 | id, revision |
+| transfer.rollback | 中央审批后撤销整批采集订单导入 | prepare | 中央审批 | id, reason |
+| order.create | 录入采购订单 | prepare | 中央审批 | platform, orderNo, date, supplier, amountCents, items |
+| order.update | 修改采购与退款 | prepare | 中央审批 | platform, orderNo, date, supplier, amountCents, items, id, updatedAt |
+| orders.attributes | 批量采购属性 | prepare | 中央审批 | orders, patch |
+| orders.classification | 批量分类与分摊 | prepare | 中央审批 | orders, category |
+| supplier.save | 维护供应商 | prepare | 中央审批 | name |
+| address.save | 维护地址 | prepare | 中央审批 | name |
+| address.remove | 删除地址 | prepare | 中央审批 | id, updatedAt |
+| task.action | 分派执行提交验收任务 | prepare | 中央审批 | month, taskId, action, revision |
+| task.mark | 记录月度核对结果 | prepare | 中央审批 | month, taskId, status, operator, revision |
+| month.confirm | 确认并锁定月份 | prepare | 中央审批 | month, platform, revision |
+| month.cancel | 取消月份锁定 | prepare | 中央审批 | month, platform, version |
+| audit.rollback | 回滚采购修改 | prepare | 中央审批 | auditId, scope, versions |
+| import.commit | 核对后导入表格 | prepare | 中央审批 | previewId, indices |
+| image.prepare | 提取订单来源图片 | prepare | 自动准备/只读 | id |
+| image.cache | 缓存原始图片 | prepare | 自动准备/只读 | id, imageId |
+| attachment.remove | 删除暂存附件 | prepare | 中央审批 | id |
 
-## 原界面/接口完整基线
-`workbench-manifest.json` 保存175个实际注册接口（含静态资源）。原业务路由、验证及界面均保留。后台配置、备份恢复、更新和人员主数据仍属主机/主页管理，不能以Agent业务审批绕过本机管理权限。
+金额为人民币整数分，查询筛选minAmount/maxAmount沿用原界面单位元并有明确参数说明。付款日期为空回退下单日期，月度确认按北京时间次月15日开放。prepare私有数据留服务端，返回preparedId及材料摘要；中央签名证明绑定人员、任务、结果版本、账本UUID/revision、差异和幂等键。
 
-## 验收门禁
-真实SQLite及模块HTTP签名测试；审批缺失/过期/篡改/错身份/错结果/账本变化拒绝；去重与锁月；分派人员范围；幂等回执及断线恢复；原件摘要/附件可用；独立模块加载；原测试全通过。当前仅完成初步接线，未完成这些门禁。
+表格保留原文件、字段映射、逐行异常、未导入报告；OCR使用真实本地worker，任务与原件/附件持久化，重启中断明确标记。正式导入复用原去重、锁月和事务；采集转采购复用原备份、来源对照、写后逐单核验及恢复，绝不伪造旧UI会话。未知结果不能返回成功回执，只按真实已核验业务回读恢复。
+
+人员主数据、密码、备份恢复、升级与服务管理仍归主页/主机，不开放模型任意主机文件路径或个人AI配置。真实平台登录、验证码和真实公司API验证由主集成验收，模块测试全部使用隔离合成账本。
+
+验证：`node --test --test-concurrency=2 tests/*.test.mjs`；新业务链路测试 `agent-http.test.mjs`、`agent-files.test.mjs`、`agent-transfer.test.mjs`、`agent-service.test.mjs`、`agent-schemas.test.mjs`。审批helper来自冻结runtime源码，SHA256 `1ca342e316eccb12b9fa69827dcac70cdd94023198fc2f16c475c3a43d6a588f`；独立模块不引用仓库外desktop路径。最终统计以本次完整测试日志为准。
+
+原件上传单次8MiB；大文件使用files.upload.part，每片8MiB、完整文件50MiB，表格分析25MiB、OCR总200MiB。所有分片与完成文件均检查所属人员、字节偏移和SHA256。

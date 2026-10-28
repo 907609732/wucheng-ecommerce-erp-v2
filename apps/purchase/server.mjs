@@ -1,5 +1,6 @@
+import {createPurchaseAgentFiles} from './lib/agent-files.mjs';
 import {openPurchasePersonnel} from './lib/purchase-personnel.mjs';
-import {createPurchaseAgentService,installPurchaseAgentRoutes} from './lib/agent-service.mjs';
+import {createPurchaseAgentService,installPurchaseAgentRoutes,purchaseAgentRequestContext} from './lib/agent-service.mjs';
 import {purchaseAgentOperations} from './lib/agent-operations.mjs';
 import {openTaskAssignment} from './lib/task-assignment.mjs';
 import {openTaskCenter} from './lib/task-center.mjs';
@@ -274,17 +275,20 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);let message=err.message||'操作失败';if(message.includes('UNIQUE constraint'))message='该平台、账号下的订单号已存在';if(err.code==='LIMIT_FILE_SIZE')message=['/api/attachments','/api/ocr'].includes(req.path)?'单个文件超过限制，最多 50 MB，请缩小后重试':'文件不能超过 25 MB';if(err.code==='LIMIT_FILE_COUNT'||err.code==='LIMIT_UNEXPECTED_FILE')message='一次最多上传 20 个文件，请减少后重试';if(message==='MONTH_LOCKED'){err.status=423;err.code='MONTH_LOCKED';message='该月份的平台采购数据已锁定，请先到「月度确认」取消确认后再修改。';}res.status(err.status||400).json({error:message,code:err.code,conflicts:err.conflicts,locks:err.locks,availableOn:err.availableOn,availableAt:err.availableAt,preview:err.preview,report:err.report});});
  mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,isMaintenance:integration.maintenance});
  const agentOperations=purchaseAgentOperations({store,taskBoard,taskCenter,supplierManagement,addresses,attachments,jobs});
- agentOperations['image.prepare']={async:true,prepare:i=>({summary:'提取订单原件图片索引',evidence:[store.get(i.id)],commitData:{}}),commit:i=>orderImages.prepare(i.id)};
- agentOperations['image.cache']={async:true,prepare:i=>({summary:'缓存订单凭证图片',evidence:[store.get(i.id),orderImages.list(i.id)],commitData:{}}),commit:i=>orderImages.cache(i.id,i.imageId)};
- agentOperations['import.preview']={query:input=>{const p=previews.get(input.previewId);if(!p)throw Error('导入预览已过期');return describe(p);}};
- agentOperations['import.commit']={prepare:input=>{
-  const p=previews.get(input.previewId);if(!p)throw Error('导入预览已过期');const preview=describe(p),indices=[...new Set(input.indices||[])];
-  if(!indices.length||indices.some(i=>!Number.isInteger(i)||!p.parsed.orders[i]||p.parsed.orders[i].importStatus!=='ready'))throw Error('所选订单包含重复、冲突、无效或锁定数据');
-  const orders=indices.map(i=>p.parsed.orders[i]);
-  return {summary:`导入 ${orders.length} 笔采购订单`,scope:{platform:p.options.platform,account:p.options.account},evidence:[{filename:p.filename,sha256:hash(p.buffer),summary:preview.summary}],blocks:[{type:'table',rows:orders.map(({raw,...o})=>o)}],changes:orders.map(o=>({action:'add',orderNo:o.orderNo,amountCents:o.amountCents,refundCents:o.refundCents})),commitData:{filename:p.filename,buffer:p.buffer.toString('base64'),orders:orders.map(o=>({index:o.index,order:validateOrder(o),original:{headers:p.table.headers,rows:o.raw,normalized:o}})),lineCount:p.parsed.lineCount,metadata:{sheet:p.table.sheet,...p.options,issues:p.parsed.issues,selected:indices.length,importReport:importReportDraft(p.filename,p.parsed.orders,p.parsed.issues,indices)}}};
- },commit:(_input,data)=>{const buffer=Buffer.from(data.buffer,'base64'),source=stash(buffer,data.filename);try{return store.importBatch(data.orders,{...source,lineCount:data.lineCount,metadata:data.metadata});}catch(e){fs.unlinkSync(path.join(dataDir,source.filePath));throw e;}}};
+ agentOperations.transfers={query:i=>i.id?transfers.preview(i.id):{batches:transfers.list()}};
+ agentOperations['transfer.verify']={query:i=>({id:i.id,preview:transfers.preview(i.id),differences:transfers.verify(i.id)})};
+ agentOperations['transfer.save']={execute:(i,c)=>{const data=transfers.saveAgent(i.id,{revision:i.revision,decisions:i.decisions},c);return {summary:'已保存历史订单核对选择，尚未入账',data,blocks:[{type:'table',rows:data.rows}],evidence:[{id:data.id,revision:data.revision,total:data.total}]};}};
+ agentOperations['transfer.commit']={async:true,prepare:(i,c)=>transfers.prepareAgent(i.id,{revision:i.revision},c),commit:(i,data,c)=>transfers.commitAgent(i.id,data,c),recover:i=>transfers.preview(i.id).result};
+ agentOperations['transfer.rollback']={prepare:(i,c)=>{if(c.actor.role!=='admin')throw Object.assign(Error('仅管理员可撤销采集批次'),{status:403});const p=transfers.preview(i.id);return {summary:'撤销整批历史订单导入',scope:{transferId:i.id},evidence:[p],changes:[{action:'rollback-transfer',id:i.id,reason:i.reason,orders:p.result?.orders}],commitData:{}};},commit:i=>transfers.rollback(i.id,i.reason)};
+ agentOperations['image.prepare']={execute:async i=>{const data=await orderImages.prepare(i.id);return {summary:'已提取来源图片索引',data,evidence:[{orderId:i.id}],blocks:[{type:'table',rows:data}]};}};
+ agentOperations['image.cache']={execute:async i=>{const data=await orderImages.cache(i.id,i.imageId);return {summary:'已缓存订单图片',data,evidence:[{orderId:i.id,imageId:i.imageId}],blocks:[{type:'table',rows:data}]};}};
+ const agentFiles=createPurchaseAgentFiles({store,dataDir});
+ Object.assign(agentOperations,agentFiles.ops);
+ agentOperations['files.upload']={execute:(input,ctx)=>{const data=agentFiles.upload(input,ctx);return {summary:'采购原件已保存',data,evidence:[data]};}};
+ const closeStore=store.close;store.close=()=>{agentFiles.close();closeStore();};
  const agentService=createPurchaseAgentService({store,key:integration.workbench.key,binding:()=>({dataSetId:integration.state.dataSetId,revision:integration.state.revision}),operations:agentOperations});
  installPurchaseAgentRoutes(integration.router,agentService);
+ agentFiles.installRoutes(integration.router,purchaseAgentRequestContext);
  integration.workbench.finalize();
  return {app,store,usage,runUpgradeCheck,mobile,integration,transfers};
 }

@@ -23,3 +23,16 @@ test('signed review binds real revision, actor, digest and durable transactional
   assert.equal(store.db.prepare('SELECT count(*) n FROM settings WHERE key=?').get('agent-test').n,1);
  }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('unknown async commit is recovered only by verified business readback without replay',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-agent-recovery-')),store=openStore(dir),key='cd'.repeat(32),binding=()=>({dataSetId:'recovery-ledger',revision:'1'});let writes=0;
+ try{
+  const service=createPurchaseAgentService({store,key,binding,operations:{'address.save':{async:true,prepare:()=>({changes:[{action:'save-address'}]}),commit:async i=>{store.db.prepare('INSERT INTO settings VALUES(?,?)').run('recovered-name',i.name);writes++;throw Error('response lost after business commit');},recover:()=>{const row=store.db.prepare('SELECT value FROM settings WHERE key=?').get('recovered-name');return row?{ok:true,verified:true,postVerified:true,name:row.value}:null;}}}});
+  const ctx={actor:{id:'owner',role:'admin',modules:['purchase']},taskId:'recover-task'},input={name:'恢复核对'},p=await service.prepare('address.save',input,ctx),now=Date.now();
+  const claims={v:1,approvalId:'review-recover',actorId:'owner',module:'purchase',capabilityId:'address.save',taskId:ctx.taskId,resultId:'result',resultVersion:1,...binding(),changeDigest:agentDigest({capabilityId:p.capabilityId,input,commitData:p.commitData,changes:p.changes}),idempotencyKey:'recover-once',issuedAt:now,expiresAt:now+30000};
+  const commitCtx={...ctx,resultId:'result',resultVersion:1,idempotencyKey:'recover-once',approval:signAgentApproval(claims,key)};
+  await assert.rejects(service.commit(p.id,commitCtx),/response lost/);assert.equal(writes,1);
+  const receipt=service.receipt('recover-once',ctx);assert.equal(receipt.state,'completed');assert.equal(receipt.receipt.result.name,input.name);
+  assert.deepEqual(await service.commit(p.id,commitCtx),receipt);assert.equal(writes,1);
+ }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
