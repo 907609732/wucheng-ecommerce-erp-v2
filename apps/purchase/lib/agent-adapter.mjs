@@ -3,12 +3,29 @@ import {validatePurchaseAgentInput,purchaseSchemas} from './agent-schemas.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {setTimeout as pause} from 'node:timers/promises';
 const digest=b=>createHash('sha256').update(b).digest('hex');
-export function createPurchaseAgentAdapter({transport}) {
+export function createPurchaseAgentAdapter({transport,pollIntervalMs=1000,jobWaitMs=300000}) {
   const request=typeof transport==='function'?transport:transport?.request?.bind(transport);
   if(!request)throw new TypeError('purchase transport required');
   const base='/api/integration/v1/agent';
   const call=(method,path,body,ctx)=>request('purchase',base+path,{method,body:body?{...body,taskId:ctx?.taskId,idempotencyKey:ctx?.idempotencyKey}:undefined,ctx,signal:ctx?.signal,approval:ctx?.approval,idempotencyKey:ctx?.idempotencyKey});
+  const ocrResult=(output,job)=>{
+    const complete=job?.status==='done',jobId=job?.jobId;
+    return {...output,summary:complete?'采购凭证识别已完成，结果尚未正式入账':'采购凭证识别尚未完成',data:job,
+      blocks:[...(output.blocks||[]),{type:'job',title:'采购凭证识别',jobId,status:job?.status||'unknown',progress:job?.progress??0,nextCapability:'ocr.status',nextInput:{jobId}}],
+      evidence:[...(output.evidence||[]),{jobId,status:job?.status||'unknown',complete}],
+      issues:[...(output.issues||[]),...(!complete?[{id:'purchase:ocr:'+jobId,code:'OCR_JOB_INCOMPLETE',blocking:true,message:job?.error||'识别仍在处理或已中断，请按同一jobId查询，不能重复启动代替核查',jobId,status:job?.status||'unknown'}]:[])]};
+  };
+  const waitOcr=async(output,ctx)=>{
+    let latest=output,job=output.data;const expires=Date.now()+Math.max(0,jobWaitMs);
+    if(!job?.jobId)return ocrResult(output,job);
+    while(['running','queued','processing'].includes(job.status)&&Date.now()<expires){
+      ctx?.signal?.throwIfAborted();await pause(Math.max(1,pollIntervalMs),undefined,{signal:ctx?.signal});
+      latest=await call('POST','/query',{capabilityId:'ocr.status',input:{jobId:job.jobId}},{...ctx,capabilityId:'ocr.status'});job=latest.data;ctx?.emit?.('job.progress',{module:'purchase',jobId:job?.jobId,status:job?.status,progress:job?.progress??0});
+    }
+    return ocrResult({...output,...latest,requiresReview:false},job);
+  };
   const download=async(output,ctx)=>{
     if(!output.data?.downloadUrl)return output;
     if(typeof transport.download!=='function')throw Error('主机尚未提供受控文件下载');
@@ -38,10 +55,10 @@ export function createPurchaseAgentAdapter({transport}) {
     id:'purchase',
     capabilities:purchaseAgentCapabilities.filter(c=>!['files.upload','files.upload.part'].includes(c.id)),
     binding:ctx=>call('GET','/binding',undefined,ctx),
-    query:async(capabilityId,input,ctx)=>download(await call('POST','/query',{capabilityId,input},ctx),ctx),
-    prepare:(capabilityId,input,ctx)=>capabilityId==='files.stage'?stage(input,ctx):call('POST','/prepare',{capabilityId,input},ctx),
+    query:async(capabilityId,input,ctx)=>{const output=await call('POST','/query',{capabilityId,input},ctx);return capabilityId==='ocr.status'?ocrResult(output,output.data):download(output,ctx);},
+    prepare:async(capabilityId,input,ctx)=>{if(capabilityId==='files.stage')return stage(input,ctx);const output=await call('POST','/prepare',{capabilityId,input},ctx);return capabilityId==='ocr.start'?waitOcr(output,ctx):output;},
     commit:(prepared,ctx)=>{const claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString('utf8'));return call('POST','/commit',{preparedId:prepared.commitData?.preparedId??prepared.id,resultId:claims.resultId,resultVersion:claims.resultVersion,idempotencyKey:ctx.idempotencyKey},ctx);},
-    receipt:(key,ctx)=>call('GET','/receipts/'+encodeURIComponent(key),undefined,ctx)
+    receipt:async(key,ctx)=>{const output=await call('GET','/receipts/'+encodeURIComponent(key),undefined,ctx);return output?.requiresReview===false&&output.data?.jobId?waitOcr(output,ctx):output;}
   };
 }
 export const purchaseAgentCapabilities=[
