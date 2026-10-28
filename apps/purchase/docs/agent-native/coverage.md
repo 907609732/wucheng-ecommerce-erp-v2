@@ -20,8 +20,8 @@
 | ocr.status | 识别进度与结果 | query | 自动准备/只读 | jobId |
 | import.preview | 读取表格导入核对结果 | query | 自动准备/只读 | previewId |
 | files.get | 读取已上传原件的文件ID、摘要及下载链接 | query | 自动准备/只读 | fileId |
-| files.upload | 上传采购原件并取得受控文件ID | prepare | 自动准备/只读 | filename, dataBase64 |
-| files.upload.part | 分片上传大原件并按摘要校验后取得文件ID | prepare | 自动准备/只读 | filename, totalBytes, offset, dataBase64, sha256 |
+| files.upload | 模块内部单片传输协议（不向模型暴露） | 内部 | 可信主机 | filename, dataBase64 |
+| files.upload.part | 模块内部分片传输协议（不向模型暴露） | 内部 | 可信主机 | filename, totalBytes, offset, dataBase64, sha256 |
 | attachment.stage | 将原件暂存为订单附件 | prepare | 自动准备/只读 | fileId |
 | import.analyze | 识别Excel或CSV字段并生成导入核对表 | prepare | 自动准备/只读 | fileId, platform |
 | import.remap | 调整原件工作表与字段映射并重新核对 | prepare | 自动准备/只读 | previewId |
@@ -60,3 +60,11 @@
 原件上传单次8MiB；大文件使用files.upload.part，每片8MiB、完整文件50MiB，表格分析25MiB、OCR总200MiB。所有分片与完成文件均检查所属人员、字节偏移和SHA256。
 
 最终冻结源码 `500b2b4dcdfb1ceec03172f19ba34e1e1b63e887`：采购完整回归192/192，导出台147/147，采购语法检查通过。覆盖真实HTTP→文件→OCR/表格→审批→数据库→原件/附件/来源回读及恢复。详见 validation.json。
+
+## 中央任务附件与产物桥接
+
+模型入口只使用 `files.stage {attachmentId}`，通过可信 `ctx.resolveAttachment` 解析本次任务附件并核对原件SHA256。代码内部以8MiB分片传输，保持原50MiB单文件上限；模型能力清单不包含 `files.upload`、`files.upload.part`，不要求模型读写base64或主机路径。
+
+`files.get`、`source.file {id}`、`attachment.file {id}`、报表 `export` 调用可信 `transport.download(moduleId,route,{ctx,expectedSha256,filename,maxBytes})`，返回真实注册artifact。结果使用UI支持的 `files` 区块与 `artifactId` 证据，不暴露本机路径。内部原件下载接口已登记为manifest的download类型；分片内部请求保留原任务身份并显式采用内部协议capability上下文。
+
+新增合成链路用例 `tests/agent-attachment-bridge.test.mjs` 支持 `PURCHASE_HOST_TRANSPORT` 指向主机组真实helper源码，供全体代码冻结后统一联调。测试文件与已有结果保留；当前新增交付的最终验收状态为“待总控统一运行”。运行时的任务上传入口也须保留50MiB上限，避免在中央入口缩减采购原有范围。
