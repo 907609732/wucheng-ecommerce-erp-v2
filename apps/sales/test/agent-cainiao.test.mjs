@@ -26,9 +26,10 @@ async function samples(period=historic,{to=bounds(period)[1],unknown=false,shipp
  return {period,from,to,total,feeNames:costs.map(([name])=>name),members:{transactions,details,goods},transactions:await zip({['交易账单_'+suffix+'.xlsx']:transactions,['计费明细_'+suffix+'.xlsx']:details,['货品信息_'+suffix+'.xlsx']:goods}),fees:await zip({['费用项汇总_'+suffix+'.xlsx']:summary,['计费明细_'+suffix+'.xlsx']:details}),expected:{transactions:{period,from,to,count:4,amountCents:total+transactionDelta},fees:{period,from,to,count:4,amountCents:total,feeNames:costs.map(([name])=>name)}}};
 }
 class FakeBrowser{
- constructor(dir,data){this.dir=path.join(dir,'fake-browser');fs.mkdirSync(this.dir,{recursive:true});this.data=data;this.tasks=[];this.submits=0;this.downloads=0;this.account='cn-isolated-fixture';this.available=true;}
- status(){return {status:'connected',account:this.account};}async connect(){return this.status();}async disconnect(){}
+ constructor(dir,data){this.dir=path.join(dir,'fake-browser');fs.mkdirSync(this.dir,{recursive:true});this.data=data;this.tasks=[];this.submits=0;this.downloads=0;this.account='cn-isolated-fixture';this.available=true;this.connected=true;this.connections=0;this.disconnections=0;}
+ status(){return {status:this.connected?'connected':'disconnected',account:this.connected?this.account:''};}async connect(){this.connected=true;this.connections++;return this.status();}async disconnect(){this.connected=false;this.disconnections++;}
  async run(operation,args){
+  if(!this.connected)throw Error('connect: FakeBrowser已断开');
   if(operation==='prepare')return {...this.data.expected[args.type]||{period:args.month,count:0,amountCents:0},from:this.wrongRange?'2000-01-01':args.from,to:args.to};
   if(operation==='tasks')return this.tasks.map(task=>({...task,status:this.available?'已完成':'生成中'}));
   if(operation==='submit'){
@@ -107,8 +108,14 @@ test('真实签名HTTP：后台下载→原件预览→中央人审→入账/附
  const query=(capabilityId,input)=>call('query?'+new URLSearchParams({capabilityId,input:JSON.stringify(input)}));
  const prepare=async(capabilityId,input)=>{const binding=await(await call('binding')).json(),response=await call('prepare',{method:'POST',body:{taskId:'cainiao-http-task',capabilityId,input}});assert.equal(response.status,200,await response.clone().text());return {binding,capabilityId,input,...await response.json()};};
  const signedCommit=(prepared,idempotencyKey)=>{const issuedAt=Date.now(),proof=signAgentApproval({v:1,approvalId:'cainiao-real-http-review',actorId:'cainiao-owner',module:'sales',capabilityId:prepared.capabilityId,taskId:'cainiao-http-task',resultId:'cainiao-result',resultVersion:1,...prepared.binding,changeDigest:agentDigest({capabilityId:prepared.capabilityId,input:prepared.input,commitData:prepared.commitData,changes:prepared.changes}),idempotencyKey,issuedAt,expiresAt:issuedAt+60000},key);return call('commit',{method:'POST',body:{prepared},headers:{'Idempotency-Key':idempotencyKey,...approvalHeaders(proof)}});};
- const before=business(app.store),started=await prepare('sales.cainiao-download-start',{from:historic,account:browser.account}),jobId=started.blocks[0].rows[0].id;assert.equal(started.commitData,undefined);await app.cainiao.manager.running;
- let response=await query('sales.cainiao-job',{jobId});assert.equal(response.status,200,await response.clone().text());const job=await response.json();assert.equal(job.status,'completed');assert.ok(job.files.length>=2);assert.ok(job.files.every(file=>file.capabilityId==='sales.cainiao-file'&&file.fileId===file.id&&file.url===undefined));assert.doesNotMatch(JSON.stringify(job),/\/api\/cainiao\/files\//);
+ const before=business(app.store);
+ let response=await query('sales.cainiao-status',{});assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json()).status,'connected');
+ const disconnected=await prepare('sales.cainiao-disconnect',{});assert.equal(disconnected.commitData,undefined);assert.equal(disconnected.blocks[0].rows[0].status,'disconnected');assert.equal(browser.disconnections,1);
+ response=await query('sales.cainiao-status',{});assert.equal(response.status,200);assert.equal((await response.json()).status,'disconnected');
+ const connected=await prepare('sales.cainiao-connect',{});assert.equal(connected.commitData,undefined);assert.equal(connected.blocks[0].rows[0].status,'connected');assert.equal(browser.connections,1);
+ const started=await prepare('sales.cainiao-download-start',{from:historic,account:browser.account}),jobId=started.blocks[0].rows[0].id;assert.equal(started.commitData,undefined);await app.cainiao.manager.running;
+ response=await query('sales.cainiao-jobs',{});assert.equal(response.status,200,await response.clone().text());const jobs=await response.json();assert.ok(jobs.data.some(job=>job.id===jobId&&job.status==='completed'));
+ response=await query('sales.cainiao-job',{jobId});assert.equal(response.status,200,await response.clone().text());const job=await response.json();assert.equal(job.status,'completed');assert.ok(job.files.length>=2);assert.ok(job.files.every(file=>file.capabilityId==='sales.cainiao-file'&&file.fileId===file.id&&file.url===undefined));assert.doesNotMatch(JSON.stringify(job),/\/api\/cainiao\/files\//);
  response=await query('sales.cainiao-preview',{jobId,month:historic});assert.equal(response.status,200,await response.clone().text());const preview=await response.json();assert.equal(preview.ready,true,JSON.stringify(preview.issues));assert.equal(preview.total,97000);assert.equal(preview.uploads,undefined);assert.doesNotMatch(JSON.stringify(preview),/dataBase64/);
  response=await query(job.files[0].capabilityId,{fileId:job.files[0].fileId});assert.equal(response.status,200,await response.clone().text());const original=(await response.json()).artifact;response=await call('files/'+original.id);assert.equal(hash(Buffer.from(await response.arrayBuffer())),job.files[0].sha256);
  const prepared=await prepare('sales.cainiao-posting',{jobId,month:historic});assert.equal(prepared.issues.length,0);assert.equal(prepared.changes[0].operation,'freight-create');assert.doesNotMatch(JSON.stringify(prepared),/dataBase64/);assert.equal(business(app.store),before,'后台下载、查询和人审准备不能提前入账');
@@ -118,4 +125,13 @@ test('真实签名HTTP：后台下载→原件预览→中央人审→入账/附
  response=await signedCommit(prepared,'cainiao-posted-once');assert.equal(response.status,200,await response.clone().text());assert.deepEqual(await response.json(),booked);assert.equal(app.store.get('SELECT COUNT(*) n FROM freight_records').n,1);
  response=await call('receipts/cainiao-posted-once');assert.equal((await response.json()).receipt.id,booked.receipt.id);
  const duplicate=await prepare('sales.cainiao-posting',{jobId,month:historic});assert.ok(duplicate.issues.some(item=>item.code==='DUPLICATE_SOURCE'));response=await signedCommit(duplicate,'cainiao-must-not-duplicate');assert.equal(response.status,409);assert.equal(app.store.get('SELECT COUNT(*) n FROM freight_records').n,1);
+ const current=beijing(),yesterday=beijing(new Date(Date.now()-86400000)).date;
+ await t.test('FakeBrowser边界：当前月cutoff/cutoffs经签名HTTP成功下载，真实manager保存并回读北京昨天范围',{skip:yesterday.slice(0,7)!==current.month?'本月第一天尚无本月可用截止日':false},async()=>{
+  browser.data=await samples(current.month,{to:yesterday});const beforeCurrent=business(app.store);
+  for(const extra of [{cutoff:yesterday},{cutoffs:{[current.month]:yesterday}}]){
+   const preparedDownload=await prepare('sales.cainiao-download-start',{from:current.month,account:browser.account,...extra}),currentJobId=preparedDownload.blocks[0].rows[0].id;assert.equal(preparedDownload.commitData,undefined);await app.cainiao.manager.running;
+   response=await query('sales.cainiao-job',{jobId:currentJobId});assert.equal(response.status,200,await response.clone().text());const currentJob=await response.json();assert.equal(currentJob.status,'completed');assert.equal(currentJob.cutoffs[current.month],yesterday);assert.ok(currentJob.items.filter(item=>item.type!=='warehouse').every(item=>item.expected.from===current.month+'-01'&&item.expected.to===yesterday));
+   response=await query('sales.cainiao-preview',{jobId:currentJobId,month:current.month});assert.equal(response.status,200,await response.clone().text());const currentPreview=await response.json();assert.equal(currentPreview.ready,true,JSON.stringify(currentPreview.issues));assert.equal(currentPreview.interim,true);assert.equal(currentPreview.cutoff,yesterday);assert.equal(business(app.store),beforeCurrent,'当前月下载和分类不自动入账');
+  }
+ });
 });
