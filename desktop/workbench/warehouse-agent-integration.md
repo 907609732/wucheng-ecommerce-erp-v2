@@ -9,7 +9,7 @@
 - 采集及备份prepare立即产生可核对原件，返回`requiresReview:false`且不返回commitData或正式changes；只有入库、发送等有业务副作用的操作保留提交载荷并等待人审。
 - commit及receipt均返回顶层`state`、`idempotencyKey`、`receipt`；nestedreceipt也含对应`state/idempotencyKey`。只有completed/accepted领域结果映射completed；partial/unknown保持unknown，可回读证据但不能使任务完成。
 - 管理员查询`schedules.legacy`可读原始开关、HH:mm、启动设置、员工截止/工作日/渠道、电脑IANA时区、业务北京时间和configurationRevision（同时覆盖配置文件与日结安排）。`candidates[].schedulerInput`直接对应统一scheduler的goal/engine/scope/cron/timezone/noOverlap/misfirePolicy/enabled字段；`migrationKey`供查重。该查询不创建计划、不改原设置。每日/月度仍使用电脑时间，催办检查用Asia/Shanghai；接管须先核对旧timer已关闭。
-- 最新调度合同：稳定去重键是`dataSetId + candidates[].migrationKey`，configurationRevision/sourceRevision仅作证据，不因修订、owner或启停变化生成第二份来源计划。候选也提供稳定sourceId、sourceRevision、enabled、timezone。旧全局配置没有owner或AI引擎字段，所以返回ownerMapping/engineMapping明确要求迁移映射；host可用已验证Windows owner承担接管，并保存该映射，不冒充原始创建者。schedulerInput不猜测引擎。旧催办30秒检查与五段cron最小1分钟的差异在cadenceMapping明确标记需确认，不能静默改成5分钟。
+- 最新调度合同：稳定去重键是`dataSetId + candidates[].migrationKey`，configurationRevision/sourceRevision仅作证据，不因修订、owner或启停变化生成第二份来源计划。候选也提供稳定sourceId、sourceRevision、enabled、timezone。旧全局配置没有owner或AI引擎字段，ownerMapping/engineMapping仅作为迁移记录：host以已验证Windows owner为接管者、原creator为unknown，并使用公司实际defaultEngine；不新增用户审批。提醒候选内部cron为`*/30 * * * * *`，cadenceMapping两个interval均30000且requiresApproval=false，只能通过内部importSchedules导入；公共创建仍五段cron。原autoRemind未开不能启用，noOverlap和发送人审保持。
 - 自动准备返回`state=completed`仅表示已经实际获得并登记产物；校验失败返回`state=blocked`和blocking issue。云仓不使用“启动后立即返回processing”模式；采集子进程、文件校验和中央下载均await完成，AbortSignal能取消，unknown副作用仍只按持久回执查询而不重启。
 - 跨组真实集成测试直接导入runtime组与host组实现，使用真实签名HTTP、原件下载、SQLite、中央产物表及人审回执。验证普通editor无canRunTasks本人签到、viewer只读查询，不伪造actor或旧UI channel。
 
