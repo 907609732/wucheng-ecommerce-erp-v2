@@ -34,6 +34,8 @@ export const purchaseSchemas={
  'ocr.text':obj({text:text('从采购凭证粘贴的原文；提取后仍需人工复核',100000),platform},['text']),
  'ocr.status':obj({jobId:id},['jobId']),'import.preview':obj({previewId:id},['previewId']),
  'files.get':obj({fileId:id},['fileId']),
+ 'files.stage':obj({attachmentId:{...id,description:'本次中央任务附件ID；由用户上传，必须属于当前任务，不接受主机路径或文件内容'}},['attachmentId']),
+ 'source.file':obj({id},['id']),'attachment.file':obj({id},['id']),
  'files.upload':obj({filename:text('原文件名（含后缀），禁止路径',180),dataBase64:{type:'string',maxLength:11184812,pattern:'^[A-Za-z0-9+/]*={0,2}$',description:'用户提供的真实原件base64，解码最多8MiB；禁止伪造凭证'}},['filename','dataBase64']),
  'files.upload.part':obj({uploadId:id,filename:text('原文件名，禁止路径',180),totalBytes:integer('完整原件字节数，最多原业务单文件上限50MiB',1,MAX_FILE_BYTES),offset:integer('本片从0开始字节偏移；后续用响应nextOffset，首次必须0',0,MAX_FILE_BYTES),dataBase64:{type:'string',maxLength:11184812,pattern:'^[A-Za-z0-9+/]*={0,2}$',description:'本片原件base64，解码最多8MiB'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$',description:'完整原件SHA256摘要，每片相同，最后校验通过才返回fileId'}},['filename','totalBytes','offset','dataBase64','sha256']),
  'attachment.stage':obj({fileId:id},['fileId']),

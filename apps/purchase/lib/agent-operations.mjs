@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {summarize} from './store.mjs';
 import {extractText,validateOrder} from './importer.mjs';
 import {filterOrders} from '../public/order-query.mjs';
@@ -13,6 +16,8 @@ export function purchaseAgentOperations({store,taskBoard,taskCenter,supplierMana
  return {
   orders:query(i=>i.id?store.get(i.id):filterOrders(store.list(),i,i.basis)),
   dashboard:query(i=>summarize(store.list(),i.year,i.basis||'paid',i.platform||'全部',i.category||'',i.month||'')),
+  'source.file':query(i=>{const row=store.db.prepare('SELECT id,filename,hash,file_path FROM imports WHERE id=?').get(i.id);if(!row?.file_path)throw Error('采购来源不存在');const file=fs.realpathSync(path.join(store.dir,row.file_path)),relative=path.relative(fs.realpathSync(path.join(store.dir,'originals')),file);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('来源文件不在原件目录');return {id:row.id,filename:row.filename,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),downloadUrl:'/api/source/'+encodeURIComponent(row.id)};}),
+  'attachment.file':query(i=>{const resource=attachments.resource(i.id,'full');return {id:i.id,filename:resource.filename||'采购附件',downloadUrl:'/api/attachments/'+encodeURIComponent(i.id)};}),
   sources:query(()=>store.imports().map(source=>({...source,downloadUrl:'/api/source/'+encodeURIComponent(source.id)}))),
   export:query(i=>{const allowed=new Set(['orders','classification','monthly','template']),kind=i.kind||'orders';if(!allowed.has(kind))throw Error('导出类型无效');const endpoint={orders:'export',classification:'classification-export',monthly:'monthly-export',template:'template'}[kind];const params=new URLSearchParams(Object.entries(i).filter(([k,v])=>k!=='kind'&&v!==undefined));return {kind,downloadUrl:'/api/'+endpoint+'?'+params.toString(),evidence:{orderCount:filterOrders(store.list(),i,i.basis).length}};}),
   audit:query(i=>i.id?{history:store.history(i.id),supplements:store.supplements(i.id)}:store.auditLog.list(i)),
