@@ -49,6 +49,19 @@ and receipt hooks are internal only. File-based permission writes use the host's
 atomic policy+receipt envelope. SQLite schedule/assignment writes and receipts
 share a transaction. Backups are advertised only when the host hook exists.
 
+The host-only `runtime.importSchedules({sourceId,sourceRevision,ownerId,entries})`
+imports warehouse legacy schedules from the actually bound ledger. `sourceId`
+must be `warehouse:` plus its verified dataset ID. Each entry explicitly supplies
+`legacyKey, goal, cron, timezone, enabled` and optional `engine, misfirePolicy`.
+The verified owner must retain warehouse execution permission. Entry scope is
+always warehouse. There is no public request/MCP operation for this method.
+Schedule and persistent `(sourceId,legacyKey)` marker are written atomically;
+source revisions never overwrite a migrated schedule or recreate a deleted one.
+Disabled legacy schedules remain disabled. The return value reports imported,
+existing and disabled counts. The host must not call this with defaults when the
+real legacy configuration cannot be read. Scheduled formal side effects still
+enter the ordinary result review queue.
+
 ## Engines
 
 Codex uses the installed official App Server, exactly version 0.150.1. The

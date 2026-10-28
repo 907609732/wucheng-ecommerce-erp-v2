@@ -190,6 +190,30 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   }
   const scheduler=createAgentScheduler({store,createTask:(input,actor)=>createTask(input,actor,{internalId:input.id}),resolveActor,now,next:scheduleNext});
   const systemAdapter=createSystemAgentAdapter({store,getScheduler:()=>scheduler,resolveActor,taskFor,extensions,now});adapterMap.set('system',systemAdapter);
+  let importingSchedules=Promise.resolve();
+  function importSchedules(input){
+    const operation=importingSchedules.then(async()=>{
+      if(closed)throw agentError('AGENT_CLOSED','任务中心已关闭',503);
+      if(!plain(input)||typeof input.sourceId!=='string'||input.sourceId.length>400||!input.sourceId.startsWith('warehouse:')||typeof input.sourceRevision!=='string'||!input.sourceRevision||input.sourceRevision.length>500||typeof input.ownerId!=='string'||!Array.isArray(input.entries)||input.entries.length>50)throw agentError('SCHEDULE_MIGRATION_INVALID','旧调度来源、版本或清单无效',400);
+      const actor=await identity({id:input.ownerId,channel:'migration'});canRun(actor);if(!actor.modules.includes('warehouse'))throw agentError('MODULE_DENIED','旧云仓调度创建者没有云仓权限',403);
+      const warehouse=adapterMap.get('warehouse');if(!warehouse)throw agentError('SCHEDULE_MIGRATION_UNAVAILABLE','云仓业务模块尚未准备好',503);
+      const source=await binding(warehouse,{actor,capabilityId:'legacy-schedule-migration'});if(input.sourceId!=='warehouse:'+source.dataSetId)throw agentError('SCHEDULE_MIGRATION_SOURCE_CHANGED','旧调度来源与当前云仓账本不一致',409);
+      const prepared=[],seen=new Set();let existing=0;
+      for(const entry of input.entries){
+        if(!plain(entry)||typeof entry.legacyKey!=='string'||!entry.legacyKey||entry.legacyKey.length>200||seen.has(entry.legacyKey)||typeof entry.enabled!=='boolean'||typeof entry.timezone!=='string'||!entry.timezone||typeof entry.goal!=='string'||!entry.goal.trim()||typeof entry.cron!=='string')throw agentError('SCHEDULE_MIGRATION_INVALID','旧调度必须逐项提供唯一来源、目标、规则、时区和原启用状态',400);
+        seen.add(entry.legacyKey);const markerId=agentDigest({sourceId:input.sourceId,legacyKey:entry.legacyKey});
+        if(store.get('schedule_migration',markerId)){existing++;continue;}
+        const value=await scheduler.prepare({goal:entry.goal,cron:entry.cron,timezone:entry.timezone,engine:entry.engine||settings.get().defaultEngine,misfirePolicy:entry.misfirePolicy||'once',enabled:entry.enabled,scope:{modules:['warehouse']},origin:{type:'legacy-migration',sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.enabled}},actor);
+        prepared.push({markerId,legacyKey:entry.legacyKey,sourceEnabled:entry.enabled,value});
+      }
+      // Refresh after asynchronous schedule validation, then persist every
+      // schedule and its non-resurrecting migration marker in one transaction.
+      const fresh=await identity({id:actor.id,channel:'migration'});canRun(fresh);if(!fresh.modules.includes('warehouse'))throw agentError('MODULE_DENIED','旧调度创建者权限已经撤销',403);
+      const currentSource=await binding(warehouse,{actor:fresh,capabilityId:'legacy-schedule-migration'});if(currentSource.dataSetId!==source.dataSetId)throw agentError('SCHEDULE_MIGRATION_SOURCE_CHANGED','云仓账本在迁入期间发生切换',409);
+      store.transaction(()=>{for(const entry of prepared){const schedule=scheduler.commit(entry.value);store.insert('schedule_migration',{id:entry.markerId,ownerId:actor.id,sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.sourceEnabled,scheduleId:schedule.id,importedAt:now()});}if(prepared.length)systemAdapter.changed();});
+      return {imported:prepared.length,existing,disabled:prepared.filter(entry=>!entry.sourceEnabled).length,sourceId:input.sourceId,sourceRevision:input.sourceRevision};
+    });importingSchedules=operation.catch(()=>{});return operation;
+  }
   async function request(operation,payload={},meta={}){
     const actor=await identity(meta.actor);if(!plain(payload))throw agentError('INPUT_INVALID','请求参数无效');
     if(operation==='status')return {actor:{...actor,label:actor.label||actor.login||actor.id,canCreateTasks:true,canManageSettings:actor.role==='admin'},environment,engines:await Promise.all(['codex','hermes'].map(async id=>({id,...await engines[id]?.check?.(),configured:settings.get().company.hasKey}))),capabilities:await capabilities(actor)};
@@ -217,5 +241,5 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(extensions[operation]){if(operation.endsWith('.save')&&(!meta.trustedUi||actor.role!=='admin'))throw agentError('ADMIN_REQUIRED','仅管理员能修改公司配置',403);return extensions[operation](payload,{...meta,actor});}
     throw agentError('OPERATION_UNAVAILABLE','此操作尚未接入当前工作台',404);
   }
-  return {request,store,run,invokeTool,tick:()=>scheduler.tick(),async close(){closed=true;const pending=[...jobs.values()];for(const job of pending)job.controller.abort();for(const session of sessions.values())await session.cancel?.();await Promise.allSettled(pending.map(job=>job.done));store.close();}};
+  return {request,store,run,invokeTool,importSchedules,tick:()=>scheduler.tick(),async close(){closed=true;await importingSchedules;const pending=[...jobs.values()];for(const job of pending)job.controller.abort();for(const session of sessions.values())await session.cancel?.();await Promise.allSettled(pending.map(job=>job.done));store.close();}};
 }
