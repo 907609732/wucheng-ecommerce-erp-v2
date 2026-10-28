@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {inventory,gate} from '../scripts/agent-beta-coverage.mjs';
+test('inventory contains current five independent modules and separates UI',()=>{const modules=inventory();assert.deepEqual(modules.map(x=>x.id),['warehouse','exporter','purchase','sales','overview']);assert(modules.every(x=>x.operations.length));assert(modules.some(x=>x.operations.some(o=>o.classification==='ui_asset_or_navigation')));});
+test('unverified and stale coverage fail closed',()=>{const modules=inventory();const m={format:'agent-beta-coverage/v1',modules};assert(gate(m).length>0);modules[0].sourceSha256='bad';assert(gate(m).some(s=>s.includes('stale')));});
+test('empty or forged matrix never passes',()=>{assert(gate({format:'agent-beta-coverage/v1',modules:[]}).length>=5);assert(gate({}).length);});

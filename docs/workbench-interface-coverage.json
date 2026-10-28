@@ -1,6 +1,6 @@
 {
   "protocol": "workbench/v1",
-  "generatedAt": "2026-10-25T04:36:22.296Z",
+  "generatedAt": "2026-10-28T09:38:29.097Z",
   "modules": [
     {
       "module": "warehouse",
@@ -92,6 +92,41 @@
         {
           "module": "warehouse",
           "method": "GET",
+          "path": "/api/integration/v1/workbench/daily",
+          "kind": "read",
+          "remote": true,
+          "operationId": "warehouse.get.daily"
+        },
+        {
+          "module": "warehouse",
+          "method": "POST",
+          "path": "/api/integration/v1/workbench/daily/action",
+          "kind": "write",
+          "remote": true,
+          "operationId": "warehouse.post.daily.action",
+          "uiOnly": true
+        },
+        {
+          "module": "warehouse",
+          "method": "POST",
+          "path": "/api/integration/v1/workbench/daily/config",
+          "kind": "write",
+          "remote": true,
+          "operationId": "warehouse.post.daily.config",
+          "uiOnly": true
+        },
+        {
+          "module": "warehouse",
+          "method": "POST",
+          "path": "/api/integration/v1/workbench/daily/remind",
+          "kind": "write",
+          "remote": true,
+          "operationId": "warehouse.post.daily.remind",
+          "uiOnly": true
+        },
+        {
+          "module": "warehouse",
+          "method": "GET",
           "path": "/api/integration/v1/workbench/ui",
           "kind": "ui",
           "remote": true,
@@ -125,8 +160,8 @@
         "login.partition"
       ],
       "counts": {
-        "total": 13,
-        "remote": 13,
+        "total": 17,
+        "remote": 17,
         "hostOnly": 0
       }
     },
@@ -1040,6 +1075,42 @@
         {
           "module": "purchase",
           "method": "GET",
+          "path": "/api/personnel",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/api/personnel"
+        },
+        {
+          "module": "purchase",
+          "method": "POST",
+          "path": "/api/personnel",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "purchase:POST:/api/personnel"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/api/personnel/session",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/api/personnel/session"
+        },
+        {
+          "module": "purchase",
+          "method": "POST",
+          "path": "/api/personnel/session",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "purchase:POST:/api/personnel/session"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
           "path": "/api/source/:id",
           "kind": "download",
           "remote": true,
@@ -1099,6 +1170,42 @@
           "remote": true,
           "uiOnly": false,
           "operationId": "purchase:GET:/api/suppliers"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/api/task-board",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/api/task-board"
+        },
+        {
+          "module": "purchase",
+          "method": "POST",
+          "path": "/api/task-board/action",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "purchase:POST:/api/task-board/action"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/api/tasks",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/api/tasks"
+        },
+        {
+          "module": "purchase",
+          "method": "POST",
+          "path": "/api/tasks",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "purchase:POST:/api/tasks"
         },
         {
           "module": "purchase",
@@ -1297,6 +1404,42 @@
           "remote": true,
           "uiOnly": false,
           "operationId": "purchase:GET:/integration-review.js"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/loading-logo.png",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/loading-logo.png"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/loading-screen-auto.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/loading-screen-auto.mjs"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/loading-screen.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/loading-screen.css"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/loading-screen.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/loading-screen.mjs"
         },
         {
           "module": "purchase",
@@ -1571,11 +1714,56 @@
         {
           "module": "purchase",
           "method": "GET",
+          "path": "/surface-theme.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/surface-theme.css"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
           "path": "/tailscale-indicator.js",
           "kind": "ui",
           "remote": true,
           "uiOnly": false,
           "operationId": "purchase:GET:/tailscale-indicator.js"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/task-cards.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/task-cards.css"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/task-cards.js",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/task-cards.js"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/task-center.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/task-center.css"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/task-center.js",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/task-center.js"
         },
         {
           "module": "purchase",
@@ -1684,12 +1872,21 @@
           "remote": true,
           "uiOnly": false,
           "operationId": "purchase:GET:/workbench-base.js"
+        },
+        {
+          "module": "purchase",
+          "method": "GET",
+          "path": "/workbench-theme.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "purchase:GET:/workbench-theme.css"
         }
       ],
       "hostOnly": [],
       "counts": {
-        "total": 152,
-        "remote": 135,
+        "total": 170,
+        "remote": 153,
         "hostOnly": 17
       }
     },
@@ -2220,6 +2417,15 @@
         },
         {
           "module": "sales",
+          "method": "GET",
+          "path": "/api/manual-summary",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/api/manual-summary"
+        },
+        {
+          "module": "sales",
           "method": "POST",
           "path": "/api/matches",
           "kind": "write",
@@ -2347,6 +2553,33 @@
         {
           "module": "sales",
           "method": "POST",
+          "path": "/api/personnel/handoff",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "sales:POST:/api/personnel/handoff"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/api/personnel/session",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/api/personnel/session"
+        },
+        {
+          "module": "sales",
+          "method": "POST",
+          "path": "/api/personnel/session",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "sales:POST:/api/personnel/session"
+        },
+        {
+          "module": "sales",
+          "method": "POST",
           "path": "/api/rates",
           "kind": "write",
           "remote": true,
@@ -2388,6 +2621,15 @@
           "remote": true,
           "uiOnly": true,
           "operationId": "sales:POST:/api/shops"
+        },
+        {
+          "module": "sales",
+          "method": "DELETE",
+          "path": "/api/shops/:id",
+          "kind": "write",
+          "remote": true,
+          "uiOnly": true,
+          "operationId": "sales:DELETE:/api/shops/:id"
         },
         {
           "module": "sales",
@@ -2460,6 +2702,15 @@
           "remote": true,
           "uiOnly": false,
           "operationId": "sales:GET:/api/taobao/statement"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/api/task-center",
+          "kind": "read",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/api/task-center"
         },
         {
           "module": "sales",
@@ -2545,6 +2796,42 @@
         {
           "module": "sales",
           "method": "GET",
+          "path": "/loading-logo.png",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/loading-logo.png"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/loading-screen-auto.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/loading-screen-auto.mjs"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/loading-screen.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/loading-screen.css"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/loading-screen.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/loading-screen.mjs"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
           "path": "/pdd-ui.js",
           "kind": "ui",
           "remote": true,
@@ -2554,11 +2841,101 @@
         {
           "module": "sales",
           "method": "GET",
+          "path": "/personnel.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/personnel.css"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/personnel.js",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/personnel.js"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/sales-workspace.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/sales-workspace.css"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/skills/cainiao-freight-import.zip",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/skills/cainiao-freight-import.zip"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/skills/cainiao-freight-import/agents/openai.yaml",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/skills/cainiao-freight-import/agents/openai.yaml"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/skills/cainiao-freight-import/references/browser.md",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/skills/cainiao-freight-import/references/browser.md"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/skills/cainiao-freight-import/references/import.md",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/skills/cainiao-freight-import/references/import.md"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/skills/cainiao-freight-import/SKILL.md",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/skills/cainiao-freight-import/SKILL.md"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
           "path": "/style.css",
           "kind": "ui",
           "remote": true,
           "uiOnly": false,
           "operationId": "sales:GET:/style.css"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/task-center.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/task-center.css"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
+          "path": "/task-center.js",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/task-center.js"
         },
         {
           "module": "sales",
@@ -4066,6 +4443,15 @@
         {
           "module": "sales",
           "method": "GET",
+          "path": "/warehouse-import-assistant.js",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "sales:GET:/warehouse-import-assistant.js"
+        },
+        {
+          "module": "sales",
+          "method": "GET",
           "path": "/workbench-base.js",
           "kind": "ui",
           "remote": true,
@@ -4075,8 +4461,8 @@
       ],
       "hostOnly": [],
       "counts": {
-        "total": 264,
-        "remote": 248,
+        "total": 285,
+        "remote": 269,
         "hostOnly": 16
       }
     },
@@ -4716,6 +5102,42 @@
         {
           "module": "overview",
           "method": "GET",
+          "path": "/loading-logo.png",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "overview:GET:/loading-logo.png"
+        },
+        {
+          "module": "overview",
+          "method": "GET",
+          "path": "/loading-screen-auto.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "overview:GET:/loading-screen-auto.mjs"
+        },
+        {
+          "module": "overview",
+          "method": "GET",
+          "path": "/loading-screen.css",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "overview:GET:/loading-screen.css"
+        },
+        {
+          "module": "overview",
+          "method": "GET",
+          "path": "/loading-screen.mjs",
+          "kind": "ui",
+          "remote": true,
+          "uiOnly": false,
+          "operationId": "overview:GET:/loading-screen.mjs"
+        },
+        {
+          "module": "overview",
+          "method": "GET",
           "path": "/style.css",
           "kind": "ui",
           "remote": true,
@@ -4761,8 +5183,8 @@
       ],
       "hostOnly": [],
       "counts": {
-        "total": 75,
-        "remote": 57,
+        "total": 79,
+        "remote": 61,
         "hostOnly": 18
       }
     }
