@@ -1,0 +1,22 @@
+const {app,BrowserWindow,ipcMain,safeStorage}=require('electron');
+const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
+const {pathToFileURL}=require('node:url');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-host-electron-'));
+app.setPath('userData',path.join(root,'profile'));
+const watchdog=setTimeout(()=>{process.stderr.write('Electron host acceptance timed out\n');app.exit(2);},45000);
+app.whenReady().then(async()=>{
+  process.stdout.write('host acceptance: Electron ready\n');
+  const load=file=>import(pathToFileURL(path.join(__dirname,'../desktop/agent-host',file)).href);
+  const [{assertLauncherSender,agentEnvelope},{createSafeSecretStore},{createHostIdentity}]=await Promise.all([load('trust.mjs'),load('secret-store.mjs'),load('identity.mjs')]);
+  const identity=createHostIdentity({storeDir:root,policyFile:path.join(root,'policy.json')}),secretStore=createSafeSecretStore({storeDir:root,safeStorage});
+  const file=path.join(__dirname,'agent-host-electron.html'),win=new BrowserWindow({show:false,webPreferences:{preload:path.join(__dirname,'agent-host-electron-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  ipcMain.handle('agent:request',async(event,value)=>{assertLauncherSender(event,win,[file]);const {operation}=agentEnvelope(value);if(operation!=='status')throw Error('Unexpected smoke operation');return {actor:identity.localActor().id};});
+  await win.loadFile(file);
+  process.stdout.write('host acceptance: isolated renderer loaded\n');
+  const answer=await win.webContents.executeJavaScript("window.hostSmoke.request({operation:'status',payload:{}})");assert.match(answer.actor,/^windows:S-1-5-/);
+  const injected=await win.webContents.executeJavaScript("window.hostSmoke.request({operation:'status',payload:{actor:{role:'admin'}}}).then(()=>false,()=>true)");assert.equal(injected,true);
+  const value='synthetic-dpapi-acceptance-value';await secretStore.set('company-api-key',value);assert.equal(await secretStore.get('company-api-key'),value);assert.equal(fs.readFileSync(path.join(root,'company-secrets.json'),'utf8').includes(value),false);
+  const other=path.join(root,'untrusted.html');fs.writeFileSync(other,'<!doctype html><title>untrusted</title>');await win.loadFile(other);
+  const denied=await win.webContents.executeJavaScript("window.hostSmoke.request({operation:'status',payload:{}}).then(()=>false,()=>true)");assert.equal(denied,true);
+  win.destroy();await secretStore.delete('company-api-key');clearTimeout(watchdog);process.stdout.write(JSON.stringify({ok:true,realElectronIpc:true,windowsSid:true,dpapiRoundTrip:true,spoofedIdentityDenied:true,untrustedPageDenied:true})+'\n');app.exit(0);
+}).catch(error=>{process.stderr.write(error.stack+'\n');app.exit(1);});

@@ -6,8 +6,8 @@ export const MODULE_IDS=Object.freeze(['warehouse','purchase','sales','overview'
 export function serverAddress(input){
   let url;
   try{url=new URL(String(input).trim());}catch{throw Error('请填写 Tailscale HTTPS 服务器地址');}
-  if(url.protocol!=='https:'||!url.hostname.endsWith('.ts.net')||url.username||url.password||url.search||url.hash||url.pathname!=='/'||url.port!=='8443')throw Error('服务器地址必须是 https://设备名.私网名.ts.net:8443');
-  url.port='8443';return url.origin;
+  if(url.protocol!=='https:'||!url.hostname.endsWith('.ts.net')||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!['8443','9443'].includes(url.port))throw Error('服务器地址必须使用私网 HTTPS：正式版 8443，测试版 9443');
+  return url.origin;
 }
 function atomic(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2),{mode:0o600});fs.renameSync(tmp,file);}
 export class ConnectionStore{

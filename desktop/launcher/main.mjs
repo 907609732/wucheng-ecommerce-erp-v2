@@ -10,10 +10,8 @@ import {withElectronLifecycle} from '../modules/electron-lifecycle.mjs';
 import {installDeskViews} from '../local-desks.mjs';
 import {createPersonnelSelection,personnelPartition,decoratePersonnelURL,assertPersonnelSupport} from './personnel.mjs';
 import {requestedUserDataPath} from '../shared/user-data-path.mjs';
-import {getWorkbenchLocation} from '../shared/workbench-location.mjs';
 import {parseCliRequest} from '../shared/ai-interface.mjs';
 import {readCliChildResult} from '../shared/cli-child-result.mjs';
-import {createUpdater} from '../updater.mjs';
 import {spawn,execFileSync} from 'node:child_process';
 import {externalLink} from '../shared/external-links.mjs';
 import crypto from 'node:crypto';
@@ -27,18 +25,27 @@ import {prepareEmbeddedSession,fetchFromEmbeddedSession,resetEmbeddedSession} fr
 import {TailnetRuntime,existingTailnetRuntimes} from '../workbench-client/tailnet-runtime.mjs';
 import {inspectLocalLedgers,backupLocalLedgers} from '../workbench-client/inventory.mjs';
 import {runRemoteCommand} from '../workbench-client/cli.mjs';
-import {startGateway,tailscaleHost} from '../workbench-client/gateway-lifecycle.mjs';
+import {tailscaleHost} from '../workbench-client/gateway-lifecycle.mjs';
 import {collectMigrationSource,freezeMigrationSource,releaseMigrationSource} from '../workbench-client/migration-source.mjs';
 import {prepareServe,enableServe} from '../workbench-client/tailscale-serve.mjs';
+import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress} from '../agent-host/isolation.mjs';
+import {createHostIdentity} from '../agent-host/identity.mjs';
+import {createAgentHost} from '../agent-host/index.mjs';
+import {assertLauncherSender,agentEnvelope} from '../agent-host/trust.mjs';
+import {saveArtifactDownload} from '../agent-host/artifacts.mjs';
+import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent-host/launcher-policy.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
-let location;
+let location,agentPaths,agentHost,agentGateway,hostIdentity,agentHostStarting;
 try{
+  agentPaths=agentBetaPaths();
   const registryArgument=process.argv.find(value=>value.startsWith('--registry-file='))?.slice('--registry-file='.length);
   if(registryArgument&&!path.isAbsolute(registryArgument))throw Error('注册表必须使用完整路径');
-  if(registryArgument&&(!fs.existsSync(registryArgument)||!fs.statSync(registryArgument).isFile()))throw Error('原注册表不存在，已阻止回退到其他账本');
-  location=getWorkbenchLocation(app.getPath('appData'),{explicitProfile:requestedUserDataPath(process.argv),registryFile:registryArgument||process.env.LINGTU_REGISTRY_PATH});
+  if(registryArgument&&path.resolve(registryArgument)!==agentPaths.registryFile)throw Error('测试版不能使用正式账本注册表');
+  const requestedProfile=requestedUserDataPath(process.argv);
+  if(requestedProfile&&path.resolve(requestedProfile)!==agentPaths.profile)throw Error('测试版必须使用独立用户配置');
+  location=prepareAgentProfile(agentPaths);
 }
 catch(error){
   if(process.argv.includes('--cli')||process.argv.includes('--mcp-stdio'))process.stderr.write('工作台数据位置需要核对：'+error.message+'\n');
@@ -77,11 +84,11 @@ function launcherPreferences(){
 }
 function persistPreferences(value){fs.mkdirSync(profile,{recursive:true});const temp=preferencesFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2));fs.renameSync(temp,preferencesFile);}
 function configureLauncherLogin(value){
-  if(headless||!app.isPackaged||process.env.LINGTU_ISOLATED_TEST==='1')return;
+  if(agentPaths||headless||!app.isPackaged||process.env.LINGTU_ISOLATED_TEST==='1')return;
   // Normal launches resolve the authoritative Documents binding themselves. Keep
   // the Windows Run command below its documented 260-character limit instead of
   // repeating the long physical MSIX authentication profile in the command line.
-  const canonical=getWorkbenchLocation(app.getPath('appData'));
+  const canonical=location;
   const canonicalBinding=path.resolve(canonical.profile).toLowerCase()===path.resolve(profile).toLowerCase()&&path.resolve(canonical.registryFile).toLowerCase()===path.resolve(location.registryFile).toLowerCase();
   const args=canonicalBinding?['--hidden']:['--hidden','--user-data-dir='+profile,'--registry-file='+location.registryFile];
   if(value.startAtLogin&&('"'+process.execPath+'" '+args.map(a=>'"'+a+'"').join(' ')).length>260)throw Error('自定义启动配置的路径过长，请从正式工作台入口设置开机启动');
@@ -137,7 +144,7 @@ const safeEncrypt=async plain=>{
 };
 const safeDecrypt=async bytes=>{
   if(!safeStorage.isEncryptionAvailable())throw Error('Windows 安全存储不可用，不能读取私网连接信息');
-  return safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(bytes):safeStorage.decryptString(bytes);
+  const value=safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(bytes):safeStorage.decryptString(bytes);return typeof value==='string'?value:value.result;
 };
 function embeddedRuntime(){
   if(!embedded())throw Error('请先选择客户端与内置私网连接');
@@ -197,8 +204,9 @@ function guardPrivateSession(target){
   target.webRequest.onBeforeRequest((details,callback)=>{
     const state=connection.read(),write=!['GET','HEAD','OPTIONS'].includes(details.method);
     const migration=details.url.startsWith(state.serverUrl+'/api/workbench/v1/migrations/');
+    const agent=details.url===state.serverUrl+'/api/workbench/v1/agent/request';
     const foreign=embedded()&&/^https?:/.test(details.url)&&new URL(details.url).origin!==state.serverUrl;
-    const cancel=foreign||remote()&&(state.networkSuspended||!connection.canWrite()&&write&&!migration);
+    const cancel=foreign||remote()&&(state.networkSuspended||!connection.canWrite()&&write&&!migration&&!agent);
     if(!cancel&&write)writes.add(details.id);callback({cancel});
   });
   const finished=details=>writes.delete(details.id);
@@ -206,6 +214,7 @@ function guardPrivateSession(target){
 }
 function remoteConnection(channel='ui'){
   assertPrivateRequestAllowed();
+  assertBetaServerAddress(connection.read().serverUrl);
   if(transport&&transport.channel===channel)return transport;
   clientSession=session.fromPartition(clientPartition());
   // Retain the same migration and origin fence for transport and sales views.
@@ -226,24 +235,25 @@ function remoteConnection(channel='ui'){
   currentTransport.connect=async()=>{try{return await connect();}catch(error){currentTransport.identity=null;currentTransport.moduleConnections.clear();if(['DATASET_CHANGED','CONNECTION_CHANGED'].includes(error.code)&&transport===currentTransport){transport=null;remoteManager=null;}throw error;}};
   remoteManager=new RemoteServiceManager(transport);return transport;
 }
-function requireHost(){if(remote())throw Error('此操作仅能在主服务器执行');}
+function requireHost(){if(remote())throw Error('此操作仅能在主服务器执行');hostIdentity?.requireAdmin(hostIdentity.localActor(),true);}
+function betaTailnetHost(){const ts=tailscaleHost(),url=new URL(ts.origin);url.port='9443';return {...ts,origin:url.origin};}
+const betaServeOptions=()=>({httpsPort:9443,targetPort:agentPaths.gatewayPort});
 async function ensureGateway(){
-  requireHost();const ts=tailscaleHost(),runtime=modules.state().packages['node-runtime'];
-  const node=runtime?path.join(runtime.root,runtime.entry):!app.isPackaged?path.join(process.env.ProgramFiles||'C:/Program Files','nodejs','node.exe'):null;
-  let component=app.isPackaged?path.join(process.resourcesPath,'workbench-gateway'):path.resolve(here,'../..');
-  if(app.isPackaged){
-    const target=path.join(profile,'gateway-components',app.getVersion());
-    if(!fs.existsSync(path.join(target,'.ready'))){const temporary=target+'.'+crypto.randomUUID()+'.tmp';fs.mkdirSync(path.dirname(target),{recursive:true});fs.cpSync(component,temporary,{recursive:true});fs.writeFileSync(path.join(temporary,'.ready'),app.getVersion());fs.renameSync(temporary,target);}
-    component=target;
-  }
-  const entry=path.join(component,'desktop','workbench-migration','server-entry.mjs');
-  return startGateway({root:path.join(profile,'workbench-server'),entry,node,registryFile:services.registryFile,origin:ts.origin,owner:ts.owner});
+  requireHost();if(agentGateway)return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
+  const ts=betaTailnetHost(),policyFile=path.join(profile,'workbench-server','access-policy.json');
+  if(!fs.existsSync(policyFile)){fs.mkdirSync(path.dirname(policyFile),{recursive:true});fs.writeFileSync(policyFile,JSON.stringify({schemaVersion:1,users:{[ts.owner]:{role:'admin',modules:MODULE_IDS,canRunTasks:true,enabled:true}}}),{flag:'wx',mode:0o600});}
+  const {runWorkbenchServer}=await import('../workbench/server.mjs'),host=await getAgentHost();
+  agentGateway=await runWorkbenchServer({storeDir:path.join(profile,'workbench-server'),publicOrigin:ts.origin,registryFile:services.registryFile,port:agentPaths.gatewayPort,agentPaths,agentRuntime:host.runtime});return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
+}
+async function getAgentHost(){
+  if(agentHost)return agentHost;
+  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
+  return agentHostStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};
-const catalogUrl = 'https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/modules-stable/catalog.json';
 const publicKeysFile = path.join(here, 'public-keys.json');
 function trusted(event) {
-  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('调用来源不符');
+  assertLauncherSender(event,win,[path.join(here,'agent-index.html'),path.join(here,'index.html')]);
 }
 function external(id) {
   if (!['purchase', 'sales', 'overview', 'exporter'].includes(id)) return null;
@@ -261,30 +271,18 @@ async function list(){
   const current=remoteConnection(),found=await current.modules();
   return MODULE_IDS.map(id=>{const row=found.find(row=>(row.id||row.extension)===id);return {id,name:names[id],remote:true,authorized:!!row,status:row?.status||'unavailable',...row};});
 }
-async function refresh() {
-  const response = await fetch(catalogUrl, {signal: AbortSignal.timeout(20000)});
-  if (!response.ok) throw Error('暂时无法获取官方扩展目录，可重试或导入离线包');
-  const final = new URL(response.url);
-  if (final.protocol !== 'https:' || !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(final.hostname)) throw Error('扩展目录来源无效');
-  let bytes = 0, chunks = [];
-  for await (const chunk of response.body) {
-    bytes += chunk.length;
-    if (bytes > 3 * 1024 ** 2) throw Error('扩展目录过大');
-    chunks.push(chunk);
-  }
-  modules.setCatalog(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-  return list();
-}
+async function refresh(){throw Error('测试版使用本包冻结组件，不连接稳定版组件目录');}
 if (acquired) app.whenReady().then(async () => {
-  app.setAppUserModelId('com.wucheng.ecommerce.erp.v2');
-  services = new ServiceManager({policyFile:path.join(profile,'workbench-server','access-policy.json')});
+  app.setAppUserModelId(agentPaths.appId);
+  hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host'),policyFile:path.join(profile,'workbench-server','access-policy.json')});
+  services = guardAgentServices(new ServiceManager({registryFile:location.registryFile,policyFile:path.join(profile,'workbench-server','access-policy.json')}),agentPaths);
   previousCloudExecutable=services.config('warehouse').exe;
   cache=new SnapshotCache({root:path.join(profile,'client-cache'),encrypt:async plain=>{
     if(!safeStorage.isEncryptionAvailable())throw Error('Windows 安全存储不可用，不能保存离线缓存');
     return safeStorage.encryptStringAsync?await safeStorage.encryptStringAsync(plain):safeStorage.encryptString(plain);
   },decrypt:async encrypted=>{
     if(!safeStorage.isEncryptionAvailable())throw Error('Windows 安全存储不可用，不能读取离线缓存');
-    return safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(encrypted):safeStorage.decryptString(encrypted);
+    const value=safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(encrypted):safeStorage.decryptString(encrypted);return typeof value==='string'?value:value.result;
   }});
   const ensureService=services.ensure.bind(services);
   const verifyProfile=id=>{
@@ -300,30 +298,19 @@ if (acquired) app.whenReady().then(async () => {
     onProgress: progress => {if(progress.phase==='installed')desks?.invalidate(progress.id);send('modules:progress', progress);}
   });
   const lifecycleOptions = {
-    services, dataRoot: path.join(profile, 'module-data'), backupRoot: path.join(profile, 'module-backups'),
+    services, dataRoot: agentPaths.data, backupRoot: path.join(profile, 'module-backups'),
     getInstalled: id => modules.state().packages[id]
   };
   modules.lifecycle = withElectronLifecycle(createServiceLifecycle(lifecycleOptions), lifecycleOptions);
-  if(fs.existsSync(modules.journalFile)){
-    try { await modules.exclusive(async()=>{}); }
-    catch(error){recoveryError=error.message;}
-  }
-  const bundledCatalog = path.join(here, 'catalog.json');
-  if(fs.existsSync(bundledCatalog)){
-    const bundled=JSON.parse(fs.readFileSync(bundledCatalog,'utf8'));
-    const issued=JSON.parse(Buffer.from(bundled.payload,'base64').toString('utf8')).publishedAt;
-    if(!modules.catalog||Date.parse(issued)>Date.parse(modules.catalog.publishedAt))modules.setCatalog(bundled);
-  }
-  if(!headless&&!process.env.LINGTU_SKIP_BUNDLED_ACTIVATION){const {initializeUnifiedData}=await import('../workbench-migration/local-data-move.mjs');initializeUnifiedData({services,mode:connection.read().mode});}
-  const {ensureBundledSuite}=await import('../modules/bundled-suite.mjs');
-  const {pendingLocalDataMoves,verifyPendingLocalDataMovesAsync,finishVerifiedLocalDataMoves}=await import('../workbench-migration/local-data-move.mjs');
-  const pendingMoves=!headless&&!remote()?pendingLocalDataMoves(services,{verificationOnly:true}):[];
-  const suiteState=await ensureBundledSuite({modules,services,profile,bundleDirectory:app.isPackaged?path.join(process.resourcesPath,'bundled-suite'):process.env.LINGTU_SUITE_DIRECTORY,mode:connection.read().mode,headless:headless||!!process.env.LINGTU_SKIP_BUNDLED_ACTIVATION,forceVerification:pendingMoves.length>0,beforeRelease:()=>verifyPendingLocalDataMovesAsync(services),onProgress:value=>{reportPreparation(value);send('modules:progress',value);}});
-  if(!headless&&!remote()&&suiteState.ready)await finishVerifiedLocalDataMoves(services);
+  if(fs.existsSync(modules.journalFile))recoveryError='测试版检测到旧组件更新记录，请重新运行测试包验收工具。';
+  // Beta payload and ledger copies are provisioned by the isolated migration tool.
+  // Never run legacy unified-data moves or reactivate production packages here.
+  const suiteState={ready:false,setupRequired:true};
   if(headless){
     const {createWorkbenchDispatcher,legacyCliArgs}=await import('../shared/workbench-dispatcher.mjs');
     let localAgentActions;
     const executeLegacy=async request=>{
+      assertLegacyAgentReadOnly(request);
       if(request.command==='debug-logs'){const result=await diagnostics.read({query:request.query,level:request.level,limit:request.limit});return {ok:true,lines:result.entries.map(r=>'['+r.source+'] '+r.text)};}
       if(request.command==='debug-bundle'){const bundle=await diagnostics.bundle(),text=JSON.stringify(bundle,null,2),directory=path.join(diagnostics.directory,'reports');await fs.promises.mkdir(directory,{recursive:true});const file=path.join(directory,'diagnostic-'+Date.now()+'-'+crypto.randomUUID()+'.json');await fs.promises.writeFile(file,text,{encoding:'utf8',mode:0o600,flag:'wx'});return {ok:true,bundle,path:file,size:Buffer.byteLength(text),sha256:crypto.createHash('sha256').update(text).digest('hex')};}
       if(suiteState.setupRequired&&!['help','status','capabilities','extensions'].includes(request.command)&&!(request.command==='extension-call'&&request.action==='status'))throw Object.assign(Error('请先打开工作台完成本机程序初始化'),{code:'SUITE_SETUP_REQUIRED'});
@@ -331,8 +318,8 @@ if (acquired) app.whenReady().then(async () => {
       if(fs.existsSync(modules.journalFile)&&!['status','capabilities','extensions'].includes(request.command))throw Object.assign(Error('程序正在更新或等待恢复检查'),{code:'MODULE_UPDATING'});
       if(request.command==='help')return {ok:true,help:'使用 workbench capabilities 查看五个业务功能；正式写入仍需相应确认。'};
       if(request.command==='status')return {ok:true,status:{modules:localList(),mode:connection.read().mode}};
-      if(request.command==='capabilities')return {ok:true,capabilities:{apiVersion:'1.0.0',modules:localList(),moduleApiVersion:1,importConfirmation:'two-ui-confirmations-required'}};
-      if(request.command==='extensions')return {ok:true,extensions:[{id:'lingtu.desks',trusted:true,actions:['status','query','prepare','start','stop']}]};
+      if(request.command==='capabilities')return {ok:true,capabilities:{apiVersion:'1.0.0',modules:localList(),moduleApiVersion:1,importConfirmation:'agent-result-review-required'}};
+      if(request.command==='extensions')return {ok:true,extensions:[{id:'lingtu.desks',trusted:true,actions:['status','query']}]};
       if(request.command==='extension-call'){
         if(request.id!=='lingtu.desks'||!['status','query','prepare','start','stop'].includes(request.action))throw Error('不支持的扩展操作');
         if(!['status','query'].includes(request.action)&&!request.confirmSideEffect)throw Error('修改操作需要本次明确确认');
@@ -362,11 +349,6 @@ if (acquired) app.whenReady().then(async () => {
   });
   win.setMenu(null);
   win.setMenuBarVisibility(false);
-  const rawEnsure = services.ensure.bind(services);
-  services.ensure = id => {
-    if (!modules.state().packages[id] && !external(id)) return Promise.reject(Error('MODULE_NOT_INSTALLED：请先下载对应模块'));
-    return rawEnsure(id);
-  };
   const verifySalesPersonnel=async(id,cap)=>{
     if(id!=='sales')return cap;
     try{
@@ -396,11 +378,13 @@ if (acquired) app.whenReady().then(async () => {
     },
     decorateURL:(id,url)=>decoratePersonnelURL(id,url,personnel.requireSelected()),
     notify:message=>send('modules:message',message)});
-  const handle = (name, fn) => ipcMain.handle(name, async (event, ...args) => {
-    trusted(event);const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
+  const legacyHandlers=new Map();
+  const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
+    trusted(event);assertLauncherOperationAllowed(name);const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
+    if(name!=='agent:request'&&/^(?:permissions:|personnel:select|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireAdmin(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
-    catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));throw Error(safeLogText(error.message));}
-  });
+    catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='agent:request')return {ok:false,code:error.code||'AGENT_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
+  });};
   handle('diagnostics:read',options=>diagnostics.read(options));
   handle('diagnostics:copy',async options=>{const result=await diagnostics.read(options);clipboard.writeText(result.entries.map(r=>'['+r.source+'] '+r.text).join('\n'));return {copied:result.entries.length};});
   handle('diagnostics:open-folder',async()=>{await fs.promises.mkdir(diagnostics.directory,{recursive:true});const problem=await shell.openPath(diagnostics.directory);if(problem)throw Error(problem);return {opened:true};});
@@ -409,20 +393,20 @@ if (acquired) app.whenReady().then(async () => {
   handle('diagnostics:event',value=>{if(Date.now()-diagnosticWindow>60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>50)return {limited:true};if(!value||typeof value.text!=='string'||value.text.length>6000||!['info','warning','error'].includes(value.level))throw Error('日志事件无效');diagnostics.write(value.level==='warning'?'warn':value.level,value.source==='network'?'network':'workbench',value.text);return {recorded:true};});
   handle('modules:list', list);
   handle('personnel:state',()=>personnel.state());
-  handle('personnel:select',role=>personnel.select(role));
+  handle('personnel:select',async role=>{if(remote()){const status=await remoteConnection().request('/agent/request',{method:'POST',body:{operation:'status',payload:{}},migration:true});if(role==='boss'&&status.actor.role!=='admin')throw Error('当前成员不是管理员');}return personnel.select(role);});
   handle('launcher:ready',()=>{rendererReady=true;deliverRequestedModule();return {ready:true};});
   handle('launcher:preferences',()=>launcherPreferences());
   handle('launcher:preferences-save',value=>{if(typeof value?.startAtLogin!=='boolean')throw Error('开机启动设置无效');const next={schemaVersion:1,startAtLogin:value.startAtLogin};configureLauncherLogin(next);persistPreferences(next);return next;});
   handle('launcher:integration-config',()=>integrationConfiguration());
   handle('launcher:copy-integration',kind=>{if(!['mcp','cli'].includes(kind))throw Error('未知配置类型');const config=integrationConfiguration()[kind];clipboard.writeText(JSON.stringify(config,null,2));return {copied:true};});
-  handle('connection:get',()=>{const state=connection.read();if(!state.serverUrl&&state.mode!=='client')try{state.suggestedServerUrl=tailscaleHost().origin;}catch{}return {...state,canWrite:connection.canWrite(),connected:!!transport?.identity};});
+  handle('connection:get',()=>{const state=connection.read();if(!state.serverUrl&&state.mode!=='client')try{state.suggestedServerUrl=betaTailnetHost().origin;}catch{}return {...state,canWrite:connection.canWrite(),connected:!!transport?.identity};});
   handle('connection:status',async()=>{
     const state=connection.read(),started=Date.now();let result;
     if(networkConfigurationBusy)result={state:'checking',label:'正在切换连接',detail:'正在保存和核对连接设置。'};
     else if(state.mode==='standalone')result={state:'local',label:'单机模式',detail:'使用本机账本，无需连接主服务器。'};
     else if(state.mode==='server'){
       let identity;try{identity=JSON.parse(fs.readFileSync(path.join(profile,'workbench-server','identity.json'),'utf8'));}catch{}
-      result=await serverConnectionHealth({state,identity});
+      result=await serverConnectionHealth({state,identity,fetchImpl:(url,options)=>fetch(url.replace('http://127.0.0.1:17330','http://127.0.0.1:'+agentPaths.gatewayPort),options)});
     }else if(state.networkSuspended)result={state:'paused',label:'私网连接已暂停',detail:'请在设置中重新连接或登录。'};
     else if(!transport?.identity)result={state:'unverified',label:'尚未连接主服务器',detail:'请检查连接或在设置中完成私网登录和设备批准。'};
     else{
@@ -439,24 +423,26 @@ if (acquired) app.whenReady().then(async () => {
     return {...result,mode:state.mode,configurationId:state.configurationId,checkedAt:new Date().toISOString(),latencyMs:Date.now()-started};
   });
   handle('connection:network-plan',()=>{
-    requireHost();const plan=prepareServe({origin:tailscaleHost().origin,backupRoot:path.join(profile,'workbench-server','network-backups')});
+    requireHost();const plan=prepareServe({...betaServeOptions(),origin:betaTailnetHost().origin,backupRoot:path.join(profile,'workbench-server','network-backups')});
     networkProposal={...plan,token:crypto.randomUUID(),expiresAt:Date.now()+300000};return {token:networkProposal.token,difference:plan.difference,backup:plan.file};
   });
   async function saveConnectionValue(value,{connect=true}={}){
+    if(value.serverUrl)assertBetaServerAddress(value.serverUrl);
     if(modules.pending.size)throw Error('请等待当前模块安装完成');
     if(activeNetworkRequests||[...privateSessionWrites.values()].some(set=>set.size))throw Error('主服务器请求尚未结束，请稍后切换连接');
     if(value.mode==='client')serverAddress(value.serverUrl);
-    const inventory=value.mode==='client'?inspectLocalLedgers(services):[];
-    if(value.mode==='client'&&inventory.some(r=>r.present&&r.records))await backupLocalLedgers(services,profile);
+    // Beta client mode never folds a local ledger into the company host. Migration
+    // only uses the explicitly staged formal-ledger copy on the host.
+    const inventory=[];
     if(value.mode==='server'){
       if(!networkProposal||networkProposal.token!==value.networkToken||networkProposal.expiresAt<Date.now())throw Error('请先审查本次私网配置差异');
-      value={...value,serverUrl:tailscaleHost().origin};
-      const fresh=prepareServe({origin:value.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});
+      value={...value,serverUrl:betaTailnetHost().origin};
+      const fresh=prepareServe({...betaServeOptions(),origin:value.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});
       if(JSON.stringify(fresh.before)!==JSON.stringify(networkProposal.before))throw Error('网络配置已变化，请重新审查');
     }
     await resetPrivateConnection();
     const state=connection.configure(value,inventory);
-    if(state.mode==='server'){await ensureGateway();enableServe({origin:state.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});networkProposal=null;}
+    if(state.mode==='server'){await ensureGateway();enableServe({...betaServeOptions(),origin:state.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});networkProposal=null;}
     if(state.mode==='client'&&connect)await remoteConnection().connect();
     return {...state,canWrite:connection.canWrite()};
   }
@@ -527,14 +513,13 @@ if (acquired) app.whenReady().then(async () => {
   handle('migration:recover',id=>migrationRequest('/'+encodeURIComponent(id)+'/recover',{method:'POST',body:{}}));
   handle('migration:archive',async id=>{if(!remote())throw Error('旧账本只能在来源客户端封存');const result=await migrationRequest('/'+encodeURIComponent(id)+'/result');if(result.status!=='completed')throw Error('服务器迁移尚未完整完成，不能封存旧账本');await freezeMigrationSource(services,connection,profile);return connection.archiveMigration(result.receipt);});
   handle('migration:release-source',()=>{if(!remote())throw Error('请在来源客户端处理封存准备');return releaseMigrationSource(services,connection,profile);});
-  handle('permissions:get',()=>{personnel.requireBoss();requireHost();const file=path.join(profile,'workbench-server','access-policy.json');return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{schemaVersion:1,users:{}};});
+  handle('permissions:get',()=>{requireHost();return hostIdentity.permissionsGet({}, {actor:hostIdentity.localActor(),trustedUi:true}).policy;});
   handle('permissions:save',async value=>{
-    personnel.requireBoss();requireHost();const {validatePolicy}=await import('../workbench/policy.mjs');
-    const policy=validatePolicy(value);if(!Object.values(policy.users).some(u=>u.enabled&&u.role==='admin'))throw Error('至少保留一名管理员');
-    const file=path.join(profile,'workbench-server','access-policy.json');fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(policy,null,2),{mode:0o600});fs.renameSync(temp,file);return {ok:true};
+    requireHost();const meta={actor:hostIdentity.localActor(),trustedUi:true},current=hostIdentity.permissionsGet({},meta);
+    hostIdentity.permissionsSave({policy:value,revision:current.revision},meta);return {ok:true};
   });
   handle('links:open', name => shell.openExternal(externalLink(name)));
-  updater=createUpdater({app,getToken:async()=>'',onState:state=>send('launcher:update',state),log:message=>send('modules:message',message)});
+  updater={check:async()=>({status:'disabled',channel:'agent-beta'}),getState:()=>({status:'disabled'})};
   handle('launcher:update-check',()=>updater.check());
   handle('launcher:update-install',()=>changePrivateConnection(async()=>{
     if(modules.pending.size)throw Error('请等待模块安装完成后更新工作台');
@@ -597,18 +582,34 @@ if (acquired) app.whenReady().then(async () => {
   win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   tray=new Tray(path.join(here,'../assets/lingtu-icon.png'));
   tray.setToolTip('五成电子商务工作台');
-  tray.setContextMenu(Menu.buildFromTemplate([{label:'打开工作台',click:showWindow},{label:'日志与诊断',click:()=>{showWindow();send('desks:navigate',{id:'logs'});}},{label:'设置',click:()=>{showWindow();send('desks:navigate',{id:'settings'});}},{label:'使用说明',click:()=>{showWindow();send('desks:navigate',{id:'help'});}},{type:'separator'},{label:'退出工作台（后台业务继续运行）',click:()=>{if(modules.pending.size){showWindow();send('modules:message','正在准备程序文件，请等待完成后退出。');return;}quitting=true;app.quit();}}]));
+  tray.setContextMenu(Menu.buildFromTemplate([{label:'打开工作台',click:showWindow},{label:'日志与诊断',click:()=>{showWindow();send('desks:navigate',{id:'logs'});}},{label:'设置',click:()=>{showWindow();send('desks:navigate',{id:'settings'});}},{label:'使用说明',click:()=>{showWindow();send('desks:navigate',{id:'help'});}},{type:'separator'},{label:'退出工作台并暂停任务主机',click:()=>{if(modules.pending.size){showWindow();send('modules:message','正在准备程序文件，请等待完成后退出。');return;}quitting=true;app.quit();}}]));
   tray.on('double-click',showWindow);tray.on('click',showWindow);
   win.on('close',event=>{if(!quitting){event.preventDefault();win.hide();}});
   const preferences=launcherPreferences();configureLauncherLogin(preferences);persistPreferences(preferences);
   win.webContents.on('will-navigate', event => event.preventDefault());
-  await win.loadFile(path.join(here, 'index.html'));
+  handle('agent:request',async value=>{
+    const {operation,payload}=agentEnvelope(value);
+    if(operation==='connection.get'){const state=await legacyHandlers.get('connection:get')();return {connection:{...state,canConfigure:true,detail:state.mode==='standalone'?'使用独立测试账本':'测试版私网入口必须为 9443'}};}
+    if(operation==='connection.check')return legacyHandlers.get('connection:check')();
+    if(operation==='connection.plan'){hostIdentity.requireAdmin(hostIdentity.localActor(),true);return legacyHandlers.get('connection:network-plan')();}
+    if(operation==='connection.save'){hostIdentity.requireAdmin(hostIdentity.localActor(),true);return legacyHandlers.get('connection:save')(payload);}
+    let result;
+    if(remote())result=await remoteConnection().request('/agent/request',{method:'POST',body:{operation,payload},migration:true});
+    else{const host=await getAgentHost();result=await host.request(operation,payload,{actor:host.identity.localActor(),trustedUi:true});}
+    if(operation==='status'&&result.environment?.mode!=='test')throw Error('服务器不是独立测试环境，已阻止连接');
+    return operation==='artifacts.open'?saveArtifactDownload(result,{dialog,window:win,downloads:app.getPath('downloads')}):result;
+  });
+  await win.loadFile(path.join(here, 'agent-index.html'));
   if(preparation&&!preparation.isDestroyed())preparation.destroy();
   if(!process.argv.includes('--hidden')||moduleArgument(process.argv))showWindow();
-  if(!remote()){const settings=legacyCloudSettings();if(settings.scheduleEnabled||settings.monthlySalesEnabled)try{await services.ensure('warehouse');}catch(error){send('modules:message',error.message);}}
+  if(!remote())try{await getAgentHost();}catch(error){send('modules:message','任务主机尚未就绪：'+error.message);}
   if(connection.read().mode==='server')try{await ensureGateway();}catch(error){send('modules:message',error.message);}
   if(recoveryError)send('modules:message','上次模块更新需要恢复检查：'+recoveryError);
 }).catch(error=>{diagnostics.write('error','workbench','启动失败 · '+(error.stack||error.message));if(headless)console.log(JSON.stringify({ok:false,code:error.code||'STARTUP_FAILED',error:error.message}));else dialog.showErrorBox('工作台准备未完成','请重新打开工作台重试。若仍然失败，请保留原数据并联系管理员处理。\n\n'+error.message);app.exit(1);});
 app.on('second-instance',(_event,args)=>{const id=moduleArgument(args);if(id){requestedModule=id;deliverRequestedModule();}if(id||!args.includes('--hidden'))showWindow();});
-app.on('before-quit',()=>{if(!headless)diagnostics.write('info','workbench','工作台界面退出，后台服务保持独立运行');quitting=true;tray?.destroy();});
+let agentShutdownDone=false;
+app.on('before-quit',event=>{
+  quitting=true;tray?.destroy();
+  if(!agentShutdownDone&&(agentHost||agentGateway)){event.preventDefault();agentShutdownDone=true;void(async()=>{await agentGateway?.stop();await agentHost?.close();app.quit();})().catch(error=>{diagnostics.write('error','workbench','任务主机退出未完成 · '+error.code);app.quit();});}
+});
 app.on('window-all-closed',()=>{if(headless||quitting)app.quit();});

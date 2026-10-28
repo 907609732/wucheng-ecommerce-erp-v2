@@ -2,6 +2,7 @@ const {contextBridge, ipcRenderer} = require('electron');
 const invoke = name => (...args) => ipcRenderer.invoke(name, ...args);
 const on = name => callback => { const listener = (_event, value) => callback(value); ipcRenderer.on(name, listener); return () => ipcRenderer.removeListener(name, listener); };
 contextBridge.exposeInMainWorld('launcher', {
+  agentRequest: invoke('agent:request'),
   openLink: invoke('links:open'),
   readLogs:invoke('diagnostics:read'),copyLogs:invoke('diagnostics:copy'),exportLogs:invoke('diagnostics:export'),openLogsFolder:invoke('diagnostics:open-folder'),reportDiagnostic:invoke('diagnostics:event'),
   ready:invoke('launcher:ready'),
