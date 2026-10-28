@@ -9,6 +9,7 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
   if(!store.get('system','identity'))store.insert('system',{id:'identity',ownerId:'system',dataSetId:randomUUID(),revision:1});
   const scheduleProperties={goal:text,cron:{type:'string',minLength:1,maxLength:100},timezone:{type:'string',minLength:1,maxLength:100},engine:{enum:['codex','hermes']},enabled:{type:'boolean'},misfirePolicy:{enum:['once','skip']},scope:{type:'object',properties:{modules:{type:'array',items:{type:'string'}}},additionalProperties:false}};
   const capabilities=[
+    {id:'people.assignable',title:'查找可分派员工',description:'根据姓名或目标任务查询真实可分派员工ID。重名或多个匹配时必须调用erp_ask让用户明确选择，不得猜测身份。只返回当前业务范围内的可用人员，不是完整权限配置。',kind:'query',roles:['admin','editor'],requiresTaskPermission:true,available:typeof extensions['people.assignable']==='function',inputSchema:object({name:{type:'string',minLength:1,maxLength:100},taskId:text})},
     {id:'schedules.list',title:'查看我的定时任务',description:'cron为五段定时规则；timezone为IANA时区；misfirePolicy once=补一次、skip=略过；noOverlap始终为true；nextRunAt为带时区的下一次执行时间。',kind:'query',inputSchema:object()},
     {id:'schedules.create',title:'安排定时业务任务',kind:'prepare',requiresReview:true,inputSchema:object(scheduleProperties,['goal','cron','timezone'])},
     {id:'schedules.update',title:'调整定时业务任务',kind:'prepare',requiresReview:true,inputSchema:object({id:text,...scheduleProperties},['id'])},
@@ -26,6 +27,15 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
       if(ctx?.capabilityId==='tasks.assign'&&ctx.capabilityInput?.taskId)revision.task=store.get('task',ctx.capabilityInput.taskId)?.version??'missing';
       return {dataSetId:identity.dataSetId,revision};},
     async query(capabilityId,input,ctx){
+      if(capabilityId==='people.assignable'){
+        if(!['admin','editor'].includes(ctx.actor.role)||!ctx.actor.canRunTasks)throw agentError('TASK_PERMISSION_REQUIRED','无权分派业务任务',403);
+        const target=input.taskId?taskFor(input.taskId,ctx.actor):taskFor(ctx.taskId,ctx.actor),visible=target.scope.modules.filter(module=>module!=='system'&&ctx.actor.modules.includes(module)),requested=visible.length?visible:[...ctx.actor.modules];
+        const response=await extensions['people.assignable']({modules:requested,...(input.name?{name:input.name}:{})},ctx);
+        if(!Array.isArray(response?.people))throw agentError('PEOPLE_DIRECTORY_UNAVAILABLE','可分派人员目录暂时不可用',503);
+        const rows=response.people.filter(person=>typeof person?.id==='string'&&person.id&&typeof person.label==='string'&&Array.isArray(person.modules)&&requested.every(module=>person.modules.includes(module))).map(person=>({id:person.id,label:person.label,modules:person.modules.filter(module=>requested.includes(module))}));
+        const ambiguous=!!input.name&&rows.length>1;
+        return {summary:ambiguous?'找到多个匹配员工，请明确选择后再分派':`找到 ${rows.length} 位可分派员工`,scope:{modules:requested},blocks:[{type:'table',title:'可分派员工',columns:[{key:'id',label:'真实人员编号'},{key:'label',label:'姓名'},{key:'modules',label:'当前业务范围'}],rows}],evidence:[{id:'company-assignable-people',scope:requested}],issues:ambiguous?[{code:'ASSIGNEE_AMBIGUOUS',blocking:true,message:'存在多个匹配人员，请调用erp_ask确认真实人员编号，不得猜测。'}]:[]};
+      }
       if(capabilityId==='permissions.list'){if(ctx.actor.role!=='admin')throw agentError('ADMIN_REQUIRED','需要管理员权限',403);const current=await extensions['permissions.inspect']({},ctx),rows=Object.entries(current.policy.users).map(([login,value])=>({login,...value}));return {summary:`已读取 ${rows.length} 位成员权限`,blocks:[{type:'table',title:'人员权限',columns:[{key:'login',label:'登录身份'},{key:'role',label:'角色'},{key:'modules',label:'业务模块'},{key:'canRunTasks',label:'写入任务'},{key:'enabled',label:'启用'}],rows}],evidence:[{id:'permissions',revision:current.revision,schemaVersion:current.policy.schemaVersion}]};}
       if(capabilityId!=='schedules.list')throw agentError('CAPABILITY_UNAVAILABLE','公共查询未登记');const rows=store.list('schedule',ctx.actor.role==='admin'?undefined:ctx.actor.id);return {summary:`已读取 ${rows.length} 个定时任务`,blocks:[{type:'table',title:'定时任务',columns:[{key:'id',label:'任务编号'},{key:'goal',label:'目标'},{key:'cron',label:'规则'},{key:'timezone',label:'时区'},{key:'engine',label:'引擎'},{key:'enabled',label:'启用'},{key:'nextRunAt',label:'下次运行'},{key:'misfirePolicy',label:'漏跑处理'}],rows}],evidence:rows.map(s=>({id:s.id,kind:'schedule',version:s.version}))};},
     async prepare(capabilityId,input,ctx){
