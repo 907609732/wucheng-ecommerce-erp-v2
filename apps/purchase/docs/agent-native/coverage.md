@@ -58,3 +58,5 @@
 验证：`node --test --test-concurrency=2 tests/*.test.mjs`；新业务链路测试 `agent-http.test.mjs`、`agent-files.test.mjs`、`agent-transfer.test.mjs`、`agent-service.test.mjs`、`agent-schemas.test.mjs`。审批helper来自冻结runtime源码，SHA256 `1ca342e316eccb12b9fa69827dcac70cdd94023198fc2f16c475c3a43d6a588f`；独立模块不引用仓库外desktop路径。最终统计以本次完整测试日志为准。
 
 原件上传单次8MiB；大文件使用files.upload.part，每片8MiB、完整文件50MiB，表格分析25MiB、OCR总200MiB。所有分片与完成文件均检查所属人员、字节偏移和SHA256。
+
+最终冻结源码 `500b2b4dcdfb1ceec03172f19ba34e1e1b63e887`：采购完整回归192/192，导出台147/147，采购语法检查通过。覆盖真实HTTP→文件→OCR/表格→审批→数据库→原件/附件/来源回读及恢复。详见 validation.json。
