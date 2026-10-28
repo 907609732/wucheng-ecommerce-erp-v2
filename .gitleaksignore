@@ -2,3 +2,11 @@
 # Match only this baseline commit, file, rule and line. No production paths excluded.
 bbff8c3f139fc63f5fb0dd7648a9bb60e0885079:tests/workbench-gateway.test.mjs:generic-api-key:79
 tests/workbench-gateway.test.mjs:generic-api-key:79
+# Reviewed Hermes source SHA256, boolean expression, and synthetic review fixture.
+# Each exception is limited to its exact commit/file/rule/line; no secret values.
+c12cf2b797e6df6f199f615b67d2a1c405624f26:desktop/agent-runtime/hermes-compatibility.json:generic-api-key:11
+desktop/agent-runtime/hermes-compatibility.json:generic-api-key:11
+c12cf2b797e6df6f199f615b67d2a1c405624f26:desktop/agent-runtime/settings.mjs:generic-api-key:19
+desktop/agent-runtime/settings.mjs:generic-api-key:19
+c12cf2b797e6df6f199f615b67d2a1c405624f26:tests/agent-runtime.test.mjs:generic-api-key:51
+tests/agent-runtime.test.mjs:generic-api-key:51
