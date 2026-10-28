@@ -30,11 +30,11 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
     const {signAgentApproval}=await import('../agent-runtime/approval.mjs');return signAgentApproval(claims,fs.readFileSync(systemKeyFile,'utf8'));
   };
   runtime=dependencies.runtimeFactory({storeDir,adapters:dependencies.adapters,engines:dependencies.engines,resolveActor:identity.resolveActor,secretStore,signApproval,environment:paths.environment,extensions:{
-    'permissions.get':identity.permissionsGet,'permissions.inspect':identity.permissionsInspect,'permissions.save':identity.permissionsSave,
+    'permissions.get':identity.permissionsGet,'permissions.inspect':identity.permissionsInspect,'permissions.receipt':identity.permissionsReceipt,'permissions.save':identity.permissionsSave,
     'artifacts.open':item=>artifactDownload(storeDir,item),...connectionHandlers
   }});
   const dispatch=runtime.request;
-  runtime.request=(operation,payload,meta)=>{if(operation==='permissions.inspect')throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);return dispatch(operation,payload,meta);};
+  runtime.request=(operation,payload,meta)=>{if(['permissions.inspect','permissions.receipt'].includes(operation))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);return dispatch(operation,payload,meta);};
   let tickJob=null,closing=false;
   const timer=setInterval(()=>{if(tickJob||closing)return;tickJob=Promise.resolve().then(()=>runtime.tick()).catch(onError).finally(()=>{tickJob=null;});},15000);timer.unref();
   let bridge;try{bridge=startBridge?await startAgentBridge({storeDir:hostDir,request:runtime.request}):null;}catch(error){clearInterval(timer);await runtime.close();throw error;}

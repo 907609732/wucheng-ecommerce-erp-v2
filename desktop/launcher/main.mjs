@@ -428,6 +428,9 @@ if (acquired) app.whenReady().then(async () => {
   });
   async function saveConnectionValue(value,{connect=true}={}){
     if(value.serverUrl)assertBetaServerAddress(value.serverUrl);
+    if(agentHostStarting)await agentHostStarting.catch(()=>{});
+    const previousMode=connection.read().mode;
+    if(value.mode!==previousMode&&agentHost?.runtime.store.list('task').some(task=>['queued','running','committing'].includes(task.status)))throw Error('请先暂停或完成正在执行的任务，再切换连接模式');
     if(modules.pending.size)throw Error('请等待当前模块安装完成');
     if(activeNetworkRequests||[...privateSessionWrites.values()].some(set=>set.size))throw Error('主服务器请求尚未结束，请稍后切换连接');
     if(value.mode==='client')serverAddress(value.serverUrl);
@@ -441,6 +444,8 @@ if (acquired) app.whenReady().then(async () => {
       if(JSON.stringify(fresh.before)!==JSON.stringify(networkProposal.before))throw Error('网络配置已变化，请重新审查');
     }
     await resetPrivateConnection();
+    if(value.mode!==previousMode&&agentGateway){await agentGateway.stop();agentGateway=null;}
+    if(value.mode==='client'&&agentHost){await agentHost.close();agentHost=null;}
     const state=connection.configure(value,inventory);
     if(state.mode==='server'){await ensureGateway();enableServe({...betaServeOptions(),origin:state.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});networkProposal=null;}
     if(state.mode==='client'&&connect)await remoteConnection().connect();

@@ -27,7 +27,8 @@ export function createHostIdentity({storeDir,policyFile,principal=windowsPrincip
   if(!fs.existsSync(ownerFile)&&bootstrap){
     try{fs.writeFileSync(ownerFile,JSON.stringify({schemaVersion:1,id:principal.id}),{flag:'wx',mode:0o600});}catch(e){if(e.code!=='EEXIST')throw e;}
   }
-  const readPolicy=()=>{try{return normalizePolicy(JSON.parse(fs.readFileSync(policyFile,'utf8')));}catch(e){if(e.code==='ENOENT')return {schemaVersion:1,users:{}};throw hostError('ACCESS_POLICY_UNAVAILABLE','成员权限记录不可读取',503);}};
+  const readState=()=>{try{const raw=JSON.parse(fs.readFileSync(policyFile,'utf8'));return {policy:normalizePolicy(raw),receipts:raw._agentReceipts&&typeof raw._agentReceipts==='object'&&!Array.isArray(raw._agentReceipts)?raw._agentReceipts:{}};}catch(e){if(e.code==='ENOENT')return {policy:{schemaVersion:1,users:{}},receipts:{}};throw hostError('ACCESS_POLICY_UNAVAILABLE','成员权限记录不可读取',503);}};
+  const readPolicy=()=>readState().policy;
   const owner=()=>{try{const record=JSON.parse(fs.readFileSync(ownerFile,'utf8'));return record.schemaVersion===1?record.id:null;}catch{return null;}};
   function resolveActor(id){
     if(typeof id!=='string')return null;
@@ -47,11 +48,19 @@ export function createHostIdentity({storeDir,policyFile,principal=windowsPrincip
   },permissionsInspect(_payload,{actor}){
     const fresh=resolveActor(actor?.id);if(!fresh||fresh.role!=='admin')throw hostError('ADMIN_REQUIRED','仅管理员可准备人员权限变更',403);
     const policy=readPolicy();return {policy,revision:revision(policy)};
-  },permissionsSave(payload,{actor,trustedUi}){
-    requireAdmin(actor,trustedUi);const current=readPolicy();if(payload?.revision!==revision(current))throw hostError('REVISION_CONFLICT','人员权限已更新，请刷新后重新确认',409);
-    const policy=normalizePolicy(payload.policy);
+  },permissionsReceipt({idempotencyKey},{actor}){
+    const fresh=resolveActor(actor?.id);if(!fresh||fresh.role!=='admin')throw hostError('ADMIN_REQUIRED','仅管理员可核对人员权限回执',403);
+    const receipt=readState().receipts[idempotencyKey];return receipt?{state:'completed',idempotencyKey,receipt}:{state:'not_found',idempotencyKey};
+  },permissionsSave(payload,{actor,trustedUi,approval,idempotencyKey}){
+    requireAdmin(actor,trustedUi);const state=readState(),current=state.policy,policy=normalizePolicy(payload.policy),operationKey=payload.idempotencyKey;
+    if(operationKey){
+      if(typeof operationKey!=='string'||!/^[A-Za-z0-9._:-]{8,160}$/.test(operationKey)||idempotencyKey!==operationKey||!approval)throw hostError('AGENT_APPROVAL_REQUIRED','权限任务缺少已确认操作的凭据',403);
+      const previous=state.receipts[operationKey];if(previous){if(previous.actorId!==actor.id||previous.revision!==revision(policy))throw hostError('IDEMPOTENCY_CONFLICT','此操作标识已用于其他权限变更',409);return {policy:current,revision:revision(current),receipt:previous};}
+    }
+    if(payload?.revision!==revision(current))throw hostError('REVISION_CONFLICT','人员权限已更新，请刷新后重新确认',409);
     // A remote administrator cannot revoke the last enabled remote administrator.
     if(actor.id.startsWith('tailscale:')&&!Object.values(policy.users).some(p=>p.enabled&&p.role==='admin'))throw hostError('LAST_ADMIN_REQUIRED','至少保留一名已启用的管理员',409);
-    atomicJson(policyFile,policy);return {policy,revision:revision(policy)};
+    const receipt=operationKey?{kind:'permissions',idempotencyKey:operationKey,actorId:actor.id,beforeRevision:revision(current),revision:revision(policy),committedAt:new Date().toISOString()}:undefined;
+    atomicJson(policyFile,{...policy,_agentReceipts:{...state.receipts,...(receipt?{[operationKey]:receipt}:{})}});return {policy,revision:revision(policy),...(receipt?{receipt}:{})};
   }};
 }

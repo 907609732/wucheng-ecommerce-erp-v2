@@ -47,6 +47,20 @@ test('secret store encrypts bytes and supports Electron async decrypt result',as
   const unavailable=createSafeSecretStore({storeDir:root,safeStorage:{...safeStorage,getSelectedStorageBackend:()=> 'basic_text'}});
   await assert.rejects(()=>unavailable.set('company-api-key',value),{code:'SAFE_STORAGE_UNAVAILABLE'});
 });
+test('permission change and operation receipt survive one atomic policy-file write',t=>{
+  const f=fixture(t),before=f.identity.permissionsGet({},f.meta),policy={schemaVersion:1,users:{'member@example.test':structuredClone(user)}},idempotencyKey='permissions-test-operation';
+  const meta={...f.meta,approval:{payload:'synthetic-proof'},idempotencyKey};
+  const saved=f.identity.permissionsSave({policy,revision:before.revision,idempotencyKey},meta);
+  assert.equal(saved.receipt.idempotencyKey,idempotencyKey);
+  assert(!('_agentReceipts' in f.identity.permissionsGet({},f.meta).policy));
+  const restarted=createHostIdentity({storeDir:f.root,policyFile:f.policyFile,principal:owner});
+  assert.deepEqual(restarted.permissionsReceipt({idempotencyKey},f.meta).receipt,saved.receipt);
+  const repeated=restarted.permissionsSave({policy,revision:before.revision,idempotencyKey},meta);assert.deepEqual(repeated.receipt,saved.receipt);
+  const next=restarted.permissionsGet({},f.meta);next.policy.users['member@example.test'].enabled=false;restarted.permissionsSave(next,f.meta);
+  assert.equal(restarted.permissionsReceipt({idempotencyKey},f.meta).state,'completed');
+  assert.throws(()=>restarted.permissionsSave({policy:next.policy,revision:next.revision,idempotencyKey},meta),{code:'IDEMPOTENCY_CONFLICT'});
+  assert.throws(()=>restarted.permissionsSave({policy,revision:before.revision,idempotencyKey:'new-operation'},f.meta),{code:'AGENT_APPROVAL_REQUIRED'});
+});
 test('IPC requires exact packaged top frame and rejects identity injection',t=>{
   const page=path.join(temp(t),'agent-index.html'),frame={url:pathToFileURL(page).href},contents={mainFrame:frame},win={isDestroyed:()=>false,webContents:contents};
   assertLauncherSender({sender:contents,senderFrame:frame},win,[page]);
