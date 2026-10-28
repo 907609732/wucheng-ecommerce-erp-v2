@@ -1,4 +1,5 @@
 // Host transport owns authentication. Prepared business payloads stay in the module.
+import {purchaseSchemas} from './agent-schemas.mjs';
 export function createPurchaseAgentAdapter({transport}) {
   const request=typeof transport==='function'?transport:transport?.request?.bind(transport);
   if(!request)throw new TypeError('purchase transport required');
@@ -14,7 +15,6 @@ export function createPurchaseAgentAdapter({transport}) {
     receipt:(key,ctx)=>call('GET','/receipts/'+encodeURIComponent(key),undefined,ctx)
   };
 }
-const schema={type:'object',additionalProperties:true};
 export const purchaseAgentCapabilities=[
   ['orders','采购订单与详情','query'],['dashboard','采购支出统计','query'],
   ['sources','导入来源与原件','query'],['audit','订单审计与补充来源','query'],
@@ -31,4 +31,4 @@ export const purchaseAgentCapabilities=[
   ['audit.rollback','回滚采购修改','prepare'],['import.commit','核对后导入表格','prepare'],
   ['image.prepare','提取订单来源图片','prepare'],['image.cache','缓存原始图片','prepare'],
   ['attachment.remove','删除暂存附件','prepare']
-].map(([id,title,kind])=>({id,title,kind,description:title,inputSchema:schema,requiresReview:kind==='prepare'}));
+].map(([id,title,kind])=>({id,title,kind,description:title+(kind==='query'?'。返回真实记录ID、版本与业务证据；金额Cents字段均为整数分。':'。先查询原记录及版本；准备差异后由中央人审授权，旧版本、重复订单与已锁定月份继续拒绝。'),inputSchema:purchaseSchemas[id],requiresReview:kind==='prepare'}));

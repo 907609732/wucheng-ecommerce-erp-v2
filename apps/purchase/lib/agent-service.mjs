@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {agentDigest,verifyAgentApproval,approvalFromHeaders} from './agent-approval.mjs';
 import {purchaseAgentCapabilities} from './agent-adapter.mjs';
+import {validatePurchaseAgentInput} from './agent-schemas.mjs';
 const fail=(code,message,status=400)=>Object.assign(Error(message),{code,status});
 export function createPurchaseAgentService({store,key,binding,operations}){
  const db=store.db;
@@ -11,9 +12,10 @@ export function createPurchaseAgentService({store,key,binding,operations}){
  const receipt=(id,ctx)=>{const a=actor(ctx),r=db.prepare('SELECT body FROM agent_receipts WHERE actor_id=? AND idempotency_key=?').get(a.id,id);return r?JSON.parse(r.body):null;};
  return {
   binding:ctx=>{actor(ctx);return binding();},receipt,
-  async query(id,input,ctx){const data=await operation(id,'query',ctx).query(input||{},ctx);return {summary:purchaseAgentCapabilities.find(c=>c.id===id).title,blocks:[{type:'table',rows:Array.isArray(data)?data:[data]}],evidence:[binding()],data};},
+  async query(id,input,ctx){const op=operation(id,'query',ctx);validatePurchaseAgentInput(id,input||{});const data=await op.query(input||{},ctx);return {summary:purchaseAgentCapabilities.find(c=>c.id===id).title,blocks:[{type:'table',rows:Array.isArray(data)?data:[data]}],evidence:[binding()],data};},
   async prepare(capabilityId,input={},ctx){
    const op=operation(capabilityId,'prepare',ctx),before=binding();
+   validatePurchaseAgentInput(capabilityId,input);
    if('confirmed'in input||'approval'in input||'actor'in input||'password'in input)throw fail('UNTRUSTED_AUTH','模型输入不能携带授权材料',403);
    const detail=await op.prepare(input,ctx),after=binding();if(agentDigest(before)!==agentDigest(after))throw fail('REVISION_CHANGED','准备期间账本变化，请重新准备',409);
    const id=randomUUID(),commitData={preparedId:id},changes=detail.changes||[{operation:capabilityId,input}];
