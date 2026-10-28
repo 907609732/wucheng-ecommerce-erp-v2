@@ -6,7 +6,7 @@ import {installWorkbenchAudit} from './lib/workbench-module.mjs';
 import {installSalesEdits} from './lib/integration-edits.mjs';
 import {installAgentService} from './lib/agent-service.mjs';
 import {createSalesAgentActions,authorizeSalesAgent} from './lib/agent-actions.mjs';
-import {salesAgentCapabilities} from './lib/agent-adapter.mjs';
+import {salesModuleCapabilities} from './lib/agent-adapter.mjs';
 import {createSalesCainiao} from './lib/agent-cainiao.mjs';
 import {ServiceManager} from './lib/service-manager.mjs';
 import {createPersonnel} from './lib/personnel.mjs';
@@ -44,7 +44,7 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
   integration.router.post('/overview/open',async(q,r)=>r.json(q.workbenchActor?{route:'/apps/overview/'}:await new ServiceManager().ensure('overview')));
   installWorkbenchMigration(integration,s,createWorkbenchMigration);installWorkbenchAudit(integration,s);
   integration.finish();
-  const agent=installAgentService({app,integration,store:s,module:'sales',capabilities:salesAgentCapabilities,actions:createSalesAgentActions({store:s,personnel,cainiao}),authorize:authorizeSalesAgent,backup:()=>makeBackup(s,'before-agent-commit')});
+  const agent=installAgentService({app,integration,store:s,module:'sales',capabilities:salesModuleCapabilities,actions:createSalesAgentActions({store:s,personnel,cainiao}),authorize:authorizeSalesAgent,backup:()=>makeBackup(s,'before-agent-commit')});
   app.disable('x-powered-by');
   app.use((req,res,next)=>{
     const allowed=[`127.0.0.1:${port}`,`localhost:${port}`];
