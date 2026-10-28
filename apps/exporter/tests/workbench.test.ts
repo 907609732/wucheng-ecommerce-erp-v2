@@ -1,3 +1,4 @@
+import {createExporterAgentAdapter} from '../src/main/agent-adapter.mjs';
 import {signAgentApproval,agentDigest,approvalHeaders} from '../src/main/agent-approval.mjs';
 import {afterEach,describe,expect,it} from 'vitest';
 import {createRequire} from 'node:module';
@@ -94,12 +95,22 @@ describe('Agent exporter review boundary',()=>{
  const {store,request,key}=await api();const task=store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});
  const prepared=await request('/agent/prepare',{method:'POST',channel:'mcp',body:{capabilityId:'export',input:{taskId:task.id,format:'csv'}}});
  expect(prepared.status).toBe(200);expect(prepared.result.evidence[0].task.id).toBe(task.id);expect(prepared.result.dataSetId).toBeTruthy();
- const denied=await request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:prepared.result,taskId:'agent-task'}});expect(denied.status).toBe(403);
+ const denied=await request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:prepared.result,preparedId:prepared.result.commitData.id,taskId:'agent-task'}});expect(denied.status).toBe(403);
  const p={...prepared.result,id:'result-1',version:1},now=Date.now(),proof=signAgentApproval({v:1,approvalId:'approval-1',actorId:'tailscale:tester@example.test',module:'exporter',capabilityId:p.capabilityId,taskId:'agent-task',resultId:p.id,resultVersion:p.version,dataSetId:p.dataSetId,revision:p.revision,changeDigest:agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes}),idempotencyKey:'idem-1',issuedAt:now,expiresAt:now+30000},key);
- const commit=()=>request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:p,taskId:'agent-task',idempotencyKey:'idem-1'},extraHeaders:approvalHeaders(proof)});
+ const commit=()=>request('/agent/commit',{method:'POST',channel:'mcp',body:{prepared:{...p,id:'runtime-step',version:99},preparedId:p.commitData.id,resultId:'result-1',resultVersion:1,taskId:'agent-task',idempotencyKey:'idem-1'},extraHeaders:approvalHeaders(proof)});
  const committed=await commit();expect(committed.status).toBe(200);expect(committed.result.receipt.state).toBe('completed');expect(committed.result.receipt.result.fileId).toBeTruthy();expect((await commit()).result).toEqual(committed.result);
+ store.db.prepare('UPDATE agent_receipts SET payload=? WHERE id=?').run(JSON.stringify({state:'processing',ok:false}),'idem-1');
+ const pending=await commit();expect(pending.result).toEqual({state:'processing',ok:false});expect(pending.result.receipt).toBeUndefined();
 
  expect((await request('/agent/prepare',{method:'POST',role:'viewer',body:{capabilityId:'pause',input:{taskId:task.id}}})).status).toBe(403);
  expect((await request('/agent/prepare',{method:'POST',body:{capabilityId:'clear',input:{platform:'taobao',confirmed:true}}})).status).toBe(400);
  });
+});
+
+it('adapter preserves real query data and separates central result identity from step identity',async()=>{
+ const calls:any[]=[];const adapter=createExporterAgentAdapter({transport:async(module:any,route:any,options:any)=>{calls.push({module,route,options});return {orders:[{id:'actual-order'}]};}});
+ const result=await adapter.query('orders',{taskId:'collection-1'},{taskId:'agent-task'});expect(result.blocks[0].data.orders[0].id).toBe('actual-order');expect(result.evidence[0].data.orders).toHaveLength(1);
+ const proof={payload:Buffer.from(JSON.stringify({resultId:'central-result',resultVersion:7})).toString('base64url')};
+ await adapter.commit({id:'step-9',version:1,commitData:{id:'prepared-4'}},{approval:proof,taskId:'agent-task',idempotencyKey:'key'});
+ expect(calls[1].options.body).toMatchObject({preparedId:'prepared-4',resultId:'central-result',resultVersion:7});
 });

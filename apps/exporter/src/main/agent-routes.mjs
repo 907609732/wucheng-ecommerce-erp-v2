@@ -33,16 +33,16 @@ export function installExporterAgentRoutes(router,{store,handlers,key,binding,gu
   store.db.prepare('INSERT INTO agent_prepared VALUES(?,?,?)').run(id,actor.id,JSON.stringify(prepared));return prepared;
  });
  route('commit',async q=>{
-  const submitted=q.body.prepared,row=store.db.prepare('SELECT * FROM agent_prepared WHERE id=?').get(submitted?.commitData?.id),actor=q.workbenchActor;
-  if(!row||row.actor!==actor.id)throw fail('PREPARED_NOT_FOUND','准备结果不存在',404);
+  const submitted=q.body.prepared,row=store.db.prepare('SELECT * FROM agent_prepared WHERE id=?').get(q.body.preparedId||submitted?.commitData?.id),actor=q.workbenchActor;
+  if(!row||row.actor!==actor.id||q.body.preparedId!==submitted?.commitData?.id)throw fail('PREPARED_NOT_FOUND','准备结果不存在',404);
   const p=JSON.parse(row.payload),digest=agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes});
   if(agentDigest({capabilityId:submitted.capabilityId,input:submitted.input,commitData:submitted.commitData,changes:submitted.changes})!==digest)throw fail('RESULT_CHANGED','结果被修改',409);
-  const proof=approvalFromHeaders(q.headers),claims=verifyAgentApproval(proof,key,{actorId:actor.id,module:'exporter',idempotencyKey:q.body.idempotencyKey,taskId:q.body.taskId,resultId:submitted.id,resultVersion:submitted.version,capabilityId:p.capabilityId,dataSetId:p.dataSetId,revision:p.revision,changeDigest:digest});
+  const proof=approvalFromHeaders(q.headers),claims=verifyAgentApproval(proof,key,{actorId:actor.id,module:'exporter',idempotencyKey:q.body.idempotencyKey,taskId:q.body.taskId,resultId:q.body.resultId,resultVersion:q.body.resultVersion,capabilityId:p.capabilityId,dataSetId:p.dataSetId,revision:p.revision,changeDigest:digest});
   const old=store.db.prepare('SELECT * FROM agent_receipts WHERE actor=? AND id=?').get(actor.id,claims.idempotencyKey);if(old){if(old.digest!==digest)throw fail('IDEMPOTENCY_CONFLICT','重复请求不同',409);return JSON.parse(old.payload);}
   const current=binding();if(current.dataSetId!==p.dataSetId||current.revision!==p.revision)throw fail('REVISION_CHANGED','账本已变化，请重新复核',409);
   const i=p.input,a=p.capabilityId;if(actor.role==='viewer'||a==='clear'&&actor.role!=='admin')throw fail('PERMISSION_DENIED','权限已变化',403);
   if(['start','pause','resume','retry','finish','enrichDetails','host-action'].includes(a)&&!(actor.role==='admin'||actor.canRunTasks))throw fail('TASK_PERMISSION_REQUIRED','无采集权限',403);
-  store.db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(actor.id,claims.idempotencyKey,digest,JSON.stringify({receipt:{state:'processing',idempotencyKey:claims.idempotencyKey}}));
+  store.db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(actor.id,claims.idempotencyKey,digest,JSON.stringify({state:'processing',ok:false,idempotencyKey:claims.idempotencyKey}));
   let result;
   if(a==='start')result=cleanTask(await handlers.invoke('start',i));
   else if(['pause','resume','retry','finish','enrichDetails'].includes(a)){await handlers.invoke(a,i.taskId);result=cleanTask(store.get(i.taskId));}

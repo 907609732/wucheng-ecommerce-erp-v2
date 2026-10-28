@@ -5,8 +5,8 @@ export function createExporterAgentAdapter({transport}){
  const request=(op,body,ctx)=>(typeof transport==='function'?transport:transport.request)('exporter','/api/integration/v1/agent/'+op,{method:op==='state'?'GET':'POST',body:body?{...body,taskId:ctx?.taskId,idempotencyKey:ctx?.idempotencyKey}:undefined,ctx,signal:ctx?.signal,approval:ctx?.approval,idempotencyKey:ctx?.idempotencyKey});
  return {id:'exporter',capabilities:[...exporterQueries.map(id=>({id,title:id,kind:'query',description:'读取导出台实际业务 '+id,inputSchema:schema(id),requiresReview:false})),...exporterActions.map(id=>({id,title:id,kind:'prepare',description:'准备导出台业务 '+id,inputSchema:schema(id),requiresReview:true}))],
  async binding(ctx){const s=await request('state',undefined,ctx);if(!s.dataSetId||s.revision===undefined)throw Error('导出台账本身份不可用');return {dataSetId:s.dataSetId,revision:s.revision};},
- query:(capabilityId,input,ctx)=>request('query',{capabilityId,input},ctx),
+ async query(capabilityId,input,ctx){const data=await request('query',{capabilityId,input},ctx);return {summary:'导出台：'+capabilityId,blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data}]};},
  prepare:(capabilityId,input,ctx)=>request('prepare',{capabilityId,input},ctx),
- commit:(prepared,ctx)=>request('commit',{prepared},ctx),
+ commit(prepared,ctx){let claims;try{claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString('utf8'));}catch{throw Error('中央审批凭据缺失');}return request('commit',{prepared,preparedId:prepared.commitData?.id,resultId:claims.resultId,resultVersion:claims.resultVersion},ctx);},
  receipt:(idempotencyKey,ctx)=>request('receipt',{idempotencyKey},ctx)};
 }
