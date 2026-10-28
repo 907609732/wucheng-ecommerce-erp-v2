@@ -1,0 +1,37 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {DatabaseSync, backup} from 'node:sqlite';
+
+const modules = ['warehouse','purchase','sales','overview','exporter'];
+const primary = {warehouse:'workspace/data/erp.sqlite',purchase:'purchases.sqlite',sales:'sales.sqlite',overview:'overview.sqlite',exporter:'orders.sqlite'};
+const hash = data => crypto.createHash('sha256').update(data).digest('hex');
+function fileHash(file) { const h=crypto.createHash('sha256'), fd=fs.openSync(file,'r'), b=Buffer.alloc(1024*1024); try { let n; while ((n=fs.readSync(fd,b,0,b.length,null))>0) h.update(b.subarray(0,n)); return h.digest('hex'); } finally { fs.closeSync(fd); } }
+function noLinks(file) { let p=path.parse(file).root; for(const part of file.slice(p.length).split(path.sep).filter(Boolean)){p=path.join(p,part);if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw Error('备份路径包含链接');} }
+function within(root,file) { const r=path.relative(root,file); return !!r && r!=='..' && !r.startsWith('..'+path.sep) && !path.isAbsolute(r); }
+function inventory(root) { const entries=[]; function visit(dir){ for(const e of fs.readdirSync(dir,{withFileTypes:true})){const f=path.join(dir,e.name), rel=path.relative(root,f).replaceAll('\\','/'); if(e.isSymbolicLink())throw Error('数据目录包含链接'); if(/(^|\/)(?:Partitions|Network|Cookies|Cache|logs?|backups?|node_modules|profiles?|auth|login|session)(\/|$)|(^|\/)(?:secrets\.bin|\.env[^/]*|\.workbench-key|.*token.*|.*credentials.*)(\/|$)/i.test(rel))continue; if(e.isDirectory()){visit(f);continue;} if(!e.isFile())throw Error('数据目录包含不支持的文件'); if(/-(?:wal|shm|journal)$/i.test(rel))continue; const db=/\.(?:sqlite3?|db)$/i.test(rel), attachment=/(^|\/)(?:originals|attachments|images|taobao-source)(\/|$)/i.test(rel); if(db||attachment)entries.push({rel,kind:db?'sqlite':'attachment',sha256:db?undefined:fileHash(f)}); }} visit(root); return entries.sort((a,b)=>a.rel.localeCompare(b.rel)); }
+function fingerprint(file){const db=new DatabaseSync(file,{readOnly:true});try{if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok'||db.prepare('PRAGMA foreign_key_check').all().length)throw Error('备份数据库完整性检查失败');const tables={};for(const {name} of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()){const s=db.prepare('SELECT * FROM "'+name.replaceAll('"','""')+'"');s.setReadBigInts(true);const rows=s.all().map(v=>JSON.stringify(v,(_k,x)=>typeof x==='bigint'?x.toString():x)).sort();tables[name]={count:rows.length,sha256:hash(JSON.stringify(rows))};}return tables;}finally{db.close();}}
+
+// Both identity providers are trusted host callbacks. No path is accepted from a caller.
+export function createAgentBackups({paths,services,storeDir}={}) {
+  return {'backups.prepare':async(input,ctx)=>{
+    if(!input||Object.keys(input).some(k=>k!=='modules')||!Array.isArray(input.modules)||!input.modules.length||new Set(input.modules).size!==input.modules.length||input.modules.some(id=>!modules.includes(id)))throw Error('备份参数无效');
+    if(!ctx?.actor?.id||!ctx.taskId||!/^[a-zA-Z0-9_-]+$/.test(ctx.taskId)||typeof ctx.registerArtifact!=='function')throw Error('缺少任务身份或产物登记能力');
+    if(typeof services?.resolveActor!=='function'||typeof services?.backupBinding!=='function')throw Error('备份身份与账本绑定服务未接入');
+    const actor=await services.resolveActor(ctx.actor.id); if(!actor||actor.enabled===false||actor.role!=='admin'||actor.canRunTasks!==true||input.modules.some(id=>!actor.modules?.includes(id)))throw Error('没有备份所选模块的管理员权限');
+    const root=path.resolve(paths?.root||''), expected=path.resolve(process.env.LOCALAPPDATA||'', 'WuchengAgentBeta');
+    if(!process.env.LOCALAPPDATA||root!==expected||paths.registry!==path.join(root,'registry.json')||paths.data!==path.join(root,'data')||!within(root,path.resolve(storeDir||'')))throw Error('仅允许使用隔离 Beta 目录');
+    noLinks(root);noLinks(paths.registry);noLinks(storeDir);
+    const registryBytes=fs.readFileSync(paths.registry), registry=JSON.parse(registryBytes), sources={};
+    const binding=await services.backupBinding(input.modules,ctx); if(!binding?.companyId||!binding?.dataSetId||!binding.modules)throw Error('公司或数据集绑定不可核验');
+    for(const id of input.modules){const c=registry[id],dir=path.join(paths.data,id);if(!c||c.managed!==true||c.allowInitialize!==false||c.dataDir!==dir||services.config(id)?.dataDir!==dir||!binding.modules[id]?.dataSetId)throw Error('模块账本绑定或路径无效: '+id);noLinks(dir);const files=inventory(dir);if(!files.some(x=>x.kind==='sqlite'&&x.rel===primary[id]))throw Error('模块主账本不存在: '+id);sources[id]={dir,files};}
+    const id=crypto.randomUUID(),base=path.join(root,'backups'),dest=path.join(base,'backup-'+id);noLinks(base);fs.mkdirSync(base,{recursive:true});noLinks(dest);fs.mkdirSync(dest,{recursive:false});const files=[],issues=[];
+    for(const module of input.modules)for(const item of sources[module].files){if(ctx.signal?.aborted)throw Error('备份任务已取消');const source=path.join(sources[module].dir,...item.rel.split('/')),target=path.join(dest,module,...item.rel.split('/'));if(!within(path.join(dest,module),target))throw Error('备份文件路径无效');noLinks(source);noLinks(target);fs.mkdirSync(path.dirname(target),{recursive:true});if(item.kind==='sqlite'){const db=new DatabaseSync(source,{readOnly:true});try{await backup(db,target);}finally{db.close();}files.push({module,relative:item.rel,kind:item.kind,sha256:fileHash(target),tables:fingerprint(target)});}else{fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);const sha256=fileHash(target);if(sha256!==item.sha256)issues.push({module,relative:item.rel,reason:'附件在备份期间发生变化',blocking:true});files.push({module,relative:item.rel,kind:item.kind,sha256});}}
+    for(const module of input.modules){const before=sources[module].files,after=inventory(sources[module].dir);if(JSON.stringify(before)!==JSON.stringify(after))issues.push({module,reason:'数据目录在备份期间发生变化',blocking:true});}
+    const again=await services.backupBinding(input.modules,ctx),fresh=await services.resolveActor(actor.id);if(JSON.stringify(binding)!==JSON.stringify(again)||hash(fs.readFileSync(paths.registry))!==hash(registryBytes)||!fresh||fresh.enabled===false||fresh.role!=='admin'||fresh.canRunTasks!==true||input.modules.some(id=>!fresh.modules?.includes(id)))throw Error('备份期间身份、权限或账本绑定已变化；副本保留待检查');
+    const report={format:'agent-beta-backup/v1',id,createdAt:new Date().toISOString(),companyId:binding.companyId,dataSetId:binding.dataSetId,moduleBindings:binding.modules,registrySha256:hash(registryBytes),files,issues,crossDatabaseAtomic:false,attachmentScope:['originals','attachments','images','taobao-source'],note:'SQLite 在线快照分别一致；跨账本及附件不是同一时点。仅覆盖列明的附件目录，未包含登录凭据。'};
+    const reportText=JSON.stringify(report,null,2);fs.writeFileSync(path.join(dest,'backup.json'),reportText,{flag:'wx',mode:0o600});
+    const taskDir=path.join(storeDir,'tasks',ctx.taskId);noLinks(taskDir);fs.mkdirSync(taskDir,{recursive:true});const artifact=path.join(taskDir,'backup-'+id+'.json');fs.writeFileSync(artifact,reportText,{flag:'wx',mode:0o600});const registered=ctx.registerArtifact({path:artifact,name:'备份校验清单.json',mimeType:'application/json'});
+    return {summary:issues.length?'备份已生成，但存在需要核对的差异':'备份已生成并完成副本校验',blocks:[{type:'text',text:report.note}],evidence:[{id,kind:'backup',status:issues.length?'needs_review':'verified',fileCount:files.length,artifactId:registered?.id,registrySha256:report.registrySha256}],issues,requiresReview:false};
+  }};
+}
