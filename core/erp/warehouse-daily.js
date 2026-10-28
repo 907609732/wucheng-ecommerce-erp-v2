@@ -89,8 +89,8 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
     const value={employees,autoRemind:input.autoRemind===true};
     db.prepare('INSERT INTO warehouse_daily_config VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload').run(json(value));audit(actor,'config',{employees:employees.map(e=>e.login),autoRemind:value.autoRemind});return value;
   }
-  function action(actor,input) {
-    if(!actor?.id||actor.local||!actor.id.startsWith('tailscale:')||actor.channel!=='ui')throw problem('请员工使用自己的 Tailscale 工作台账号在界面签到',403);
+  function action(actor,input,{approvalVerified=false}={}) {
+    if(!actor?.id||actor.local||!actor.id.startsWith('tailscale:')||(actor.channel!=='ui'&&!approvalVerified))throw problem('请员工使用自己的 Tailscale 工作台账号在界面签到',403);
     if(actor.role==='viewer')throw problem('只读成员不能签到，请管理员授予编辑权限',403);
     const login=normalizeLogin(actor.login),employee=config().employees.find(e=>e.login===login&&e.enabled);
     if(!employee)throw problem('当前账号未加入云仓员工名单',403);
@@ -102,17 +102,17 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
     }else if(input.action==='complete') {
       if(!old)throw problem('请先签到');
       if(!old.completed_at){
-        const sync=syncStatus();if(!sync.complete||input.runId!==sync.runId||input.confirmed!==true)throw problem('今日最新数据尚未完成采集、校验和发群，或批次已变化，请刷新后确认',409);
+        const sync=syncStatus();if(!sync.complete||input.runId!==sync.runId||(input.confirmed!==true&&!approvalVerified))throw problem('今日最新数据尚未完成采集、校验和发群，或批次已变化，请刷新后确认',409);
         const note=String(input.note||'').slice(0,500);
         db.prepare('UPDATE warehouse_attendance SET completed_at=?,run_id=?,note=? WHERE login=? AND business_date=? AND completed_at=\'\'').run(time(),sync.runId,note,login,day);
       }
     }else throw problem('不支持的签到操作');
     audit(actor,input.action,{login,day});return {ok:true};
   }
-  async function remind(actor,input,automatic=false) {
+  async function remind(actor,input,automatic=false,{approvalVerified=false}={}) {
     admin(actor);
-    if(!automatic&&input.confirmed!==true)throw problem('请确认提醒对象和渠道');
-    if(!automatic&&actor.channel!=='ui')throw problem('催办须从管理界面发起',403);
+    if(!automatic&&input.confirmed!==true&&!approvalVerified)throw problem('请确认提醒对象和渠道');
+    if(!automatic&&actor.channel!=='ui'&&!approvalVerified)throw problem('催办须从管理界面发起',403);
     if(!Array.isArray(input.logins)||!input.logins.length||input.logins.length>300||!Array.isArray(input.channels)||!input.channels.length||input.channels.some(c=>!CHANNELS.includes(c)))throw problem('提醒对象或渠道无效');
     const day=businessDate(now()),channels=await getChannels(),results=[];
     for(const login of new Set(input.logins.map(normalizeLogin))){
@@ -132,7 +132,7 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
         let outcome;
         const target=channel==='email'?employee.email:channel==='dingtalk'?employee.dingtalkUserId:employee.mobile;
         if(!channels[channel]?.ready||!target||!senders[channel])outcome={status:'unconfigured',message:channels[channel]?.reason||'缺少接收人或渠道配置'};
-        else try{const receipt=await senders[channel]({employee,message,businessDate:day});outcome={status:'accepted',receiptId:String(receipt?.receiptId||'')};}
+        else try{const receipt=await senders[channel]({employee,message,businessDate:day});const receiptId=String(receipt?.receiptId||'').trim();outcome=receiptId?{status:'accepted',receiptId}:{status:'unknown',message:'服务商未返回可核对的受理记录'};}
         catch(error){outcome={status:error?.definiteFailure?'failed':'unknown',message:safeError()};}
         const result={...payload,...outcome};db.prepare('UPDATE warehouse_reminders SET status=?,payload=? WHERE id=?').run(result.status,json(result),id);audit(actor,'remind',{login,day,channel,status:result.status});results.push({...result,login,channel});
       }

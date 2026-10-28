@@ -374,6 +374,7 @@ export async function sendWarehouseMonthlySalesReport(month, {
       },
       userIds: [config.targetUserId]
     });
+    if(typeof result?.processQueryKey!=='string'||!result.processQueryKey.trim())throw Object.assign(new Error('钉钉月报未返回可核对的受理记录'),{code:'DELIVERY_UNKNOWN'});
     db.prepare(
       `UPDATE monthly_report_deliveries SET status = 'sent', sent_at = CURRENT_TIMESTAMP,
        result_json = ?, error_text = '', updated_at = CURRENT_TIMESTAMP
@@ -492,7 +493,7 @@ function sanitizeResult(result) {
 
 function isUnknownDelivery(error) {
   const code = String(error?.code || "").toUpperCase();
-  return ["ECONNABORTED", "ECONNRESET", "ETIMEDOUT", "EPIPE", "ENETUNREACH"].includes(code)
+  return ["DELIVERY_UNKNOWN", "ECONNABORTED", "ECONNRESET", "ETIMEDOUT", "EPIPE", "ENETUNREACH"].includes(code)
     || /timeout|timed out|socket hang up/i.test(String(error?.message || ""));
 }
 

@@ -41,6 +41,16 @@ function validRows(month, values = [["SKU-A", "产品A", 10, 2], ["SKU-B", "产�
   }));
 }
 
+test('empty provider acknowledgment is unknown and cannot be sent again',async()=>{
+  const month='2026-03',file=writeWorkbook('empty-ack-2026-03.xlsx',validRows(month));importWarehouseMonthlySalesFile({file,month,now:new Date('2026-08-30T00:00:00Z')});
+  const config={clientId:'test',clientSecret:'test',robotCode:'test',conversationId:'test',targetUserId:'test'};let calls=0;
+  await assert.rejects(sendWarehouseMonthlySalesReport(month,{config,sender:async()=>{calls++;return {};}}),{code:'DELIVERY_UNKNOWN'});
+  const result=await sendWarehouseMonthlySalesReport(month,{config,sender:async()=>{calls++;return {processQueryKey:'must-not-send'};}});assert.equal(result.reason,'unknown');assert.equal(calls,1);
+  getDb().prepare('DELETE FROM warehouse_monthly_sales WHERE month=?').run(month);
+  getDb().prepare('DELETE FROM warehouse_monthly_sales_validations WHERE month=?').run(month);
+  getDb().prepare('DELETE FROM monthly_report_deliveries WHERE report_month=?').run(month);
+});
+
 test("完整自然月导入只计算 toC + toB，并保持幂等", () => {
   const file = writeWorkbook("valid-2026-05.xlsx", validRows("2026-05"));
   const first = importWarehouseMonthlySalesFile({ file, month: "2026-05", now: new Date("2026-08-30T00:00:00Z") });

@@ -6,6 +6,7 @@ import {createHash,createHmac,randomUUID} from 'node:crypto';
 import {DatabaseSync,backup} from 'node:sqlite';
 import {provisionWorkbenchKey,verifyWorkbenchActor} from '../workbench/actor.mjs';
 import {warehouseHtml,warehouseScript,warehouseStyles,warehouseAdapter,createWorkbenchMigration} from '../workbench/warehouse-adapter.mjs';
+import {createWarehouseAgentRequestHandler,WAREHOUSE_AGENT_ROUTES} from '../workbench/warehouse-agent-api.mjs';
 
 export async function startCloudControl({root, dataDir, version, busy, activate, open, stop, business, migration}) {
   const maintenanceFile=path.join(dataDir,'.workbench-maintenance.json');
@@ -52,6 +53,30 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
       if(stopping)return send(503,{error:'云仓服务正在停止',code:'SERVICE_STOPPING'});
       const auth = Buffer.from(String(req.headers.authorization||'')), expected = Buffer.from(token);
       if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return send(401,{error:'本机授权无效'});
+      if(req.url.startsWith('/api/integration/v1/agent/')||req.url.startsWith('/api/integration/v1/workbench/agent-files/')){
+        const actor=verifyWorkbenchActor(req.headers,workbenchKey,{module:'warehouse',method:req.method,path:req.url});
+        if(!business?.getAgentAdapter)return send(503,{error:'云仓Agent接口尚未启用',code:'WAREHOUSE_AGENT_DISABLED'});
+        const url=new URL(req.url,'http://127.0.0.1');
+        if(maintenance())return send(409,{error:'模块正在安装或迁移检查',code:'MODULE_MAINTENANCE'});
+        let body={};if(req.method==='GET'){const payload=url.searchParams.get('payload')||'{}';if(payload.length>1024*1024)return send(413,{error:'请求过大'});body=JSON.parse(payload);}else{let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>1024*1024)return send(413,{error:'请求过大'});}body=JSON.parse(raw||'{}');}
+        if(!body||typeof body!=='object'||Array.isArray(body)||Object.hasOwn(body,'actor')||Object.hasOwn(body,'approval'))return send(400,{error:'不能通过请求正文提供身份或审批凭据'});
+        if(typeof body.taskId!=='string'||!/^[-\w:.]{1,160}$/.test(body.taskId))return send(400,{error:'缺少可信任务标识',code:'WAREHOUSE_TASK_CONTEXT_REQUIRED'});
+        getDataSetIdentity(); // Initialize only the existing ledger's identity.
+        const adapter=await business.getAgentAdapter(workbenchKey),controller=new AbortController();
+        res.once('close',()=>{if(!res.writableEnded)controller.abort();});
+        const ctx={actor,taskId:body.taskId,idempotencyKey:String(req.headers['idempotency-key']||''),signal:controller.signal};
+        if(req.headers['x-erp-agent-approval'])try{ctx.approval=JSON.parse(Buffer.from(req.headers['x-erp-agent-approval'],'base64url').toString('utf8'));}catch{return send(403,{error:'审批凭据格式无效'});}
+        if(url.pathname.startsWith('/api/integration/v1/workbench/agent-files/')){
+          if(req.method!=='GET')return send(405,{error:'下载只支持GET'});
+          const id=decodeURIComponent(url.pathname.slice('/api/integration/v1/workbench/agent-files/'.length));
+          if(!/^[a-f0-9-]{36}$/i.test(id))return send(400,{error:'原件标识无效'});
+          const file=adapter.download(id,ctx);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Length':file.size,'Content-Disposition':'attachment; filename="'+file.name+'"','X-Content-SHA256':file.sha256,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});file.stream.on('error',()=>res.destroy());return file.stream.pipe(res);
+        }
+        const route=WAREHOUSE_AGENT_ROUTES.find(r=>r.path===url.pathname&&r.method===req.method);if(!route)return send(404,{error:'未知云仓Agent接口'});
+        if(route.action==='commit'&&(!ctx.approval||!ctx.idempotencyKey))return send(403,{error:'提交需要中央结果确认凭据',code:'WAREHOUSE_APPROVAL_REQUIRED'});
+        if(['prepare','commit'].includes(route.action)){if(isBusy())return send(409,{error:'其他云仓任务正在运行',code:'SERVICE_BUSY'});activeBusinessWrites++;}
+        try{const value=await createWarehouseAgentRequestHandler(adapter)(route.action,body,ctx);audit(actor,'agent.'+route.action,value?.receipt?.status||'completed');return send(200,value);}finally{if(['prepare','commit'].includes(route.action))activeBusinessWrites--;}
+      }
       if(req.url.startsWith('/api/integration/v1/workbench/')){
         const actor=verifyWorkbenchActor(req.headers,workbenchKey,{module:'warehouse',method:req.method,path:req.url});
         const url=new URL(req.url,'http://127.0.0.1'),route=url.pathname.slice('/api/integration/v1/workbench'.length);
@@ -84,6 +109,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
           }finally{adapter.close();}
         }
         if(!business)return send(503,{error:'云仓业务接口尚未就绪',code:'MODULE_UNAVAILABLE'});
+        if(business.agentManaged&&req.method!=='GET')return send(409,{error:'Agent管理模式须通过中央结果页复核，不再接受旧写入入口',code:'AGENT_REVIEW_REQUIRED'});
         if(req.method==='GET'){
           if(route.startsWith('/requests/')){const id=decodeURIComponent(route.slice('/requests/'.length)),record=workbenchDb.prepare('SELECT result FROM requests WHERE actor_id=? AND request_id=?').get(actor.id,id);return send(record?200:404,record?{requestId:id,result:JSON.parse(record.result)}:{error:'请求结果不存在'});}
           if(['/ui','/ui/app.js','/ui/app.css'].includes(route)){res.writeHead(200,{'Content-Type':route==='/ui'?'text/html; charset=utf-8':route.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(route==='/ui'?warehouseHtml:route.endsWith('.js')?warehouseScript:warehouseStyles);}

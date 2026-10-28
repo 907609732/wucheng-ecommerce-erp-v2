@@ -4,8 +4,10 @@ import {createHash,randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {createRemoteWarehouseScript} from '../renderer/remote-warehouse-ui.mjs';
 
-export {warehouseAdapter,createWarehouseAdapter} from './descriptors.mjs';
-export {warehouseAdapter as default} from './descriptors.mjs';
+import {warehouseAdapter as baseWarehouseAdapter} from './descriptors.mjs';
+export const warehouseAdapter={...baseWarehouseAdapter,operations:[...baseWarehouseAdapter.operations,{module:'warehouse',method:'GET',path:'/agent-files/:id',kind:'download',remote:true,operationId:'warehouse.agent.download'}]};
+export const createWarehouseAdapter=()=>structuredClone(warehouseAdapter);
+export default warehouseAdapter;
 
 // The API provides stockAlert as {level, text, days, label}. Display its existing
 // description without recalculating thresholds or treating missing data as OK.

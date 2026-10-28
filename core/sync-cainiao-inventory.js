@@ -550,7 +550,7 @@ function refreshCainiaoLogin() {
   console.log('✅ 登录态已刷新，继续本次库存采集');
 }
 
-async function exportWithSingleAuthRecovery() {
+export async function exportWithSingleAuthRecovery() {
   try {
     return await exportFromCainiao();
   } catch (error) {

@@ -37,8 +37,13 @@ import { externalLink } from "./shared/external-links.mjs";
 import { CHANGELOG } from './shared/changelog.mjs';
 import { defaultBackfillRange, latestCompleteMonth, shiftMonth } from "../core/erp/monthly-sales-dashboard.js";
 import brandingModule from "./shared/branding.cjs";
+import {createWarehouseAgentAdapter} from './workbench/warehouse-agent.mjs';
 
 const { buildBranding } = brandingModule;
+// Explicit opt-in from the isolated Agent host. Existing production scheduling
+// remains unchanged until a separately approved migration switches ownership.
+const agentManaged=process.env.LINGTU_AGENT_MANAGED==='1';
+let warehouseAgent;
 
 let startupLocation;
 try {
@@ -343,6 +348,8 @@ function emitState(extra = {}) {
     monthlySalesDueMonth = latestCompleteMonth();
   }
   const payload = {
+    schedulingOwner:agentManaged?'agent':'legacy',
+    legacyAutomaticRemindersEnabled:!agentManaged,
     running: Boolean(runningChild),
     runningKind,
     stopRequested: stopRequestedPid !== null,
@@ -438,6 +445,7 @@ function currentBranding() {
 }
 
 async function startProcess(kind, trigger = "manual", options = {}, context = {}) {
+  if(agentManaged)throw Object.assign(Error('Agent管理模式须从中央任务结果页复核后执行'),{code:'AGENT_REVIEW_REQUIRED'});
   if(fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Object.assign(Error('账本正在迁移维护，恢复并核对完成前不能执行任务'),{code:'MODULE_MAINTENANCE'});
   if (runningChild || runningTaskPromise) throw new Error("已有任务正在运行，请等待完成");
   const definition = taskDefinition(kind, options);
@@ -837,6 +845,7 @@ function configureSchedule() {
   scheduleTimer = null;
   nextScheduledRun = null;
   nextMonthlyScheduledRun = null;
+  if(agentManaged){emitState();return;}
   const settings = readSettings();
   configureLoginItem(settings);
   if (settings.runtimeMode === "client") {
@@ -938,12 +947,14 @@ ipcMain.handle('warehouse-daily:get', async event => {
   return dailyStatus();
 });
 ipcMain.handle('warehouse-daily:action', async (event,payload={}) => {
+  if(agentManaged)throw Object.assign(Error('请从中央任务结果页复核本人操作'),{code:'AGENT_REVIEW_REQUIRED'});
   if(event.sender!==mainWindow?.webContents)throw Error('无权操作工作记录');
   assertDailyAvailable();
   if(payload.action==='remind')return dailyRemind(localDailyActor,payload);
   return dailyService().action(localDailyActor,payload);
 });
 ipcMain.handle('warehouse-daily:config', (event,payload={}) => {
+  if(agentManaged)throw Object.assign(Error('请从中央任务结果页复核员工配置'),{code:'AGENT_REVIEW_REQUIRED'});
   if(event.sender!==mainWindow?.webContents)throw Error('无权修改员工设置');
   assertDailyAvailable();
   return dailyService().configure(localDailyActor,payload);
@@ -1097,6 +1108,7 @@ function cliHelp() {
 }
 
 async function sendLatestValidInventoryReport() {
+  if(agentManaged)throw Object.assign(Error('请从中央任务结果页复核本次对外发送'),{code:'AGENT_REVIEW_REQUIRED'});
   if(fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Object.assign(Error('账本正在迁移维护，当前不能发送报告'),{code:'MODULE_MAINTENANCE'});
   const settings = readSettings();
   const secrets = await readSecrets();
@@ -1220,6 +1232,8 @@ app.on("second-instance", () => {
 
 app.on("before-quit", event => {
   cloudControl?.close();
+  warehouseAgent?.close();
+  warehouseAgent=null;
   quitting = true;
   if (mcpBridgeChild && !mcpBridgeChild.killed) mcpBridgeChild.kill();
   void stopRemoteService();
@@ -1286,6 +1300,11 @@ app.whenReady().then(async () => {
       busy: () => !!runningChild || !!runningTaskPromise || reminderWork>0,
       migration: {databasePath:inventoryDatabasePath(),dataDir:app.getPath('userData')},
       business: {
+        agentManaged,
+        getAgentAdapter: agentManaged?async key=>{
+          if(!warehouseAgent){const {verifyAgentApproval}=await import('./agent-runtime/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});}
+          return warehouseAgent;
+        }:undefined,
         getDailyStatus: actor => dailyStatus(actor),
         dailyAction: (actor,payload) => dailyService().action(actor,payload),
         saveDailyConfig: (actor,payload) => dailyService().configure(actor,payload),
@@ -1322,12 +1341,12 @@ app.whenReady().then(async () => {
   });
   if (!managedCloud) updater.initialize();
   configureSchedule();
-  reminderTimer=setInterval(async()=>{
+  if(!agentManaged)reminderTimer=setInterval(async()=>{
     if(reminderWork||managedMaintenance||fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json'))||!fs.existsSync(inventoryDatabasePath()))return;
     reminderWork++;
     try{await dailyService().tick();}catch{appendLog('员工自动提醒检查失败，请核对签到管理配置','error');}finally{reminderWork--;}
   },30000);
-  reminderTimer.unref();
+  reminderTimer?.unref();
   try {
     await configureRemoteService();
   } catch {
