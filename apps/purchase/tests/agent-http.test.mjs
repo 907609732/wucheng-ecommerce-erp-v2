@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {createApp} from '../server.mjs';
+import {signWorkbenchActor} from '../lib/workbench-actor.mjs';
+import {signAgentApproval,agentDigest,approvalHeaders} from '../lib/agent-approval.mjs';
+test('real HTTP business mutation requires signed actor and central proof, records audit and one receipt',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-agent-http-')),{app,store,integration}=createApp({dataDir:dir});
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ t.after(async()=>{await new Promise(r=>server.close(r));store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim(),token=fs.readFileSync(path.join(dir,'.integration-key'),'utf8').trim(),base='http://127.0.0.1:'+server.address().port;
+ const actor={v:1,id:'test-owner',login:'test',role:'admin',modules:['purchase'],module:'purchase',channel:'mcp',canRunTasks:true,sessionId:'session'};
+ const request=async(route,body,proof)=>{const method=body?'POST':'GET',url='/api/integration/v1/agent'+route,now=Date.now();return fetch(base+url,{method,headers:{Authorization:'Bearer '+token,'content-type':'application/json',...signWorkbenchActor({...actor,method,path:url,requestId:randomUUID(),issuedAt:now,expiresAt:now+30000},key),...(proof?approvalHeaders(proof):{})},...(body?{body:JSON.stringify(body)}:{})});};
+ const input={name:'合成供应商',tags:['供应商地址']};let r=await request('/prepare',{capabilityId:'address.save',input,taskId:'task'});assert.equal(r.status,200,await r.clone().text());const p=await r.json();
+ const body={preparedId:p.id,taskId:'task',resultId:'result',resultVersion:1,idempotencyKey:'once'};
+ assert.equal((await request('/commit',body)).status,403);
+ const now=Date.now(),proof=signAgentApproval({v:1,approvalId:'review',actorId:actor.id,module:'purchase',capabilityId:p.capabilityId,taskId:'task',resultId:'result',resultVersion:1,dataSetId:p.dataSetId,revision:p.revision,changeDigest:agentDigest({capabilityId:p.capabilityId,input,commitData:p.commitData,changes:p.changes}),idempotencyKey:'once',issuedAt:now,expiresAt:now+30000},key);
+ r=await request('/commit',body,proof);assert.equal(r.status,200,await r.clone().text());const result=await r.json();assert.equal(result.receipt.result.name,input.name);
+ r=await request('/commit',body,proof);assert.equal(r.status,200,await r.clone().text());assert.deepEqual(await r.json(),result);
+ assert.equal(store.db.prepare('SELECT count(*) n FROM addresses').get().n,1);
+});

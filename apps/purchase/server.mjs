@@ -1,4 +1,6 @@
 import {openPurchasePersonnel} from './lib/purchase-personnel.mjs';
+import {createPurchaseAgentService,installPurchaseAgentRoutes} from './lib/agent-service.mjs';
+import {purchaseAgentOperations} from './lib/agent-operations.mjs';
 import {openTaskAssignment} from './lib/task-assignment.mjs';
 import {openTaskCenter} from './lib/task-center.mjs';
 import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,MAX_OCR_PAGES,validateUploadLimits} from './public/upload-limits.mjs';
@@ -271,6 +273,18 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.use(express.static(path.join(root,'public')));
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);let message=err.message||'操作失败';if(message.includes('UNIQUE constraint'))message='该平台、账号下的订单号已存在';if(err.code==='LIMIT_FILE_SIZE')message=['/api/attachments','/api/ocr'].includes(req.path)?'单个文件超过限制，最多 50 MB，请缩小后重试':'文件不能超过 25 MB';if(err.code==='LIMIT_FILE_COUNT'||err.code==='LIMIT_UNEXPECTED_FILE')message='一次最多上传 20 个文件，请减少后重试';if(message==='MONTH_LOCKED'){err.status=423;err.code='MONTH_LOCKED';message='该月份的平台采购数据已锁定，请先到「月度确认」取消确认后再修改。';}res.status(err.status||400).json({error:message,code:err.code,conflicts:err.conflicts,locks:err.locks,availableOn:err.availableOn,availableAt:err.availableAt,preview:err.preview,report:err.report});});
  mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,isMaintenance:integration.maintenance});
+ const agentOperations=purchaseAgentOperations({store,taskBoard,taskCenter,supplierManagement,addresses,attachments,jobs});
+ agentOperations['image.prepare']={async:true,prepare:i=>({summary:'提取订单原件图片索引',evidence:[store.get(i.id)],commitData:{}}),commit:i=>orderImages.prepare(i.id)};
+ agentOperations['image.cache']={async:true,prepare:i=>({summary:'缓存订单凭证图片',evidence:[store.get(i.id),orderImages.list(i.id)],commitData:{}}),commit:i=>orderImages.cache(i.id,i.imageId)};
+ agentOperations['import.preview']={query:input=>{const p=previews.get(input.previewId);if(!p)throw Error('导入预览已过期');return describe(p);}};
+ agentOperations['import.commit']={prepare:input=>{
+  const p=previews.get(input.previewId);if(!p)throw Error('导入预览已过期');const preview=describe(p),indices=[...new Set(input.indices||[])];
+  if(!indices.length||indices.some(i=>!Number.isInteger(i)||!p.parsed.orders[i]||p.parsed.orders[i].importStatus!=='ready'))throw Error('所选订单包含重复、冲突、无效或锁定数据');
+  const orders=indices.map(i=>p.parsed.orders[i]);
+  return {summary:`导入 ${orders.length} 笔采购订单`,scope:{platform:p.options.platform,account:p.options.account},evidence:[{filename:p.filename,sha256:hash(p.buffer),summary:preview.summary}],blocks:[{type:'table',rows:orders.map(({raw,...o})=>o)}],changes:orders.map(o=>({action:'add',orderNo:o.orderNo,amountCents:o.amountCents,refundCents:o.refundCents})),commitData:{filename:p.filename,buffer:p.buffer.toString('base64'),orders:orders.map(o=>({index:o.index,order:validateOrder(o),original:{headers:p.table.headers,rows:o.raw,normalized:o}})),lineCount:p.parsed.lineCount,metadata:{sheet:p.table.sheet,...p.options,issues:p.parsed.issues,selected:indices.length,importReport:importReportDraft(p.filename,p.parsed.orders,p.parsed.issues,indices)}}};
+ },commit:(_input,data)=>{const buffer=Buffer.from(data.buffer,'base64'),source=stash(buffer,data.filename);try{return store.importBatch(data.orders,{...source,lineCount:data.lineCount,metadata:data.metadata});}catch(e){fs.unlinkSync(path.join(dataDir,source.filePath));throw e;}}};
+ const agentService=createPurchaseAgentService({store,key:integration.workbench.key,binding:()=>({dataSetId:integration.state.dataSetId,revision:integration.state.revision}),operations:agentOperations});
+ installPurchaseAgentRoutes(integration.router,agentService);
  integration.workbench.finalize();
  return {app,store,usage,runUpgradeCheck,mobile,integration,transfers};
 }

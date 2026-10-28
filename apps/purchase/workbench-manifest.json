@@ -211,6 +211,51 @@
     {
       "module": "purchase",
       "method": "GET",
+      "path": "/api/integration/v1/agent/binding",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/agent/binding"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/agent/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/agent/commit"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/agent/prepare",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/agent/prepare"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/integration/v1/agent/query",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:POST:/api/integration/v1/agent/query"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/integration/v1/agent/receipts/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/integration/v1/agent/receipts/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
       "path": "/api/integration/v1/capabilities",
       "kind": "read",
       "remote": false,

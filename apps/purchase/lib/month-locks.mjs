@@ -87,6 +87,15 @@ export function openMonthLocks(db,{list,transaction}){
    }
    return {confirmed:rows.length,batchId};
   });},
+  // Called only from the module's verified central-review transaction. Legacy
+  // password HTTP endpoints retain their independent authentication below.
+  cancelWithAgentReview({month,platform,version},{actorId,approvalId}){return transaction(()=>{
+   validateScope(month,platform);if(!actorId||!approvalId)throw failure('缺少中央复核记录','AGENT_REVIEW_REQUIRED',403);
+   const before=confirmations().find(c=>c.month===month&&c.platform===platform);
+   if(!before||typeof version!=='string'||before.version!==version)throw failure('月度确认状态已变化，请重新复核','MONTH_CONFIRMATION_CHANGED',409);
+   event('cancel',{confirmationVersion:before.version,snapshot:before.snapshot,current:preview(month,platform),actorId,approvalId,authorization:'agent-central-review'},month,platform);
+   db.prepare('DELETE FROM month_confirmations WHERE month=? AND platform=?').run(month,platform);return {month,platform,cancelled:true};
+  });},
   history(month,platform){validateScope(month,platform);return db.prepare('SELECT * FROM month_events WHERE month=? AND platform=? ORDER BY id DESC').all(month,platform).map(r=>({id:r.id,action:r.action,orderId:r.order_id,batchId:r.batch_id,details:JSON.parse(r.details_json),createdAt:r.created_at}));},
   async setPassword({password,confirmation,currentPassword}){
    if(typeof password!=='string'||password.length<8||password.length>128)throw failure('管理员密码需为 8–128 位','PASSWORD_FORMAT');
