@@ -37,12 +37,14 @@
     "warehouse:build": "node desktop/prepare-build.mjs --channel=release && electron-builder --config build/electron-builder.config.cjs --win nsis"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "2.1.0",
     "@alicloud/dysmsapi20170525": "4.6.0",
     "@alicloud/dyvmsapi20170525": "4.5.0",
     "@fastify/cookie": "11.1.3",
     "@fastify/reply-from": "12.8.0",
     "@modelcontextprotocol/server": "^2.1.0",
     "axios": "^1.20.0",
+    "cron-parser": "5.10.2",
     "dingtalk-stream": "^2.1.5",
     "dotenv": "^16.4.7",
     "echarts": "^6.1.0",
