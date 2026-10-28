@@ -2,6 +2,17 @@
 
 本组仅实现模块领域及适配器，不接大模型、launcher、preload 或 gateway。原正式模式旧入口继续可用；Agent管理模式禁止旧直接执行、发送及员工配置写入口，统一走中央审批。Beta不同时启用旧定时器和Agent定时器。
 
+## 增量验收契约
+
+- `warehouse-agent-schema.mjs` 提供所有能力的闭合中文JSON Schema和同源入口校验；年月、UUID、必填项、员工字段、渠道枚举及范围在启动采集前实校验。员工名单及备份仅管理员可操作。
+- `warehouse-agent-artifacts.mjs` 在host代理的prepare/query结果里调用真实`transport.download('warehouse', registeredRoute, {ctx,expectedSha256,filename})`。helper负责签actor、manifest下载白名单、流量上限、中央task目录与`ctx.registerArtifact`。证据`artifactId`是中央ID，另保留`moduleArtifactId`供下一步领域调用；`files`块符合中央UI协议。changes与commitData不改写，审批digest不变。runtime场景缺helper会明确失败，不伪造下载链接。
+- 采集及备份prepare立即产生可核对原件，返回`requiresReview:false`且不返回commitData或正式changes；只有入库、发送等有业务副作用的操作保留提交载荷并等待人审。
+- commit及receipt均返回顶层`state`、`idempotencyKey`、`receipt`；nestedreceipt也含对应`state/idempotencyKey`。只有completed/accepted领域结果映射completed；partial/unknown保持unknown，可回读证据但不能使任务完成。
+- 管理员查询`schedules.legacy`可读原始开关、HH:mm、启动设置、员工截止/工作日/渠道、电脑IANA时区、业务北京时间和configurationRevision（同时覆盖配置文件与日结安排）。`candidates[].schedulerInput`直接对应统一scheduler的goal/engine/scope/cron/timezone/noOverlap/misfirePolicy/enabled字段；`migrationKey`供查重。该查询不创建计划、不改原设置。每日/月度仍使用电脑时间，催办检查用Asia/Shanghai；接管须先核对旧timer已关闭。
+- 跨组真实集成测试直接导入runtime组与host组实现，使用真实签名HTTP、原件下载、SQLite、中央产物表及人审回执。验证普通editor无canRunTasks本人签到、viewer只读查询，不伪造actor或旧UI channel。
+
+独立树跨组测试需额外设置`AGENT_HOST_TRANSPORT_HELPER`为host组`desktop/agent-host/module-transport.mjs`实际路径；合入集成树后使用默认相对路径。全部依赖仅只读导入，不复制或修改其他组文件。
+
 ## 工厂
 
 主机侧 `createWarehouseAgentAdapter({transport})`，工厂文件 `warehouse-agent.mjs`。transport 严格使用统一签名契约：
