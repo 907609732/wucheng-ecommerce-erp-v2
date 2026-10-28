@@ -16,8 +16,34 @@ export function validateExporterInput(id,input){
  const walk=(s,v,p)=>{if(s.type==='object'){if(!v||typeof v!=='object'||Array.isArray(v))throw Error(p+'必须为对象');for(const k of Object.keys(v))if(!s.properties[k])throw Error(p+'包含未允许字段：'+k);for(const k of s.required)if(v[k]===undefined)throw Error(p+'缺少字段：'+k);for(const k of Object.keys(v))walk(s.properties[k],v[k],p+'.'+k);}else if(s.type==='array'){if(!Array.isArray(v)||v.length<s.minItems||v.length>s.maxItems)throw Error(p+'数组数量无效');v.forEach((x,i)=>walk(s.items,x,p+'.'+i));}else if(s.type==='string'){if(typeof v!=='string'||s.minLength&&v.length<s.minLength||s.maxLength&&v.length>s.maxLength||s.pattern&&!new RegExp(s.pattern).test(v))throw Error(p+'字符串格式无效');if(s===date&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)!==v)throw Error(p+'日期无效');}else if(s.type==='integer'){if(!Number.isSafeInteger(v)||v<s.minimum||v>s.maximum)throw Error(p+'分页数值无效');}else if(s.type==='boolean'&&typeof v!=='boolean')throw Error(p+'必须为布尔值');if(s.enum&&!s.enum.includes(v))throw Error(p+'选项无效');};walk(schema,input,'参数');
  if(id==='start'&&input.from>input.to)throw Error('起始日期不能晚于结束日期');if(id==='host-action'&&input.orderId&&!input.taskId)throw Error('打开订单必须提供采集任务ID');return input;
 }
-export function createExporterAgentAdapter({transport}){
+export function createExporterAgentAdapter({transport,pollIntervalMs=1000,maxWaitMs=60000}){
+ const interval=Math.max(1,Math.min(5000,pollIntervalMs)),waitLimit=Math.max(1,Math.min(120000,maxWaitMs));
  const request=(op,body,ctx)=>(typeof transport==='function'?transport:transport.request)('exporter','/api/integration/v1/agent/'+op,{method:op==='state'?'GET':'POST',body:body?{...body,taskId:ctx?.taskId,idempotencyKey:ctx?.idempotencyKey}:undefined,ctx,signal:ctx?.signal,approval:ctx?.approval,idempotencyKey:ctx?.idempotencyKey});
+ const pollActions=new Set(['start','resume','retry','enrichDetails']),jobActions=new Set([...pollActions,'pause','finish']);
+ const throwCancelled=ctx=>{if(ctx?.signal?.aborted)throw ctx.signal.reason||Object.assign(Error('采集等待已取消'),{name:'AbortError'});};
+ const taskComplete=task=>task?.status==='completed'&&task.listOutcome==='complete'&&!task.plan?.buckets?.some(b=>b.status!=='completed')&&!task.plan?.segments?.some(s=>s.status!=='completed');
+ const taskBlock=(task,jobId)=>({type:'table',title:'实际采集任务状态',columns:[{key:'jobId',label:'采集任务ID'},{key:'status',label:'实际状态'},{key:'listOutcome',label:'列表完整性'},{key:'count',label:'已获取订单数'},{key:'message',label:'执行说明'}],rows:[{jobId,status:task?.status||task?.state||'unknown',listOutcome:task?.listOutcome||'unknown',count:task?.count??null,message:task?.message||'可使用此采集任务ID继续查询'}]});
+ function jobResult(output,task,jobId,{timedOut=false,human=false}={}){
+  const completed=!human&&taskComplete(task),status=task?.status||task?.state||'unknown';
+  const issue={blocking:true,code:human?'EXPORTER_HOST_ACTION_REQUIRED':timedOut?'EXPORTER_JOB_WAIT_TIMEOUT':'EXPORTER_JOB_INCOMPLETE',jobId:jobId||null,status,message:human?'需要用户在主机完成平台登录、验证码或授权，尚未完成采集目标':timedOut?'等待已达到时限；实际采集任务仍未完成，请按采集任务ID继续查询':`采集任务状态为 ${status}，列表完整性为 ${task?.listOutcome||'unknown'}；不能作为目标完成，请按采集任务ID查询或处理缺项`};
+  return {...output,summary:completed?'实际采集任务已完成并确认列表范围':human?'平台操作等待人工接管':'采集目标尚未完成',scope:{...(output.scope||{}),jobId:jobId||null},blocks:[...(output.blocks||[]),taskBlock(task,jobId||null)],evidence:[...(output.evidence||[]),{module:'exporter',jobId:jobId||null,status,listOutcome:task?.listOutcome||'unknown',complete:completed}],issues:[...(output.issues||[]),...(completed?[]:[issue])]};
+ }
+ async function settleJob(output,capabilityId,input,ctx){
+  throwCancelled(ctx);if(output?.ok===false)return output;
+  const data=output.blocks?.map(b=>b.data).find(d=>d&&typeof d==='object'&&(d.id||d.taskId||d.state)),jobId=data?.id||data?.taskId||input?.taskId;
+  if(capabilityId==='host-action')return jobResult(output,data,jobId,{human:true});
+  if(!jobId)return jobResult(output,{status:'unknown',message:'业务服务未返回真实采集任务ID'},null);
+  let task=data?.id===jobId?data:null;const timeout=AbortSignal.timeout(waitLimit),signal=ctx?.signal?AbortSignal.any([ctx.signal,timeout]):timeout,pollCtx={...ctx,signal};
+  while(true){
+   throwCancelled(ctx);
+   try{task=await request('query',{capabilityId:'task',input:{taskId:jobId}},pollCtx);}catch(error){throwCancelled(ctx);if(timeout.aborted)return jobResult(output,task,jobId,{timedOut:true});throw error;}
+   throwCancelled(ctx);
+   if(task?.id!==jobId)return jobResult(output,{status:'unknown',message:'查询结果未匹配真实采集任务ID'},jobId);
+   if(taskComplete(task)||!pollActions.has(capabilityId)||!['running','processing','queued','starting'].includes(task.status))return jobResult(output,task,jobId);
+   if(timeout.aborted)return jobResult(output,task,jobId,{timedOut:true});
+   try{await new Promise((resolve,reject)=>{let timer;const abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},interval);if(signal.aborted)abort();});}catch(error){throwCancelled(ctx);if(timeout.aborted)return jobResult(output,task,jobId,{timedOut:true});throw error;}
+  }
+ }
  const requireDownload=()=>{if(typeof transport.download!=='function')throw Object.assign(Error('主机尚未提供真实文件产物下载能力'),{code:'ARTIFACT_TRANSPORT_UNAVAILABLE'});};
  async function artifact(file,ctx){
   requireDownload();if(!file?.fileId||!/^[A-Za-z0-9:_-]{1,300}$/.test(file.fileId)||file.available===false)throw Object.assign(Error('导出文件不存在或已经失效'),{code:'EXPORT_FILE_UNAVAILABLE'});
@@ -31,8 +57,8 @@ export function createExporterAgentAdapter({transport}){
  }
  return {id:'exporter',capabilities:[...exporterQueries.map(id=>({id,title:exporterLabels[id][0],kind:'query',description:exporterLabels[id][1],inputSchema:exporterSchemas[id],requiresReview:false})),...exporterActions.map(id=>({id,title:exporterLabels[id][0],kind:'prepare',description:exporterLabels[id][1],inputSchema:exporterSchemas[id],requiresReview:!exporterAutomatic.includes(id)}))],
  async binding(ctx){const s=await request('state',undefined,ctx);if(!s.dataSetId||s.revision===undefined)throw Error('导出台账本身份不可用');return {dataSetId:s.dataSetId,revision:s.revision};},
- async query(capabilityId,input,ctx){if(capabilityId==='file')requireDownload();const data=await request('query',{capabilityId,input},ctx),output={summary:exporterLabels[capabilityId][0],blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data}]};return capabilityId==='file'?exportResult(output,ctx):output;},
- async prepare(capabilityId,input,ctx){if(capabilityId==='export')requireDownload();const output=await request('prepare',{capabilityId,input},ctx);return capabilityId==='export'?exportResult(output,ctx):output;},
+ async query(capabilityId,input,ctx){throwCancelled(ctx);if(capabilityId==='file')requireDownload();const data=await request('query',{capabilityId,input},ctx),output={summary:exporterLabels[capabilityId][0],blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data}]};if(capabilityId==='task')return jobResult(output,data,input.taskId);return capabilityId==='file'?exportResult(output,ctx):output;},
+ async prepare(capabilityId,input,ctx){throwCancelled(ctx);if(capabilityId==='export')requireDownload();const output=await request('prepare',{capabilityId,input},ctx);if(jobActions.has(capabilityId)||capabilityId==='host-action')return settleJob(output,capabilityId,input,ctx);return capabilityId==='export'?exportResult(output,ctx):output;},
  commit(prepared,ctx){let claims;try{claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString('utf8'));}catch{throw Error('中央审批凭据缺失');}return request('commit',{prepared,preparedId:prepared.commitData?.id,resultId:claims.resultId,resultVersion:claims.resultVersion},ctx);},
- async receipt(idempotencyKey,ctx){const output=await request('receipt',{idempotencyKey},ctx);return output?.requiresReview===false&&output.blocks?.some(b=>b.data?.fileId)?exportResult(output,ctx):output;}};
+ async receipt(idempotencyKey,ctx){const output=await request('receipt',{idempotencyKey},ctx);if(output?.requiresReview===false&&output.blocks?.some(b=>b.data?.fileId))return exportResult(output,ctx);const capabilityId=output?.evidence?.find(e=>e.capabilityId)?.capabilityId;return jobActions.has(capabilityId)||capabilityId==='host-action'?settleJob(output,capabilityId,{},ctx):output;}};
 }
