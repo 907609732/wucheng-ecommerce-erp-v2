@@ -26,7 +26,7 @@ export function createPurchaseAgentAdapter({transport}) {
       const content=fs.readFileSync(file),sha256=digest(content);if(item.sha256!==sha256)throw Error('任务原件摘要已变化');
       const filename=path.basename(item.name||item.filename||item.path);let offset=0,uploadId,result;
       while(offset<content.length){ctx.signal?.throwIfAborted();const end=Math.min(offset+8*1024*1024,content.length),key=digest(Buffer.from(ctx.idempotencyKey+':'+sha256+':'+offset));
-        const response=await call('POST','/prepare',{capabilityId:'files.upload.part',input:{...(uploadId?{uploadId}:{}),filename,totalBytes:content.length,offset,dataBase64:content.subarray(offset,end).toString('base64'),sha256}},{...ctx,idempotencyKey:key});
+        const response=await call('POST','/prepare',{capabilityId:'files.upload.part',input:{...(uploadId?{uploadId}:{}),filename,totalBytes:content.length,offset,dataBase64:content.subarray(offset,end).toString('base64'),sha256}},{...ctx,parentCapabilityId:'files.stage',capabilityId:'files.upload.part',idempotencyKey:key});
         if(response.ok===false||!response.data?.uploadId)throw Error(response.error||'原件分片尚未核实');
         result=response.data;uploadId=result.uploadId;offset=result.nextOffset;if(offset!==end)throw Error('原件上传偏移不符');
       }

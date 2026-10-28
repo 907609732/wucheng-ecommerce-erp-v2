@@ -248,7 +248,7 @@
       "module": "purchase",
       "method": "GET",
       "path": "/api/integration/v1/agent/files/:id/download",
-      "kind": "read",
+      "kind": "download",
       "remote": true,
       "uiOnly": false,
       "operationId": "purchase:GET:/api/integration/v1/agent/files/:id/download"

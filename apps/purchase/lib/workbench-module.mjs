@@ -7,7 +7,7 @@ const safe=new Set(['GET','HEAD','OPTIONS']);
 const localOnly=/\/(?:backups?|restore|mobile-admin|phone|settings\/secrets|settings\/password|admin\/password|admin-password|upgrades?|updates?|stop|maintenance|workbench\/migration)(?:\/|$)|\/integration\/v1\/(?:open|stop|maintenance)|\/api\/(?:settings|data-dir|filesystem)(?:\/|$)/;
 const task=/\/(?:jobs|download-jobs|run|sync|start|collect|retry|resume)(?:\/|$)/;
 const confirmation=/\/(?:review-session|review|confirm|commit|rollback|lock|unlock|void)(?:\/|$)/;
-const download=/\/(?:export|[^/]*-export|template|templates|original|source|attachments|images|evidence)(?:\/|$)/;
+const download=/\/(?:export|[^/]*-export|template|templates|original|source|attachments|images|evidence|download)(?:\/|$)/;
 const matcher=route=>new RegExp('^'+route.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/:[A-Za-z0-9_]+/g,'[^/]+')+'/?$');
 export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
  const key=provisionWorkbenchKey(dataDir),operations=[],patterns=[];
