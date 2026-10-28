@@ -1,0 +1,2 @@
+import test from'node:test';import assert from'node:assert/strict';import {spawnSync}from'node:child_process';import path from'node:path';
+test('staging refuses missing integrated vendor or host without producing an installer',()=>{const result=spawnSync(process.execPath,[path.resolve('scripts/agent-beta-stage.mjs'),'--prepare'],{encoding:'utf8',timeout:30000});assert.notEqual(result.status,0);assert.match(result.stderr,/ENOENT|Missing|missing|vendor|Cannot find/i);assert.doesNotMatch(result.stdout,/installerCreated.*false/);});

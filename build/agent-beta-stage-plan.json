@@ -1,0 +1,26 @@
+{
+  "format": "agent-beta-stage-plan/v1",
+  "engines": {
+    "codex": "desktop/agent-runtime/codex-engine.mjs",
+    "hermes": "desktop/agent-runtime/hermes-engine.mjs"
+  },
+  "warehouseEntries": [
+    "desktop/workbench/warehouse-agent.mjs",
+    "desktop/workbench/warehouse-agent-api.mjs"
+  ],
+  "modules": {
+    "purchase": [
+      "lib/agent-adapter.mjs"
+    ],
+    "sales": [
+      "lib/agent-adapter.mjs"
+    ],
+    "overview": [
+      "lib/agent-adapter.mjs"
+    ],
+    "exporter": [
+      "src/main/agent-adapter.mjs"
+    ]
+  },
+  "betaVersion": "0.11.6"
+}
