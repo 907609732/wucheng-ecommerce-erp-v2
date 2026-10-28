@@ -137,7 +137,7 @@ prepare('restore-copy','恢复备份为独立副本','准备将已验证备份�
 prepare('file-stage','暂存任务原件','校验原始文件字节和SHA-256并保存为同人员同任务原件；不入账、不改变财务数据。',object({file:inlineFile()},['file']),false);
 prepare('cainiao-connect','连接菜鸟云仓','打开或复用本机菜鸟账单连接，仅建立下载环境，不入账或确认结算。',object(),false);
 prepare('cainiao-disconnect','断开菜鸟连接','停止复用菜鸟账单连接，不清除其他浏览器账号或历史账单。',object(),false);
-prepare('cainiao-download-start','逐月下载菜鸟账单','按真实账户和月份范围下载官方云仓账单，留存原件；下载不表示已入账。',object({account:text('连接状态返回的真实账户标识，不接受密码或cookie',100),from:month,to:{...month,description:'结束月份（含）；省略时仅处理from月份'},force:{type:'boolean',default:false,description:'是否重新下载已有原件；不自动覆盖已入账费用'}},['account','from']),false);
+prepare('cainiao-download-start','逐月下载菜鸟账单','按真实账户和月份范围下载官方云仓账单，留存原件；下载不表示已入账。',object({account:text('连接状态返回的真实账户标识，不接受密码或cookie',100),from:month,to:{...month,description:'结束月份（含）；省略时仅处理from月份'},cutoff:{...date,description:'包含当前月时必须明确业务数据截止日，属于当前月且不能晚于北京时间昨天'},cutoffs:{...object(),patternProperties:{'^20[0-9]{2}-(0[1-9]|1[0-2])$':date},description:'按月份明确截止日；当前月键优先于cutoff，日期上限仍由实际业务校验'},force:{type:'boolean',default:false,description:'是否重新下载已有原件；不自动覆盖已入账费用'}},['account','from']),false);
 for(const [name,title,description]of [['cainiao-download-stop','停止菜鸟下载','停止指定真实账单下载任务，保留已经下载的官方原件。'],['cainiao-download-resume','继续菜鸟下载','继续指定可恢复的逐月账单下载任务，不重复确认资金结算。']])prepare(name,title,description,object({jobId:id},['jobId']),false);
 prepare('cainiao-posting','复核云仓运费入账','对指定任务月份的官方账单费用及赔付抵扣预演，中央复核后登记销售台运费。',object({jobId:id,month},['jobId','month']));
 

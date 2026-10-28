@@ -9,9 +9,10 @@ import {createApp} from '../server.mjs';
 import {signWorkbenchActor} from '../lib/workbench-actor.mjs';
 import {signAgentApproval,agentDigest,approvalHeaders} from '../lib/agent-approval.mjs';
 import {addLedger,setCoverage} from '../lib/ledger.mjs';
+import {beijing} from '../lib/util.mjs';
 
-async function setup(t){
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-remaining-')),{app,store,cainiao}=createApp({dataDir:dir,port:0,demo:true}),server=app.listen(0,'127.0.0.1');
+async function setup(t,appOptions={}){
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-remaining-')),{app,store,cainiao}=createApp({dataDir:dir,port:0,demo:true,...appOptions}),server=app.listen(0,'127.0.0.1');
  await new Promise((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim(),nativeFetch=globalThis.fetch,taskId='remaining-business-task';let sequence=0;
  const call=async(route,{method='GET',body,actor='boss',role='admin',headers={}}={})=>{
@@ -91,4 +92,13 @@ test('ready employee handoff persists actual employee identity and reviewed rece
  assert.equal(f.store.get("SELECT COUNT(*) n FROM coverage WHERE dataset IN ('settlement','receipt') AND status='full'").n,0);
  assert.equal(f.store.get('SELECT COUNT(*) n FROM month_locks').n,0);
  assert.equal(f.store.get('SELECT COUNT(*) n FROM agent_receipts WHERE actor_id=? AND preparation_id IS NOT NULL',employee.actor).n,1);
+});
+
+test('current-month cutoff reaches the real Cainiao domain through signed HTTP and cannot include today',async t=>{
+ const cainiaoBrowser={status:()=>({status:'connected',account:'remaining-cainiao'}),async disconnect(){},async run(){throw Error('截止日无效时不得访问平台');}},f=await setup(t,{cainiaoBrowser}),today=beijing();
+ for(const cutoffInput of [{cutoff:today.date},{cutoffs:{[today.month]:today.date}}]){
+  const response=await f.call('prepare',{method:'POST',body:{taskId:'remaining-business-task',capabilityId:'sales.cainiao-download-start',input:{account:'remaining-cainiao',from:today.month,...cutoffInput}}});
+  assert.equal(response.status,409,await response.clone().text());const failure=await response.json();assert.equal(failure.code,'CAINIAO_CUTOFF_INVALID');assert.match(failure.error,/北京时间昨天/);
+ }
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM sales_cainiao_jobs').n,0);
 });

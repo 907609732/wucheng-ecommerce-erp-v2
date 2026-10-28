@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Ajv from 'ajv';
-import {salesAgentCapabilities,createSalesAgentAdapter} from '../lib/agent-adapter.mjs';
+import {salesModuleCapabilities as salesAgentCapabilities,salesAgentCapabilities as publicCapabilities,createSalesAgentAdapter} from '../lib/agent-adapter.mjs';
 import {schemaFor,salesCapabilityDefinitions} from '../lib/agent-schemas.mjs';
 
 const ajv=new Ajv({allErrors:true,strict:false});
+test('central model capabilities expose only attachment IDs and managed file IDs',()=>{
+ assert.ok(publicCapabilities.some(c=>c.id==='sales.files.stage'));assert.ok(!publicCapabilities.some(c=>c.id==='sales.file-stage'));
+ const visit=schema=>{if(!schema||typeof schema!=='object')return;assert.ok(!schema.properties?.dataBase64);for(const value of Object.values(schema))if(value&&typeof value==='object')visit(value);};
+ for(const cap of publicCapabilities){visit(cap.inputSchema);ajv.compile(cap.inputSchema);}
+ const cap=publicCapabilities.find(c=>c.id==='sales.import'),validate=ajv.compile(cap.inputSchema);assert.equal(validate({file:{filename:'b.csv',dataBase64:'YQ==',sha256:'a'.repeat(64)},context:{shop_id:'pdd',month:'2026-09',dataset:'operations'},options:{}}),false);
+});
 const file={filename:'官方运营报表.csv',dataBase64:'YQ==',sha256:'a'.repeat(64)};
 const staged={id:'10000000-0000-4000-8000-000000000001'};
 const m='2026-09',rowId='real-record-id',shop='real-shop-id';
@@ -67,6 +73,8 @@ test('only nonfinancial preparatory steps skip human review and adapter retains 
  const noReview=new Set(['file-stage','backup','cainiao-connect','cainiao-disconnect','cainiao-download-start','cainiao-download-stop','cainiao-download-resume']);
  for(const cap of salesAgentCapabilities.filter(cap=>cap.kind==='prepare'))assert.equal(cap.requiresReview,!noReview.has(cap.id.slice(6)),cap.id);
  valid('cainiao-download-start',{account:'actual-account',from:'2026-99'},false);valid('cainiao-posting',{jobId:rowId},false);
+ valid('cainiao-download-start',{account:'actual-account',from:m,cutoff:m+'-20'});valid('cainiao-download-start',{account:'actual-account',from:m,cutoffs:{[m]:m+'-20'}});
+ valid('cainiao-download-start',{account:'actual-account',from:m,cutoff:'2026-99-01'},false);valid('cainiao-download-start',{account:'actual-account',from:m,cutoffs:{arbitrary:m+'-20'}},false);valid('cainiao-download-start',{account:'actual-account',from:m,cutoffs:{[m]:{date:m+'-20'}}},false);
  const calls=[],adapter=createSalesAgentAdapter({transport:async(module,route,options)=>{calls.push({module,route,options});return {};}});
  await adapter.query('sales.file-inspect',{file:staged},{taskId:'actual-task'});
  const route=new URL(calls[0].route,'http://local');assert.equal(route.searchParams.get('taskId'),'actual-task');assert.equal(route.searchParams.get('capabilityId'),'sales.file-inspect');assert.deepEqual(JSON.parse(route.searchParams.get('input')),{file:staged});
