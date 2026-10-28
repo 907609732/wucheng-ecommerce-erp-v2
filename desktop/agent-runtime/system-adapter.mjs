@@ -20,7 +20,11 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
   ];
   const changed=()=>store.update('system','identity',s=>({revision:s.revision+1}));
   return {id:'system',capabilities,changed,
-    binding(){const identity=store.get('system','identity');return {dataSetId:identity.dataSetId,revision:identity.revision};},
+    async binding(ctx){const identity=store.get('system','identity'),revision={system:identity.revision};
+      if(ctx?.capabilityId?.startsWith('permissions.')&&extensions['permissions.inspect'])revision.policy=(await extensions['permissions.inspect']({},ctx)).revision;
+      if(ctx?.capabilityId?.startsWith('schedules.')&&ctx.capabilityInput?.id)revision.schedule=store.get('schedule',ctx.capabilityInput.id)?.version??'missing';
+      if(ctx?.capabilityId==='tasks.assign'&&ctx.capabilityInput?.taskId)revision.task=store.get('task',ctx.capabilityInput.taskId)?.version??'missing';
+      return {dataSetId:identity.dataSetId,revision};},
     async query(capabilityId,input,ctx){
       if(capabilityId==='permissions.list'){if(ctx.actor.role!=='admin')throw agentError('ADMIN_REQUIRED','需要管理员权限',403);const current=await extensions['permissions.inspect']({},ctx),rows=Object.entries(current.policy.users).map(([login,value])=>({login,...value}));return {summary:`已读取 ${rows.length} 位成员权限`,blocks:[{type:'table',title:'人员权限',columns:[{key:'login',label:'登录身份'},{key:'role',label:'角色'},{key:'modules',label:'业务模块'},{key:'canRunTasks',label:'写入任务'},{key:'enabled',label:'启用'}],rows}],evidence:[{id:'permissions',revision:current.revision,schemaVersion:current.policy.schemaVersion}]};}
       if(capabilityId!=='schedules.list')throw agentError('CAPABILITY_UNAVAILABLE','公共查询未登记');const rows=store.list('schedule',ctx.actor.role==='admin'?undefined:ctx.actor.id);return {summary:`已读取 ${rows.length} 个定时任务`,blocks:[{type:'table',title:'定时任务',columns:[{key:'id',label:'任务编号'},{key:'goal',label:'目标'},{key:'cron',label:'规则'},{key:'timezone',label:'时区'},{key:'engine',label:'引擎'},{key:'enabled',label:'启用'},{key:'nextRunAt',label:'下次运行'},{key:'misfirePolicy',label:'漏跑处理'}],rows}],evidence:rows.map(s=>({id:s.id,kind:'schedule',version:s.version}))};},
@@ -39,7 +43,7 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
         if(ctx.actor.role!=='admin')throw agentError('ADMIN_REQUIRED','需要管理员权限',403);const current=await extensions['permissions.inspect']({},ctx);commitData={...commitData,expectedVersion:current.revision};changes=[{kind:'permissions',before:current.policy,after:input.policy}];summary='请复核人员权限变更';
       }else if(capabilityId==='backups.create'){const result=await extensions['backups.prepare'](input,ctx);return {...result,requiresReview:false};}
       else throw agentError('CAPABILITY_UNAVAILABLE','公共能力未登记');
-      return {summary,blocks:[{type:'text',text:summary}],changes,evidence:[{id:'system-policy',revision:this.binding().revision}],commitData};
+      return {summary,blocks:[{type:'text',text:summary}],changes,evidence:[{id:'system-policy',revision:(await this.binding(ctx)).revision}],commitData};
     },
     async commit(step,ctx){
       if(!ctx.approval||!ctx.idempotencyKey)throw agentError('HUMAN_REVIEW_REQUIRED','公共变更需要有效的结果复核',403);

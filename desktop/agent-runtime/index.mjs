@@ -13,7 +13,7 @@ const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
 const modules=['warehouse','purchase','sales','overview','exporter','system'];
 const forbidden=new Set(['actor','approval','confirmed','trustedUi','role','commitData']);
 function safeInput(value){if(!plain(value)||Buffer.byteLength(JSON.stringify(value))>1024*1024)throw agentError('INPUT_INVALID','业务参数必须是小于 1 MiB 的对象');for(const key of Object.keys(value))if(forbidden.has(key))throw agentError('IDENTITY_INPUT_DENIED','调用参数不能指定身份或确认凭据',403);return structuredClone(value);}
-const publicTask=t=>{const {prepared,engineSession,...rest}=t;return rest;};
+const publicTask=t=>{const {prepared,engineSession,review,...rest}=t;return {...rest,review:review?{...review,canApprove:false}:null};};
 const publicResult=r=>{if(!r)return null;const {prepared,...rest}=r;return rest;};
 const tokenCount=usage=>{if(!usage)return null;const n=usage.totalTokens??usage.total_tokens??(typeof usage.inputTokens==='number'&&typeof usage.outputTokens==='number'?usage.inputTokens+usage.outputTokens:null)??(typeof usage.input_tokens==='number'&&typeof usage.output_tokens==='number'?usage.input_tokens+usage.output_tokens:null);return Number.isSafeInteger(n)&&n>=0?n:null;};
 const verifiedReceipt=(response,key)=>['completed','confirmed'].includes(response?.state)&&response?.ok!==false&&plain(response?.receipt)&&!['pending','processing','partial','unknown','failed'].includes(response.receipt.state)&&(response.idempotencyKey||response.receipt.idempotencyKey)===key;
@@ -44,11 +44,13 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const bytes=fs.readFileSync(file),saved=store.insert('artifact',{id:randomUUID(),ownerId:task.ownerId,taskId:task.id,path:file,name:name||path.basename(file),mimeType:mimeType||'application/octet-stream',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});const {path:privatePath,ownerId,...publicArtifact}=saved;return publicArtifact;
   }
   function resultState(taskId){const task=store.get('task',taskId);return store.get('result',task.resultId);}
+  function snapshotResult(saved){store.insert('result_version',{...publicResult(saved),id:saved.id+':'+saved.version,resultId:saved.id,resultVersion:saved.version,createdAt:now()});return saved;}
+  function updateResult(id,value){return store.transaction(()=>snapshotResult(store.update('result',id,value)));}
   function appendResult(task,output,step){
     const previous=task.resultId?store.get('result',task.resultId):null;
     const result={id:previous?.id||randomUUID(),ownerId:task.ownerId,taskId:task.id,summary:output.summary||previous?.summary||'处理结果',scope:output.scope||task.scope,blocks:[...(previous?.blocks||[]),...(output.blocks||[])],evidence:[...(previous?.evidence||[]),...(output.evidence||[])],changes:[...(previous?.changes||[]),...(output.changes||[])],issues:[...(previous?.issues||[]),...(output.issues||[])],environment,prepared:[...(previous?.prepared||[]),...(step?[step]:[])]};
     const saved=previous?store.update('result',result.id,result):store.insert('result',result);
-    store.insert('result_version',{...publicResult(saved),id:saved.id+':'+saved.version,resultId:saved.id,resultVersion:saved.version,createdAt:now()});
+    snapshotResult(saved);
     const review=saved.prepared.length?{id:randomUUID(),resultVersion:saved.version,revision:agentDigest(saved.prepared.map(s=>({module:s.module,binding:s.binding,digest:s.changeDigest}))),canApprove:!saved.issues.some(i=>i.blocking===true)}:null;
     store.update('task',task.id,{resultId:saved.id,review,status:review?'waiting_review':'running'});emit(task.id,'result.updated',{resultId:saved.id,resultVersion:saved.version});return saved;
   }
@@ -67,7 +69,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!cap.inputSchema)throw agentError('CAPABILITY_SCHEMA_MISSING','业务能力缺少输入校验契约',503);
     const validated=await fromJsonSchema(cap.inputSchema)['~standard'].validate(params);
     if(validated.issues)throw agentError('CAPABILITY_INPUT_INVALID','业务参数不符合能力输入约定',400);
-    const ctx={...context(task,actor,jobs.get(taskId)?.controller.signal),capabilityId:cap.id},before=await binding(adapter,ctx);
+    const ctx={...context(task,actor,jobs.get(taskId)?.controller.signal),capabilityId:cap.id,capabilityInput:params},before=await binding(adapter,ctx);
     emit(taskId,'step.started',{module:adapter.id,capabilityId:cap.id,title:cap.title});
     const output=await adapter[kind](cap.id,params,ctx);
     const latest=store.get('task',taskId);if(!['running','waiting_review'].includes(latest.status))throw agentError('TASK_INTERRUPTED','任务已暂停或取消，结果未自动提交',409);
@@ -129,7 +131,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       if(task.status==='unknown')return reconcile(task,actor);
       if(!['paused','failed','waiting_input'].includes(task.status))throw agentError('TASK_STATE_INVALID','当前任务不能继续执行',409);
       if(engine!==undefined&&engine!==task.engine){if(!['codex','hermes'].includes(engine))throw agentError('ENGINE_INVALID','未知执行引擎');const model=settings.get().company.model;if(model&&engines[engine]?.supportedModels&&!engines[engine].supportedModels.includes(model))throw agentError('ENGINE_MODEL_UNSUPPORTED','此模型不兼容选定引擎',409);store.update('task',task.id,{engine,engineSession:null});emit(task.id,'engine.changed',{from:task.engine,to:engine,restoredFrom:'erp-checkpoint'});}
-      if(task.review&&resultState(task.id)?.prepared?.length){store.update('task',task.id,{status:'waiting_review'});return {task:publicTask(store.get('task',task.id)),result:publicResult(resultState(task.id)),review:task.review};}
+      if(task.review&&resultState(task.id)?.prepared?.length){store.update('task',task.id,{status:'waiting_review'});return {task:publicTask(store.get('task',task.id)),result:publicResult(resultState(task.id)),review:{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}};}
       store.update('task',task.id,{status:'queued'});if(autoStart)queueMicrotask(()=>run(task.id).catch(()=>{}));return {task:publicTask(store.get('task',task.id))};
     }
     if(!['pause','cancel'].includes(action))throw agentError('CONTROL_INVALID','未知任务控制操作');
@@ -144,7 +146,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!review.canApprove)throw agentError('BLOCKING_ISSUES','结果仍有待处理异常，不能正式提交',409);
     if(!canReview(task,actor))throw agentError('TASK_PERMISSION_REQUIRED','当前人员没有批准这些业务操作的权限',403);
     if(typeof signApproval!=='function')throw agentError('APPROVAL_UNAVAILABLE','主机尚未配置受控提交签名',503);
-    for(const step of result.prepared){const adapter=adapterMap.get(step.module),actual=await binding(adapter,context(task,actor));if(canonicalJson(actual)!==canonicalJson(step.binding)){store.update('task',task.id,{status:'waiting_input',review:null,question:'账本已变化，请重新生成结果后复核'});emit(task.id,'review.invalidated',{reason:'source_changed'});throw agentError('REVIEW_DATA_CHANGED','账本已变化，请重新生成结果',409);}}
+    for(const step of result.prepared){const adapter=adapterMap.get(step.module),actual=await binding(adapter,{...context(task,actor),capabilityId:step.capabilityId,capabilityInput:step.input});if(canonicalJson(actual)!==canonicalJson(step.binding)){store.update('task',task.id,{status:'waiting_input',review:null,question:'账本已变化，请重新生成结果后复核'});emit(task.id,'review.invalidated',{reason:'source_changed'});throw agentError('REVIEW_DATA_CHANGED','账本已变化，请重新生成结果',409);}}
     // Compare-and-swap before the first asynchronous submission. Only one reviewer wins.
     store.update('task',task.id,{status:'committing',approvedBy:actor.id},{expectedVersion:task.version});
     return commitSteps(task.id,result,actor);
@@ -157,7 +159,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       if(old){store.update('task',taskId,{status:'unknown'});return {task:publicTask(store.get('task',taskId))};}
       try{
         const fresh=await identity(actor);taskFor(taskId,fresh);if(!canReview(task,fresh))throw agentError('TASK_PERMISSION_REQUIRED','业务操作权限已经撤销',403);
-        const adapter=adapterMap.get(step.module),ctx={...context(task,fresh),capabilityId:step.capabilityId},actual=await binding(adapter,ctx);
+        const adapter=adapterMap.get(step.module),ctx={...context(task,fresh),capabilityId:step.capabilityId,capabilityInput:step.input},actual=await binding(adapter,ctx);
         if(canonicalJson(actual)!==canonicalJson(step.binding))throw agentError('REVIEW_DATA_CHANGED','账本在提交前变化，请重新复核',409);
         const issuedAt=now(),claims={v:1,approvalId:task.review.id,actorId:fresh.id,module:step.module,capabilityId:step.capabilityId,taskId,resultId:result.id,resultVersion:result.version,...step.binding,changeDigest:step.changeDigest,idempotencyKey:key,issuedAt,expiresAt:issuedAt+60000};
         const proof=await signApproval(claims,step.module);
@@ -170,20 +172,20 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       }catch(error){
         if(!store.effect(key)&&receipts.length&&error.code==='REVIEW_DATA_CHANGED'){
           const remaining=result.prepared.slice(result.prepared.indexOf(step)).map(s=>({module:s.module,capabilityId:s.capabilityId,input:s.input}));
-          store.update('result',result.id,{receipt:{state:'partial',receipts,verifiedAt:now()},issues:[...(result.issues||[]),{blocking:true,code:'REPREPARE_REQUIRED',message:'前序提交改变了账本，剩余操作需重新生成结果并复核。'}]});
+          updateResult(result.id,{receipt:{state:'partial',receipts,verifiedAt:now()},issues:[...(result.issues||[]),{blocking:true,code:'REPREPARE_REQUIRED',message:'前序提交改变了账本，剩余操作需重新生成结果并复核。'}]});
           store.update('task',taskId,{status:'waiting_input',review:null,completedStages:receipts,remainingOperations:remaining,question:'已核实前序提交。请继续生成剩余操作的新版本结果。'});emit(taskId,'review.invalidated',{reason:'preceding_commit_changed_revision',remainingOperations:remaining});return {task:publicTask(store.get('task',taskId)),result:publicResult(resultState(taskId))};
         }
         if(store.effect(key))store.finishEffect(key,'unknown',{module:step.module,code:error.code});
         store.update('task',taskId,{status:store.effect(key)||receipts.length?'unknown':'waiting_review',error:error.message});emit(taskId,'commit.blocked',{code:error.code,message:error.message});return {task:publicTask(store.get('task',taskId)),result:publicResult(resultState(taskId))};
       }
     }
-    store.update('result',result.id,{receipt:{state:'verified',receipts,verifiedAt:now()}});store.update('task',taskId,{status:'completed',review:null});emit(taskId,'task.completed',{receiptCount:receipts.length});return {task:publicTask(store.get('task',taskId)),result:publicResult(resultState(taskId))};
+    updateResult(result.id,{receipt:{state:'verified',receipts,verifiedAt:now()}});store.update('task',taskId,{status:'completed',review:null});emit(taskId,'task.completed',{receiptCount:receipts.length});return {task:publicTask(store.get('task',taskId)),result:publicResult(resultState(taskId))};
   }
   async function reconcile(task,actor){
     const result=resultState(task.id);if(!result)throw agentError('RESULT_NOT_FOUND','缺少待核对结果',409);
     let unknown=false;const receipts=[];
     for(const step of result.prepared){const key=agentDigest({taskId:task.id,resultId:result.id,version:task.review?.resultVersion||result.version,stepId:step.id}),effect=store.effect(key);if(!effect){unknown=true;continue;}if(effect.state==='completed'){receipts.push(effect.receipt);continue;}const response=await adapterMap.get(step.module).receipt(key,context(task,actor));if(verifiedReceipt(response,key)){store.finishEffect(key,'completed',{receipt:response.receipt,module:step.module});receipts.push(response.receipt);}else unknown=true;}
-    if(!unknown){store.update('result',result.id,{receipt:{state:'verified',receipts,verifiedAt:now()}});store.update('task',task.id,{status:'completed',review:null});emit(task.id,'task.completed',{reconciled:true});}
+    if(!unknown){updateResult(result.id,{receipt:{state:'verified',receipts,verifiedAt:now()}});store.update('task',task.id,{status:'completed',review:null});emit(task.id,'task.completed',{reconciled:true});}
     return {task:publicTask(store.get('task',task.id)),result:publicResult(resultState(task.id))};
   }
   const scheduler=createAgentScheduler({store,createTask:(input,actor)=>createTask(input,actor,{internalId:input.id}),resolveActor,now,next:scheduleNext});
@@ -193,7 +195,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(operation==='status')return {actor:{...actor,label:actor.label||actor.login||actor.id,canCreateTasks:true,canManageSettings:actor.role==='admin'},environment,engines:await Promise.all(['codex','hermes'].map(async id=>({id,...await engines[id]?.check?.(),configured:settings.get().company.hasKey}))),capabilities:await capabilities(actor)};
     if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');return createTask(payload,actor);}
     if(operation==='tasks.list')return {tasks:store.list('task').filter(t=>(actor.role==='admin'||t.ownerId===actor.id||t.assigneeId===actor.id)&&t.scope.modules.every(m=>allowedModule(actor,m))).map(publicTask)};
-    if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:publicTask(task),events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
+    if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:{...publicTask(task),review},events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
     if(operation==='tasks.control')return control(payload.taskId,payload.action,actor,payload);
     if(operation==='tasks.input'){
       const task=taskFor(payload.taskId,actor);if(task.status==='unknown')throw agentError('OUTCOME_UNKNOWN','请先核对提交回执，再补充新的要求',409);if(live.has(task.status))throw agentError('TASK_BUSY','请先暂停任务再补充要求',409);
