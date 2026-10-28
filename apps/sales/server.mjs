@@ -4,6 +4,10 @@ import {installWorkbenchMigration} from './lib/workbench-migration-routes.mjs';
 import {createWorkbenchMigration} from './lib/workbench-migration.mjs';
 import {installWorkbenchAudit} from './lib/workbench-module.mjs';
 import {installSalesEdits} from './lib/integration-edits.mjs';
+import {installAgentService} from './lib/agent-service.mjs';
+import {createSalesAgentActions,authorizeSalesAgent} from './lib/agent-actions.mjs';
+import {salesAgentCapabilities} from './lib/agent-adapter.mjs';
+import {createSalesCainiao} from './lib/agent-cainiao.mjs';
 import {ServiceManager} from './lib/service-manager.mjs';
 import {createPersonnel} from './lib/personnel.mjs';
 import {deleteEmptyShop} from './lib/shops.mjs';
@@ -28,15 +32,19 @@ import {runJob,sourceStatus,duePeriods} from './lib/jobs.mjs';
 import {stagePdd,pddPreview,commitPdd,pddFundsReport,pddStatementYear,setAttribution,unassignedBatches,movementsPage,movementRows,movementDetail,saveReference} from './lib/pdd.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
-export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false}={}) {
+export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,cainiaoBrowser,cainiaoOptions={}}={}) {
   const s=openStore(dataDir),app=express(),token=randomBytes(32).toString('hex'),personnel=createPersonnel(s);
+  const cainiao=createSalesCainiao({store:s,browser:cainiaoBrowser,...cainiaoOptions});
+  s.agentTransactionGuard=()=>{if(cainiao.manager.active)throw fail('云仓下载仍在归档，请完成或暂停后提交业务',409,'BACKGROUND_TASK_BUSY');};
   const integration=installLocalIntegration(app,{id:'wucheng-sales-desk',version:JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version,root,dataDir,authorize:personnel.authorize,busy:()=>edits.busy()||!!s.get("SELECT 1 FROM jobs WHERE state IN ('running','pending') LIMIT 1"),capabilities:['report.read','ledger.read','overview.open','edits.prepare','edits.review-ui']});
   const edits=installSalesEdits(integration,s);
+  integration.agentBlocked=()=>edits.busy()||!!s.get("SELECT 1 FROM jobs WHERE state='running' LIMIT 1");
   integration.router.get('/report',(q,r)=>r.json(report(s,q.query)));
   integration.router.get('/ledger',(q,r)=>r.json({rows:monthData(s,month(q.query.month)).ledger}));
   integration.router.post('/overview/open',async(q,r)=>r.json(q.workbenchActor?{route:'/apps/overview/'}:await new ServiceManager().ensure('overview')));
   installWorkbenchMigration(integration,s,createWorkbenchMigration);installWorkbenchAudit(integration,s);
   integration.finish();
+  const agent=installAgentService({app,integration,store:s,module:'sales',capabilities:salesAgentCapabilities,actions:createSalesAgentActions({store:s,personnel,cainiao}),authorize:authorizeSalesAgent,backup:()=>makeBackup(s,'before-agent-commit')});
   app.disable('x-powered-by');
   app.use((req,res,next)=>{
     const allowed=[`127.0.0.1:${port}`,`localhost:${port}`];
@@ -127,15 +135,15 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false}
   app.use('/vendor/chart',express.static(path.join(root,'node_modules/chart.js/dist')));
   app.use('/vendor/tabulator',express.static(path.join(root,'node_modules/tabulator-tables/dist')));
   app.use(express.static(path.join(root,'public')));integration.workbench.finalize();
-  app.use((err,q,r,next)=>{const msg=String(err.message||'');const locked=msg.includes('MONTH_LOCKED'),constraint=msg.includes('constraint');const message=locked?'月份已锁定，原件可保留待处理；如需改动请先明确解锁。':constraint?'记录重复或存在关联关系，请核对业务编号与匹配记录。':err.status?msg:err.code==='LIMIT_FILE_SIZE'?'文件超过 25 MB':['LIMIT_FILE_COUNT','LIMIT_UNEXPECTED_FILE'].includes(err.code)?'附件数量超限或附件字段无效': '操作未完成，请检查文件格式和填写内容。';if(!err.status&&!locked&&!constraint)console.error(err.stack);r.status(locked?423:err.status||400).json({error:message,code:locked?'MONTH_LOCKED':err.code||'FAILED',...(err.details?{details:err.details}:{})});});
-  return {app,store:s,integration};
+  app.use((err,q,r,next)=>{const msg=String(err.message||'');const locked=msg.includes('MONTH_LOCKED'),constraint=msg.includes('constraint');const status=err.status||err.statusCode;const message=locked?'月份已锁定，原件可保留待处理；如需改动请先明确解锁。':constraint?'记录重复或存在关联关系，请核对业务编号与匹配记录。':status?msg:err.code==='LIMIT_FILE_SIZE'?'文件超过 25 MB':['LIMIT_FILE_COUNT','LIMIT_UNEXPECTED_FILE'].includes(err.code)?'附件数量超限或附件字段无效': '操作未完成，请检查文件格式和填写内容。';if(!status&&!locked&&!constraint)console.error(err.stack);r.status(locked?423:status||400).json({error:message,code:locked?'MONTH_LOCKED':err.code||'FAILED',...(err.details?{details:err.details}:{})});});
+  return {app,store:s,integration,agent,cainiao};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const port=Number(process.env.SALES_PORT||17869),{app,store,integration}=createApp({port,dataDir:process.env.SALES_DATA_DIR||path.join(root,'data'),demo:process.env.SALES_DEMO==='1'});
+  const port=Number(process.env.SALES_PORT||17869),{app,store,integration,cainiao}=createApp({port,dataDir:process.env.SALES_DATA_DIR||path.join(root,'data'),demo:process.env.SALES_DEMO==='1'});
   const server=app.listen(port,'127.0.0.1',err=>{
     if(err){console.error(`Sales desk failed to listen on ${port}: ${err.code||err.message}`);store.close();process.exitCode=1;return;}
     console.log(`灵兔电商销售台 http://127.0.0.1:${port}`);
   });
   integration.attach(server);
-  const shutdown=()=>server.close(()=>{store.close();process.exit(0);});integration.onStop=shutdown;process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
+  const shutdown=()=>server.close(async()=>{await cainiao.close();store.close();process.exit(0);});integration.onStop=shutdown;process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
 }

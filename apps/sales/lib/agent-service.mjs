@@ -1,0 +1,70 @@
+import {randomUUID,createHash} from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import Ajv from 'ajv';
+import {agentDigest,canonicalJson,agentError,verifyAgentApproval,approvalFromHeaders} from './agent-approval.mjs';
+
+// Mirrored into independently packaged modules; never imports the host runtime.
+export function installAgentService({app,integration,store:s,module,capabilities,actions,authorize,binding,backup}){
+ const db=s.db,r=integration.router,prefix='/api/integration/v1/agent/';let busy=false;
+ integration.agentBusy=()=>busy;
+ const bind=binding||(()=>({dataSetId:integration.state.dataSetId,revision:integration.state.revision}));
+ db.exec(`CREATE TABLE IF NOT EXISTS agent_preparations(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,task_id TEXT NOT NULL,capability_id TEXT NOT NULL,input_json TEXT NOT NULL,domain_json TEXT NOT NULL,public_json TEXT NOT NULL,binding_json TEXT NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS agent_receipts(idempotency_key TEXT PRIMARY KEY,preparation_id TEXT UNIQUE NOT NULL,actor_id TEXT NOT NULL,request_hash TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS agent_artifacts(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,filename TEXT NOT NULL,mime TEXT NOT NULL,sha256 TEXT NOT NULL,bytes INTEGER NOT NULL,path TEXT NOT NULL);`);
+ const caps=new Map(capabilities.map(c=>[c.id,c])),ajv=new Ajv({allErrors:true,strict:false}),validators=new Map(capabilities.map(c=>[c.id,ajv.compile(c.inputSchema)]));
+ const validate=(c,input)=>{const fn=validators.get(c.id);if(!fn(input))throw agentError('AGENT_INPUT_SCHEMA','业务参数无效：'+ajv.errorsText(fn.errors),400);};
+ const publicValue=v=>{if(Array.isArray(v))return v.map(publicValue);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).filter(([k])=>!['dataBase64','original_path','evidence_path','filePath','root','keyFile','integrationKey','workbenchKey','token','dataDir','profileDir','nodePath','exe'].includes(k)).map(([k,x])=>[k,publicValue(x)]));if(typeof v==='string'&&/^[a-z]:[\\/]/i.test(v))return '[本机私有路径]';return v;};
+ if(!db.prepare('PRAGMA table_info(agent_artifacts)').all().some(c=>c.name==='grant_json'))db.exec("ALTER TABLE agent_artifacts ADD COLUMN grant_json TEXT NOT NULL DEFAULT '{}'");
+ const financialState=()=>agentDigest(['ledger','operations','matches','freight_records','freight_attachments','bills','payments','coverage','month_locks','month_history','snapshots','overrides','shops','imports','rates','platform_references','batch_attributions','sales_staff_handoffs'].filter(name=>db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)).map(name=>({name,rows:db.prepare('SELECT * FROM "'+name+'"').all().map(canonicalJson).sort()})));
+ const cap=id=>{const c=caps.get(id);if(!c)throw agentError('AGENT_CAPABILITY_UNKNOWN','此业务能力未开通',404);return c;};
+ const actor=q=>{const a=q.workbenchActor;if(!a?.id||!a.modules?.includes(module)||a.module!==module)throw agentError('AGENT_ACTOR_REQUIRED','Agent 业务接口必须使用真实签名人员身份',403);return a;};
+ const permit=(q,c,phase,input)=>{const a=actor(q);if(phase!=='query'&&(a.role==='viewer'||!a.canRunTasks))throw agentError('AGENT_PERMISSION_DENIED','当前人员不能准备或提交此业务',403);authorize?.(a,c,phase,input);return a;};
+ const idle=()=>{if(busy||integration.agentBlocked?.())throw agentError('AGENT_COMMIT_BUSY','业务提交中，请稍后重读状态',409);};
+ const clean=input=>{const visit=v=>{if(!v||typeof v!=='object')return;for(const[k,x]of Object.entries(v)){if(['actor','approval','confirmed','trustedUi','role','commitData','confirmation','review_token'].includes(k))throw agentError('AGENT_INPUT_FORBIDDEN','模型不能提供身份、审批或内部提交数据');visit(x);}};if(!input||typeof input!=='object'||Array.isArray(input))throw agentError('AGENT_INPUT_INVALID','业务输入必须为对象');visit(input);return JSON.parse(JSON.stringify(input));};
+ const putFile=(value,a,grant)=>{const bytes=value.bytes||value.buffer,id=randomUUID(),filename=path.basename(value.filename||'business-export.bin'),relative=path.join('agent-artifacts',id);fs.mkdirSync(path.join(s.dir,'agent-artifacts'),{recursive:true});fs.writeFileSync(path.join(s.dir,relative),bytes,{flag:'wx'});const sha256=createHash('sha256').update(bytes).digest('hex');db.prepare('INSERT INTO agent_artifacts(id,actor_id,filename,mime,sha256,bytes,path,grant_json) VALUES(?,?,?,?,?,?,?,?)').run(id,a.id,filename,value.mime||'application/octet-stream',sha256,bytes.length,relative,JSON.stringify(grant));return {id,filename,mime:value.mime||'application/octet-stream',sha256,bytes:bytes.length,url:prefix+'files/'+id};};
+ const context=(q,taskId)=>({actor:actor(q),taskId,signal:undefined,
+   publishFile(value,capabilityId=module+'.backup'){return putFile(value,actor(q),{capabilityId,input:{}});},
+   stageFile(input){if(typeof input?.filename!=='string'||!/\.(csv|tsv|xlsx|xls|zip|pdf|png|jpg|jpeg|webp)$/i.test(input.filename)||typeof input.dataBase64!=='string')throw agentError('AGENT_FILE_INVALID','原件格式无效');const bytes=Buffer.from(input.dataBase64,'base64');if(!bytes.length||bytes.length>25*1024*1024||createHash('sha256').update(bytes).digest('hex')!==input.sha256)throw agentError('AGENT_FILE_INVALID','原件大小或摘要不符');return putFile({filename:input.filename,bytes},actor(q),{kind:'source',taskId,capabilityId:module+'.file-stage',input:{}});},
+   resolveFile(id){const file=db.prepare('SELECT * FROM agent_artifacts WHERE id=? AND actor_id=?').get(id,actor(q).id),grant=file&&JSON.parse(file.grant_json);if(!file||grant.kind!=='source'||grant.taskId!==taskId)throw agentError('AGENT_FILE_SCOPE','原件不属于当前人员和任务',403);const bytes=fs.readFileSync(path.join(s.dir,file.path));if(createHash('sha256').update(bytes).digest('hex')!==file.sha256)throw agentError('AGENT_FILE_CHANGED','原件已变化',409);return {filename:file.filename,sha256:file.sha256,dataBase64:bytes.toString('base64')};}
+ });
+ const encode=async(value,a,grant)=>{
+   if(value&&typeof value==='object'&&(Buffer.isBuffer(value.bytes)||Buffer.isBuffer(value.buffer)))return {artifact:putFile(value,a,grant)};
+   return value;
+ };
+ app.use((q,res,next)=>{if(busy&&!q.path.startsWith(prefix))return res.status(503).json({error:'正在原子提交 Agent 业务，请稍后重试',code:'AGENT_COMMIT_BUSY'});next();});
+ r.get('/agent/binding',async(q,res)=>{actor(q);idle();res.json(await bind());});
+ r.get('/agent/query',async(q,res)=>{idle();let input;try{input=clean(JSON.parse(q.query.input||'{}'));}catch(e){if(e.code)throw e;throw agentError('AGENT_INPUT_INVALID','查询参数无效');}const c=cap(q.query.capabilityId);if(c.kind!=='query')throw agentError('AGENT_QUERY_INVALID','写入能力必须先准备并复核');const a=permit(q,c,'query',input);validate(c,input);const result=publicValue(await encode(await actions.query(c.id,input,context(q,q.query.taskId||q.headers['x-erp-agent-task-id']||'')),a,{capabilityId:c.id,input}));res.json({...(!Array.isArray(result)&&typeof result==='object'?result:{data:result}),summary:c.title,scope:{module},blocks:result?.artifact?[{type:'download',...result.artifact}]:[{type:'table',title:c.title,rows:Array.isArray(result)?result:[result]}],evidence:result?.artifact?[{sha256:result.artifact.sha256,filename:result.artifact.filename}]:[]});});
+ r.get('/agent/files/:id',(q,res)=>{idle();const a=actor(q),file=db.prepare('SELECT * FROM agent_artifacts WHERE id=? AND actor_id=?').get(q.params.id,a.id);if(!file)throw agentError('AGENT_ARTIFACT_NOT_FOUND','文件不存在或不属于当前人员',404);const grant=JSON.parse(file.grant_json);permit(q,cap(grant.capabilityId),'query',grant.input||{});const absolute=path.resolve(s.dir,file.path);if(!absolute.startsWith(path.resolve(s.dir,'agent-artifacts')+path.sep))throw agentError('AGENT_ARTIFACT_INVALID','文件路径无效');if(createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')!==file.sha256)throw agentError('AGENT_FILE_CHANGED','文件摘要已变化',409);res.download(absolute,file.filename);});
+ r.post('/agent/prepare',async(q,res)=>{
+   idle();const input=clean(q.body.input||{}),c=cap(q.body.capabilityId),a=permit(q,c,'prepare',input);validate(c,input);if(c.kind!=='prepare')throw agentError('AGENT_PREPARE_INVALID','只读能力不需要准备');const taskId=String(q.body.taskId||q.headers['x-erp-agent-task-id']||'');if(!taskId||taskId.length>300)throw agentError('AGENT_TASK_REQUIRED','缺少可信任务编号');
+   busy=true;try{const before=await bind(),financialBefore=c.requiresReview===false?financialState():null,output=await actions.prepare(c.id,input,context(q,taskId));
+     if(c.requiresReview===false){if(financialState()!==financialBefore)throw agentError('AGENT_UNREVIEWED_WRITE','非人审步骤不得改变正式业务数据',500);return res.json(publicValue({summary:output.summary||c.title,scope:output.scope||{module},blocks:output.blocks||[],evidence:output.evidence||[],changes:[],issues:output.issues||[]}));}
+     if(output?.commitData===undefined)throw agentError('AGENT_PREPARATION_INVALID','模块未生成真实提交草稿',500);if(canonicalJson(await bind())!==canonicalJson(before))throw agentError('AGENT_PREPARE_CHANGED','准备过程改变了正式业务修订，需要重新检查',409);
+     const id=randomUUID(),publicOutput=publicValue({summary:output.summary||c.title,scope:output.scope||{module},blocks:output.blocks||[],evidence:output.evidence||[],changes:output.changes||[],issues:output.issues||[],commitData:{preparationId:id}});
+     db.prepare('INSERT INTO agent_preparations VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,a.id,taskId,c.id,JSON.stringify(input),JSON.stringify(output.commitData),JSON.stringify(publicOutput),JSON.stringify(before),'prepared',new Date().toISOString());res.json(publicOutput);
+   }finally{busy=false;}
+ });
+ r.get('/agent/receipts/:key',(q,res)=>{const a=actor(q);if(busy)return res.json({state:'pending',idempotencyKey:q.params.key,receipt:null});const row=db.prepare('SELECT r.payload,p.capability_id,p.input_json FROM agent_receipts r JOIN agent_preparations p ON p.id=r.preparation_id WHERE r.idempotency_key=? AND r.actor_id=?').get(q.params.key,a.id);if(row)permit(q,cap(row.capability_id),'query',JSON.parse(row.input_json));res.json(row?{state:'completed',idempotencyKey:q.params.key,receipt:JSON.parse(row.payload)}:{state:'unknown',idempotencyKey:q.params.key,receipt:null});});
+ r.post('/agent/commit',async(q,res)=>{
+   idle();const a=actor(q),prepared=q.body.prepared,id=prepared?.commitData?.preparationId,row=id&&db.prepare('SELECT * FROM agent_preparations WHERE id=?').get(id);if(!row||row.actor_id!==a.id)throw agentError('AGENT_PREPARATION_NOT_FOUND','草稿不存在或不属于当前人员',404);
+   const c=cap(row.capability_id),input=JSON.parse(row.input_json),publicOutput=JSON.parse(row.public_json),before=JSON.parse(row.binding_json);permit(q,c,'commit',input);
+   const taskId=row.task_id,key=String(q.headers['idempotency-key']||'');if(!key||key.length>300)throw agentError('AGENT_IDEMPOTENCY_REQUIRED','缺少提交幂等编号');
+   if(prepared.capabilityId!==c.id||canonicalJson(prepared.input)!==canonicalJson(input)||canonicalJson(prepared.changes||[])!==canonicalJson(publicOutput.changes)||canonicalJson(prepared.binding)!==canonicalJson(before))throw agentError('AGENT_PREPARATION_MISMATCH','提交内容与服务端草稿不符',409);
+   if(publicOutput.issues.some(i=>i.blocking===true))throw agentError('AGENT_PREPARATION_BLOCKED','本次结果仍有阻断项',409);
+   const proof=approvalFromHeaders(q.headers);let claims;try{claims=JSON.parse(Buffer.from(proof.payload,'base64url'));}catch{throw agentError('AGENT_APPROVAL_INVALID','审批证明无效',403);}
+   const digest=agentDigest({capabilityId:c.id,input,commitData:publicOutput.commitData,changes:publicOutput.changes});
+   verifyAgentApproval(proof,integration.workbench.key,{actorId:a.id,module,capabilityId:c.id,taskId,resultId:claims.resultId,resultVersion:claims.resultVersion,...before,changeDigest:digest,idempotencyKey:key});
+   const requestHash=agentDigest({id,actorId:a.id,taskId,digest,before}),existing=db.prepare('SELECT * FROM agent_receipts WHERE idempotency_key=?').get(key);
+   if(existing){if(existing.actor_id!==a.id||existing.request_hash!==requestHash)throw agentError('AGENT_IDEMPOTENCY_REUSED','此提交编号已用于其他内容',409);return res.json({state:'completed',idempotencyKey:key,receipt:JSON.parse(existing.payload)});}
+   if(row.state!=='prepared')throw agentError('AGENT_PREPARATION_USED','本草稿已提交，请查询原回执',409);
+   busy=true;try{
+     if(canonicalJson(await bind())!==canonicalJson(before))throw agentError('AGENT_BINDING_CHANGED','账本或来源在复核后发生变化',409);
+     const financialBeforeBackup=financialState();const backupResult=backup?await backup():null;if(financialState()!==financialBeforeBackup)throw agentError('AGENT_BINDING_CHANGED','备份期间业务数据发生变化，请重新复核',409);
+     const run=async()=>{const result=await actions.commit(JSON.parse(row.domain_json),{...context(q,taskId),approval:proof,idempotencyKey:key,backup:backupResult});const verification=actions.verify?await actions.verify(JSON.parse(row.domain_json),result,context(q,taskId)):null;if(verification?.ok!==true)throw agentError('AGENT_READBACK_FAILED','业务回读未通过',500);const after=await bind();const receipt={id:randomUUID(),module,capabilityId:c.id,taskId,actorId:a.id,idempotencyKey:key,dataSetId:before.dataSetId,beforeRevision:before.revision,afterRevision:after.revision,result:publicValue(await encode(result,a,{capabilityId:c.id,input})),verification,backup:backupResult,createdAt:new Date().toISOString()};db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?,?,?)').run(key,id,a.id,requestHash,JSON.stringify(receipt),receipt.createdAt);db.prepare("UPDATE agent_preparations SET state='committed' WHERE id=?").run(id);return receipt;};
+     if(typeof s.agentTransaction!=='function')throw agentError('AGENT_ATOMICITY_UNAVAILABLE','模块缺少原子业务回执事务',503);
+     res.json({state:'completed',idempotencyKey:key,receipt:await s.agentTransaction(run)});
+   }finally{busy=false;}
+ });
+ return {busy:()=>busy};
+}
