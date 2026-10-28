@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {createCanvas,GlobalFonts} from '@napi-rs/canvas';
 import {openStore} from '../lib/store.mjs';
 import {createPurchaseAgentFiles} from '../lib/agent-files.mjs';
@@ -34,7 +34,7 @@ test('persistent table analyze/remap/review imports real source once, isolates o
 });
 test('real local OCR persists progress/result, preserves originals as order attachments and marks restart interruption',{timeout:120000},async t=>{
  const {files,store,dir}=fixture(t);GlobalFonts.registerFromPath('C:/Windows/Fonts/msyh.ttc','AgentChinese');const canvas=createCanvas(1500,1000),c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,1500,1000);c.fillStyle='#111';c.font='42px AgentChinese';['订单号: AGENTOCR20261028001','日期: 2026-10-16','供应商: 五金配件店','商品: 螺丝','数量: 2','实付金额: 123.45'].forEach((l,i)=>c.fillText(l,80,100+i*120));const buffer=canvas.toBuffer('image/png'),file=put(files,buffer,'采购单.png'),start=await files.ops['ocr.start'].execute({fileIds:[file.fileId]},ctx('ocr-start'));
- const again=await files.ops['ocr.start'].execute({fileIds:[file.fileId]},ctx('ocr-start'));assert.equal(again.data.jobId,start.data.jobId);let job;for(let i=0;i<500;i++){job=files.ops['ocr.status'].query({jobId:start.data.jobId},ctx());if(job.status!=='running')break;await new Promise(r=>setTimeout(r,150));}assert.equal(job.status,'done',job.error);assert.equal(job.progress,100);assert.equal(job.result.order.amountCents,12345);assert.equal(store.list().length,0);
+ const again=await files.ops['ocr.start'].execute({fileIds:[file.fileId]},ctx('ocr-start'));assert.equal(again.data.jobId,start.data.jobId);let job;for(let i=0;i<500;i++){job=files.ops['ocr.status'].query({jobId:start.data.jobId},ctx());if(job.status!=='running')break;await new Promise(r=>setTimeout(r,150));}assert.equal(job.status,'done',job.error);assert.equal(job.progress,100);assert.equal(job.result.order.amountCents,12345);assert.equal(store.list().length,0);files.close();assert.equal(files.ops['ocr.status'].query({jobId:job.jobId},ctx()).status,'done');
  const input={jobId:job.jobId,order:{...job.result.order,platform:'微信',account:'OCR测试号',status:'已完成'}},detail=await files.ops['ocr.commit'].prepare(input,ctx('ocr-stage'));const result=store.transaction(()=>files.ops['ocr.commit'].commit(input,detail.commitData,ctx()));assert.equal(result.imported,1);const order=store.list()[0];assert.equal(order.amountCents,12345);assert.equal(order.attachmentIds.length,1);assert.deepEqual(fs.readFileSync(store.attachments.resource(order.attachmentIds[0],'full').path),buffer);
  const pending={jobId:'interrupted-synthetic-state',status:'running',progress:45};store.db.prepare('INSERT INTO agent_ocr_jobs VALUES(?,?,?)').run(pending.jobId,owner,JSON.stringify(pending));const reopened=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>reopened.close());assert.equal(reopened.ops['ocr.status'].query({jobId:pending.jobId},ctx()).status,'interrupted');assert.equal(reopened.ops['ocr.status'].query({jobId:job.jobId},ctx()).result.order.amountCents,12345);
 });
@@ -45,4 +45,17 @@ test('locks and content hashes reject stale or damaged source without creating o
  await store.monthLocks.setPassword({password:'Agent-files-isolated-29487',confirmation:'Agent-files-isolated-29487'});store.monthLocks.confirm(store.monthLocks.preview('2026-06','微信'));
  assert.equal(files.ops['import.preview'].query({previewId:p.previewId},ctx()).summary.locked,1);assert.throws(()=>files.ops['import.commit'].prepare({previewId:p.previewId,indices:[0]},ctx()),/锁定/);assert.throws(()=>store.transaction(()=>files.ops['import.commit'].commit({},prepared.commitData,ctx())),{code:'MONTH_LOCKED'});assert.equal(fs.readdirSync(path.join(dir,'originals')).length,0);assert.equal(store.list().length,0);
  fs.writeFileSync(path.join(dir,'agent-files',file.fileId),'tampered');assert.throws(()=>files.resource(file.fileId,ctx()),/摘要不符/);
+});
+
+test('9MiB chunk upload survives restart, binds owner and offsets, verifies full hash and deduplicates real bytes',async t=>{
+ const {files,store,dir}=fixture(t),buffer=Buffer.alloc(9*1024*1024,0x5a),sha256=createHash('sha256').update(buffer).digest('hex'),base={filename:'large-original.pdf',totalBytes:buffer.length,sha256},first={...base,offset:0,dataBase64:buffer.subarray(0,8*1024*1024).toString('base64')};
+ const p=files.uploadPart(first,ctx('part-first'));assert.equal(p.state,'uploading');assert.equal(p.nextOffset,8*1024*1024);assert.equal(p.fileId,undefined);assert.deepEqual(files.uploadPart(first,ctx('part-first')),p);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_file_parts').get().n,1);files.close();
+ const restored=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>restored.close());
+ assert.throws(()=>restored.uploadPart({...base,uploadId:p.uploadId,offset:p.nextOffset+1,dataBase64:Buffer.from('x').toString('base64')},ctx()),/偏移不连续/);
+ assert.throws(()=>restored.uploadPart({...base,uploadId:p.uploadId,offset:p.nextOffset,dataBase64:buffer.subarray(p.nextOffset).toString('base64')},ctx('other-owner','other-owner')),/不属于/);
+ const final={...base,uploadId:p.uploadId,offset:p.nextOffset,dataBase64:buffer.subarray(p.nextOffset).toString('base64')},done=restored.ops['files.upload.part'].execute(final,ctx('part-final')).data;assert.equal(done.state,'completed');assert.equal(done.bytes,buffer.length);assert.equal(done.sha256,sha256);assert.deepEqual(restored.resource(done.fileId,ctx()).buffer,buffer);
+ assert.deepEqual(restored.uploadPart(final,ctx('part-final')),done);assert.equal(restored.uploadPart({...first,uploadId:p.uploadId},ctx('replayed-first')).fileId,done.fileId);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_files').get().n,1);assert.equal(fs.readdirSync(path.join(dir,'agent-files')).filter(n=>n.endsWith('.part')).length,0);
+ assert.throws(()=>restored.uploadPart({...base,offset:0,totalBytes:50*1024*1024+1,dataBase64:'eA=='},ctx()),/50MiB/);
+ assert.throws(()=>restored.uploadPart({...base,offset:0,dataBase64:buffer.toString('base64')},ctx()),/8MiB/);
+ assert.throws(()=>restored.uploadPart({filename:'bad.bin',totalBytes:3,offset:0,dataBase64:'YWJj',sha256:'0'.repeat(64)},ctx()),/完整文件摘要不符/);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_files').get().n,1);
 });
