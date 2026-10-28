@@ -1,0 +1,4 @@
+# Reviewed synthetic idempotency key in gateway retry test; not an API credential.
+# Match only this baseline commit, file, rule and line. No production paths excluded.
+bbff8c3f139fc63f5fb0dd7648a9bb60e0885079:tests/workbench-gateway.test.mjs:generic-api-key:79
+tests/workbench-gateway.test.mjs:generic-api-key:79
