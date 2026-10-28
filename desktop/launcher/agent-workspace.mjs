@@ -6,6 +6,8 @@ const $ = id => document.getElementById(id);
 const make = (tag, text = '', className = '') => Object.assign(document.createElement(tag), {textContent:String(text ?? ''),className});
 const array = value => Array.isArray(value) ? value : [];
 const display = value => value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+const fieldLabels={id:'编号',name:'名称',filename:'文件名',fileId:'文件编号',artifactId:'结果文件编号',taskId:'任务编号',jobId:'处理任务编号',orderNo:'订单号',order_no:'订单号',platform:'平台',supplier:'供应商',date:'日期',month:'月份',period:'期间',status:'状态',state:'状态',amountCents:'金额（分）',refundCents:'退款（分）',amount:'金额（按来源单位）',moneyUnit:'金额单位',dateBasis:'日期口径',count:'数量',total:'总数',offset:'当前起始位置',nextOffset:'下一段起始位置',limit:'每段条数',message:'说明',summary:'摘要',issues:'待处理事项',operation:'操作',input:'业务参数',preview:'预演结果',action:'操作',revision:'数据修订',version:'版本',createdAt:'创建时间',updatedAt:'更新时间',sha256:'文件摘要',size:'字节数',bytes:'字节数',available:'可用',files:'文件',orders:'订单',entries:'记录',data:'明细',rows:'明细',result:'结果',sourceFingerprint:'来源摘要',attachments:'原件',before:'变更前',after:'变更后'};
+const fieldLabel = key => fieldLabels[key] || key;
 const when = value => {const date = new Date(value);return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN',{hour12:false});};
 const pending = new Set(['waiting_input','waiting_review','unknown']);
 const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,policy:null,policyRevision:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,connected:false};
@@ -175,13 +177,31 @@ async function controlTask(action) {
 function tableBlock(block) {
   const wrap=make('div','','table-wrap');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',block.title || '结果明细');
   const table=make('table'),head=make('thead'),headRow=make('tr'),body=make('tbody');
-  const columns=array(block.columns).map(column=>typeof column==='string'?{key:column,label:column}:column);
+  const rows=array(block.rows).map(row=>row&&typeof row==='object'&&!Array.isArray(row)?row:{value:row});
+  const columns=array(block.columns).length?block.columns.map(column=>typeof column==='string'?{key:column,label:fieldLabel(column)}:column):[...new Set(rows.flatMap(row=>Object.keys(row)))].map(key=>({key,label:fieldLabel(key),wrap:true}));
   for(const column of columns){const th=make('th',column.label || column.key,column.type==='number'||column.type==='money'?'numeric':'');th.scope='col';headRow.append(th);}
   head.append(headRow);
-  for(const row of array(block.rows)){
+  for(const row of rows){
     const tr=make('tr');for(const column of columns){const value=row?.[column.key];const td=make('td',display(value),column.type==='number'||column.type==='money'||typeof value==='number'?'numeric':column.wrap?'wrap':'');tr.append(td);}body.append(tr);
   }
-  table.append(head,body);wrap.append(table);return wrap;
+  table.append(head,body);wrap.append(table);if(!rows.length)wrap.append(make('p','本次查询没有返回记录。','fine-print'));return wrap;
+}
+function structuredValue(value,depth=0) {
+  if(value==null || typeof value!=='object')return make('span',display(value));
+  if(depth>6)return make('pre',JSON.stringify(value,null,2));
+  if(Array.isArray(value)){
+    if(value.every(row=>row&&typeof row==='object'&&!Array.isArray(row)))return tableBlock({rows:value});
+    const list=make('ul');for(const item of value){const row=make('li');row.append(structuredValue(item,depth+1));list.append(row);}return list;
+  }
+  const list=make('dl','','structured-result');
+  for(const [key,item]of Object.entries(value)){
+    if(key==='downloadUrl')continue;
+    const term=make('dt',fieldLabel(key)),description=make('dd');
+    if(item&&typeof item==='object'){const details=make('details','','record-details');details.append(make('summary',Array.isArray(item)?`${item.length} 条记录`:'展开查看'),structuredValue(item,depth+1));description.append(details);}else description.append(make('span',display(item)));
+    list.append(term,description);
+  }
+  if(value.artifactId){const description=make('dd');description.append(filesBlock([{...value,id:value.artifactId,name:value.name||value.filename}]));list.append(make('dt','结果文件'),description);}
+  return list;
 }
 function filesBlock(files) {
   const list=make('ul','','file-list');
@@ -208,12 +228,21 @@ function renderResult(detail) {
     else if(block.type==='metrics'){
       const metrics=make('div','','metrics');for(const metric of array(block.items || block.metrics)){const item=make('div','','metric');item.append(make('small',metric.label || metric.title),make('strong',display(metric.value)),make('small',metric.unit || metric.note || ''));metrics.append(item);}section.append(metrics);
     }else if(block.type==='files')section.append(filesBlock(block.files || block.items));
-    else section.append(make('p',block.text || block.content || block.message || '','result-text'));
+    else if(['file','download'].includes(block.type)){
+      if(block.artifactId)section.append(filesBlock([{...block,id:block.artifactId,name:block.name||block.filename}]));
+      else section.append(make('p',block.name || block.filename || '业务原件'),make('p','此文件尚未登记为可下载的任务结果，请补充要求让 AI 整理可下载原件。','fine-print'));
+      if(block.sha256)section.append(make('p','文件摘要：'+block.sha256,'fine-print'));
+    }else if(block.type==='json')section.append(structuredValue(block.data));
+    else if(block.type==='job')section.append(structuredValue(Object.fromEntries(Object.entries(block).filter(([key])=>!['type','title'].includes(key)))));
+    else if(['text',undefined].includes(block.type))section.append(make('p',block.text || block.content || block.message || '','result-text'));
+    else section.append(structuredValue(block));
     target.append(section);
   }
-  if(array(result.changes).length){const section=make('section','','result-block');section.append(make('h3','本次变更'),tableBlock({title:'变更前后',columns:[{key:'label',label:'项目',wrap:true},{key:'before',label:'变更前',wrap:true},{key:'after',label:'变更后',wrap:true}],rows:result.changes.map(change=>({label:change.label || change.title || change.field || ({assignment:'任务负责人'+(change.taskId?' · '+change.taskId:''),schedule:'定时任务',permissions:'人员权限'}[change.kind]) || change.operation || '变更',before:change.before,after:change.after}))}));target.append(section);}
+  if(array(result.changes).length){const section=make('section','','result-block');section.append(make('h3','本次变更'));const compared=result.changes.filter(change=>change&&typeof change==='object'&&(Object.hasOwn(change,'before')||Object.hasOwn(change,'after'))),other=result.changes.filter(change=>!compared.includes(change));
+    if(compared.length)section.append(tableBlock({title:'变更前后',columns:[{key:'label',label:'项目',wrap:true},{key:'before',label:'变更前',wrap:true},{key:'after',label:'变更后',wrap:true}],rows:compared.map(change=>({label:change.label || change.title || change.field || ({assignment:'任务负责人'+(change.taskId?' · '+change.taskId:''),schedule:'定时任务',permissions:'人员权限'}[change.kind]) || change.operation || '变更',before:change.before,after:change.after}))}));
+    for(const change of other)section.append(structuredValue(change));target.append(section);}
   if(array(result.issues).length){const issues=make('section','','result-issues');issues.append(make('h3','异常与需要关注的事项'));const list=make('ul');for(const issue of result.issues)list.append(make('li',typeof issue==='string'?issue:issue.message || issue.summary || issue.code));issues.append(list);target.append(issues);}
-  if(array(result.evidence).length){const section=make('section','','result-block');section.append(make('h3','来源与原件'));const list=make('ul','','evidence-list');for(const source of result.evidence){const li=make('li'),copy=make('div');copy.append(make('span',source.label || source.title || source.name || '业务来源'));if(source.note || source.period)copy.append(make('small',source.note || source.period));li.append(copy);if(source.artifactId)li.append(actionButton('查看原件',()=>void openArtifact(source.artifactId)));list.append(li);}section.append(list);target.append(section);}
+  if(array(result.evidence).length){const section=make('section','','result-block');section.append(make('h3','来源与原件'));const list=make('ul','','evidence-list');for(const source of result.evidence){const li=make('li'),copy=make('div');copy.append(make('span',source.label || source.title || source.name || source.filename || '业务来源'));if(source.note || source.period)copy.append(make('small',source.note || source.period));const details=make('details','','record-details');details.append(make('summary','查看来源、单位与范围'),structuredValue(source));copy.append(details);li.append(copy);if(source.artifactId)li.append(actionButton('查看原件',()=>void openArtifact(source.artifactId)));list.append(li);}section.append(list);target.append(section);}
   if(result.receipt){const receipt=make('section','','receipt'),verified=result.receipt.verified===true||result.receipt.state==='verified';receipt.append(make('h3',verified?'提交结果已核对':result.receipt.state==='partial'?'部分提交已核对':'提交回执'));receipt.append(make('p',result.receipt.message || result.receipt.summary || '已保存业务回执。'));if(result.receipt.id)receipt.append(make('p','回执编号：'+result.receipt.id));if(result.receipt.verified===false||['unknown','partial'].includes(result.receipt.state))receipt.append(make('p','其余业务结果仍需核对，当前不能视为全部提交完成。'));if(array(result.receipt.receipts).length){const records=make('details','','record-details');records.append(make('summary','查看 '+result.receipt.receipts.length+' 项业务回执'),make('pre',JSON.stringify(result.receipt.receipts,null,2)));receipt.append(records);}target.append(receipt);}
   renderReview(detail);
 }
@@ -320,7 +349,7 @@ function renderConnection(response) {
 }
 function clearConnectionPlan() {state.connectionPlan=null;$('connection-review').hidden=true;}
 function syncConnectionControls() {const enabled=state.connectionCanConfigure && !state.busy.has('connection');setFormEnabled($('connection-form'),enabled);$('confirm-connection').disabled=!enabled || !state.connectionPlan;}
-function connectionVisibility() {const mode=$('connection-mode').value;$('connection-url').required=mode==='client';$('connection-url').closest('label').hidden=mode!=='client';$('connection-provider').closest('label').hidden=mode!=='client';$('save-connection').textContent=mode==='server'?'查看连接变更':'保存连接';}
+function connectionVisibility() {const mode=$('connection-mode').value;$('connection-url').required=mode==='client';$('connection-url').closest('label').hidden=mode!=='client';$('connection-provider').closest('label').hidden=mode!=='client';$('save-connection').textContent=mode==='server'?'查看连接变更':'保存连接';$('private-network-tools').hidden=mode!=='client'||$('connection-provider').value!=='embedded'||typeof window.launcher?.networkLogin!=='function';}
 function connectionInput() {const mode=$('connection-mode').value;return {mode,networkProvider:$('connection-provider').value,serverUrl:mode==='client'?betaServerUrl($('connection-url').value):''};}
 async function connectionAction(action) {if(state.busy.has('connection'))return;$('error-banner').hidden=true;notice('');await run('connection',async()=>{syncConnectionControls();await action();});syncConnectionControls();}
 async function prepareConnection(form, renewed=false) {
@@ -352,6 +381,23 @@ async function confirmConnection() {
     try{await persistConnection({...proposal.form,networkToken:proposal.token});}
     catch(error){clearConnectionPlan();if(/请先审查本次私网配置差异|网络配置已变化，请重新审查/.test(errorMessage(error)) || ['NETWORK_PLAN_EXPIRED','NETWORK_PLAN_CHANGED'].includes(error.code)){await prepareConnection(proposal.form,true);return;}throw error;}
   });
+}
+function showNetworkStatus(result) {
+  const labels={'needs-login':'需要登录私网','needs-approval':'设备正在等待管理员批准','logged-out':'已退出私网',starting:'正在连接私网',stopped:'私网已停止',running:'私网已运行',error:'连接未完成',unavailable:'私网组件尚未就绪'};
+  $('private-network-state').textContent=result.loginOpened?'已打开官方登录页。完成验证后，点击“登录后重新连接”。':result.connected?'公司私网已连接':result.message || labels[result.state] || '暂未返回连接状态';
+}
+async function networkAction(action) {
+  await connectionAction(async()=>{
+    const method={login:'networkLogin',connect:'networkConnect',status:'networkStatus',logout:'networkLogout'}[action],invoke=window.launcher?.[method];
+    if(typeof invoke!=='function')throw new Error('当前终端不支持此私网操作');
+    const form=connectionInput();if(form.mode!=='client'||form.networkProvider!=='embedded')throw new Error('请选择员工客户端和内置私网连接');
+    const result=await invoke(...(['login','connect'].includes(action)?[form]:[]));showNetworkStatus(result||{});
+    if(action==='connect' || action==='logout')await refreshStatus().catch(showError);
+  });
+}
+async function diagnosticAction(action) {
+  const methods={read:'readLogs',copy:'copyLogs',export:'exportLogs'},button=$({read:'read-diagnostics',copy:'copy-diagnostics',export:'export-diagnostics'}[action]);
+  await run('diagnostics',async()=>{const invoke=window.launcher?.[methods[action]];if(typeof invoke!=='function')throw new Error('当前终端不支持主机诊断');const result=await invoke();if(action==='read')$('diagnostic-output').textContent=array(result.entries).map(entry=>'['+(entry.source||'主机')+'] '+(entry.text||entry.message||'')).join('\n') || '本次未返回日志记录。';else if(action==='copy' && result.copied!=null)notice('已复制 '+result.copied+' 条日志。');else if(action==='export' && result.exported===true)notice('诊断报告已导出：'+(result.filename||''));},[button]);
 }
 function renderSchedules() {
   $('schedule-list').replaceChildren(...state.schedules.map(schedule=>{
@@ -403,6 +449,8 @@ $('default-engine').addEventListener('change',()=>renderModelChoice());
 $('permissions-form').addEventListener('submit',savePermissions);$('add-member').addEventListener('click',()=>{$('member-rows').querySelector('.empty')?.remove();const row=memberRow();$('member-rows').append(row);row.querySelector('input').focus();});
 for(const id of ['connection-mode','connection-provider','connection-url'])$(id).addEventListener('input',()=>{clearConnectionPlan();connectionVisibility();});
 $('connection-mode').addEventListener('change',()=>{clearConnectionPlan();connectionVisibility();});$('connection-form').addEventListener('submit',saveConnection);$('confirm-connection').addEventListener('click',()=>void confirmConnection());$('cancel-connection').addEventListener('click',()=>{clearConnectionPlan();$('save-connection').focus();});$('check-connection').addEventListener('click',()=>void run('connection-check',async()=>{const result=await api.request('connection.check');$('connection-detail').textContent=result.detail || result.message || result.label || '连接检查已完成';await refreshStatus();},[$('check-connection')]));
+for(const action of ['login','connect','status','logout'])$('network-'+action).addEventListener('click',()=>void networkAction(action));
+$('local-diagnostics').hidden=typeof window.launcher?.readLogs!=='function';for(const action of ['read','copy','export'])$({read:'read-diagnostics',copy:'copy-diagnostics',export:'export-diagnostics'}[action]).addEventListener('click',()=>void diagnosticAction(action));
 $('new-schedule').addEventListener('click',()=>editSchedule());$('cancel-schedule').addEventListener('click',()=>{$('schedule-form').hidden=true;state.scheduleId=null;});$('schedule-frequency').addEventListener('change',scheduleVisibility);$('schedule-form').addEventListener('submit',saveSchedule);
 window.addEventListener('unhandledrejection',event=>showError(event.reason));
 const taskPoll=setInterval(()=>void pollTask(),2000);
