@@ -1,5 +1,5 @@
 import {loadingMarkup} from '../shared/loading-screen.mjs';
-import {createAgentApi,taskStates,moduleLabels,scheduleCron,reviewBinding} from './agent-api.mjs';
+import {createAgentApi,taskStates,moduleLabels,scheduleCron,reviewBinding,betaServerUrl} from './agent-api.mjs';
 
 const api = createAgentApi();
 const $ = id => document.getElementById(id);
@@ -8,7 +8,7 @@ const array = value => Array.isArray(value) ? value : [];
 const display = value => value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value);
 const when = value => {const date = new Date(value);return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN',{hour12:false});};
 const pending = new Set(['waiting_input','waiting_review','unknown']);
-const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,policy:null,policyRevision:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,busy:new Set(),polling:false,connected:false};
+const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,policy:null,policyRevision:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,connected:false};
 
 function errorMessage(error) {
   return String(error?.message || error || '本次操作未完成').replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');
@@ -282,11 +282,42 @@ async function savePermissions(event) {
 function renderConnection(response) {
   const connection=response.connection || response;$('connection-mode').value=connection.mode || 'standalone';$('connection-provider').value=connection.networkProvider || 'embedded';$('connection-url').value=connection.serverUrl || '';
   $('connection-detail').textContent=connection.detail || connection.label || '员工连接公司主机后，使用同一任务与权限服务。';
-  setFormEnabled($('connection-form'),canManage() || connection.canConfigure===true);connectionVisibility();
+  state.connectionCanConfigure=canManage() || connection.canConfigure===true;clearConnectionPlan();connectionVisibility();syncConnectionControls();
 }
-function connectionVisibility() {const mode=$('connection-mode').value;$('connection-url').required=mode==='client';$('connection-url').closest('label').hidden=mode==='standalone';$('connection-provider').closest('label').hidden=mode!=='client';}
+function clearConnectionPlan() {state.connectionPlan=null;$('connection-review').hidden=true;}
+function syncConnectionControls() {const enabled=state.connectionCanConfigure && !state.busy.has('connection');setFormEnabled($('connection-form'),enabled);$('confirm-connection').disabled=!enabled || !state.connectionPlan;}
+function connectionVisibility() {const mode=$('connection-mode').value;$('connection-url').required=mode==='client';$('connection-url').closest('label').hidden=mode!=='client';$('connection-provider').closest('label').hidden=mode!=='client';$('save-connection').textContent=mode==='server'?'查看连接变更':'保存连接';}
+function connectionInput() {const mode=$('connection-mode').value;return {mode,networkProvider:$('connection-provider').value,serverUrl:mode==='client'?betaServerUrl($('connection-url').value):''};}
+async function connectionAction(action) {if(state.busy.has('connection'))return;$('error-banner').hidden=true;notice('');await run('connection',async()=>{syncConnectionControls();await action();});syncConnectionControls();}
+async function prepareConnection(form, renewed=false) {
+  clearConnectionPlan();const proposal=await api.request('connection.plan',form);
+  if(JSON.stringify(form)!==JSON.stringify(connectionInput()))return;
+  if(typeof proposal.token!=='string' || !proposal.token || !Array.isArray(proposal.difference?.add) || !Array.isArray(proposal.difference?.preserve) || proposal.difference.funnel!==false)throw new Error('无法核实本次连接变更，请检查公司主机后重试。');
+  state.connectionPlan={token:proposal.token,form,createdAt:Date.now()};
+  const difference=proposal.difference,body=$('connection-difference');body.replaceChildren();
+  body.append(make('h3',difference.add.length?'将新增':'测试版入口'));
+  if(difference.add.length){const list=make('ul');for(const entry of difference.add){const port=/^HTTPS\s+(\d+)\s*→\s*http:\/\/127\.0\.0\.1:\d+$/.exec(String(entry));list.append(make('li',port?'公司私网测试版入口：HTTPS '+port[1]:entry));}body.append(list);}
+  else body.append(make('p','测试版入口已存在，本次将切换为公司主机模式。'));
+  if(difference.preserve.length){body.append(make('h3','现有入口继续保留'));const list=make('ul');for(const entry of difference.preserve)list.append(make('li',entry));body.append(list);}
+  body.append(make('p','访问范围：仅公司私网，不对公网开放。'));
+  if(proposal.backup)body.append(make('p','变更前的连接配置已保存。','fine-print'));
+  $('connection-review-note').textContent=renewed?'连接方案已更新，请重新核对后确认。':'请核对以下变更，确认后启用这台公司主机。';
+  $('connection-review').hidden=false;$('connection-review-title').focus({preventScroll:true});$('connection-review').scrollIntoView({block:'nearest'});
+}
+async function persistConnection(form) {
+  const response=await api.request('connection.save',form);renderConnection(response);
+  notice('连接配置已保存。');await refreshStatus();
+}
 async function saveConnection(event) {
-  event.preventDefault();await run('connection',async()=>{const response=await api.request('connection.save',{mode:$('connection-mode').value,networkProvider:$('connection-provider').value,serverUrl:$('connection-url').value.trim()});renderConnection(response);await refreshStatus();notice('连接配置已保存。');},[$('save-connection')]);
+  event.preventDefault();await connectionAction(async()=>{const form=connectionInput();if(form.mode==='server')await prepareConnection(form);else{clearConnectionPlan();await persistConnection(form);}});
+}
+async function confirmConnection() {
+  await connectionAction(async()=>{
+    const proposal=state.connectionPlan;if(!proposal)return;
+    if(Date.now()-proposal.createdAt>=290000){await prepareConnection(proposal.form,true);return;}
+    try{await persistConnection({...proposal.form,networkToken:proposal.token});}
+    catch(error){clearConnectionPlan();if(/请先审查本次私网配置差异|网络配置已变化，请重新审查/.test(errorMessage(error)) || ['NETWORK_PLAN_EXPIRED','NETWORK_PLAN_CHANGED'].includes(error.code)){await prepareConnection(proposal.form,true);return;}throw error;}
+  });
 }
 function renderSchedules() {
   $('schedule-list').replaceChildren(...state.schedules.map(schedule=>{
@@ -331,7 +362,8 @@ $('review-check').addEventListener('change',syncActions);$('approve-result').add
 $('history-query').addEventListener('input',renderTasks);$('history-state').addEventListener('change',renderTasks);$('refresh-history').addEventListener('click',()=>void run('history',()=>refreshTasks(),[$('refresh-history')]));$('history-more').addEventListener('click',()=>void run('history',()=>refreshTasks({more:true}),[$('history-more')]));
 $('refresh-settings').addEventListener('click',()=>void run('refresh-settings',()=>loadSettings(),[$('refresh-settings')]));$('model-form').addEventListener('submit',saveModel);
 $('permissions-form').addEventListener('submit',savePermissions);$('add-member').addEventListener('click',()=>{$('member-rows').querySelector('.empty')?.remove();const row=memberRow();$('member-rows').append(row);row.querySelector('input').focus();});
-$('connection-mode').addEventListener('change',connectionVisibility);$('connection-form').addEventListener('submit',saveConnection);$('check-connection').addEventListener('click',()=>void run('connection-check',async()=>{const result=await api.request('connection.check');$('connection-detail').textContent=result.detail || result.message || result.label || '连接检查已完成';await refreshStatus();},[$('check-connection')]));
+for(const id of ['connection-mode','connection-provider','connection-url'])$(id).addEventListener('input',()=>{clearConnectionPlan();connectionVisibility();});
+$('connection-mode').addEventListener('change',()=>{clearConnectionPlan();connectionVisibility();});$('connection-form').addEventListener('submit',saveConnection);$('confirm-connection').addEventListener('click',()=>void confirmConnection());$('cancel-connection').addEventListener('click',()=>{clearConnectionPlan();$('save-connection').focus();});$('check-connection').addEventListener('click',()=>void run('connection-check',async()=>{const result=await api.request('connection.check');$('connection-detail').textContent=result.detail || result.message || result.label || '连接检查已完成';await refreshStatus();},[$('check-connection')]));
 $('new-schedule').addEventListener('click',()=>editSchedule());$('cancel-schedule').addEventListener('click',()=>{$('schedule-form').hidden=true;state.scheduleId=null;});$('schedule-frequency').addEventListener('change',scheduleVisibility);$('schedule-form').addEventListener('submit',saveSchedule);
 window.addEventListener('unhandledrejection',event=>showError(event.reason));
 const taskPoll=setInterval(()=>void pollTask(),2000);

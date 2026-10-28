@@ -1,4 +1,4 @@
-const operations = new Set(['status','tasks.list','tasks.create','tasks.get','tasks.input','tasks.control','reviews.approve','reviews.reject','schedules.list','schedules.create','schedules.update','schedules.delete','settings.get','settings.save','permissions.get','permissions.save','connection.get','connection.check','connection.save','attachments.upload','artifacts.open']);
+const operations = new Set(['status','tasks.list','tasks.create','tasks.get','tasks.input','tasks.control','reviews.approve','reviews.reject','schedules.list','schedules.create','schedules.update','schedules.delete','settings.get','settings.save','permissions.get','permissions.save','connection.get','connection.check','connection.plan','connection.save','attachments.upload','artifacts.open']);
 
 /** The host supplies authenticated identity; the renderer never supplies an actor. */
 export function createAgentApi(invoke = globalThis.window?.launcher?.agentRequest) {
@@ -15,6 +15,13 @@ export function createAgentApi(invoke = globalThis.window?.launcher?.agentReques
 
 export const taskStates = Object.freeze({queued:'等待执行',running:'执行中',waiting_input:'需要补充',waiting_review:'待复核',committing:'正在提交',unknown:'核对提交状态',paused:'已暂停',completed:'已完成',failed:'未完成',cancelled:'已停止'});
 export const moduleLabels = Object.freeze({warehouse:'云仓',exporter:'订单导出',purchase:'采购',sales:'销售',overview:'经营总览'});
+
+export function betaServerUrl(value) {
+  let url;try{url=new URL(String(value).trim());}catch{throw new Error('请填写有效的公司主机地址');}
+  if(url.protocol!=='https:' || url.port!=='9443')throw new Error('测试版公司主机地址必须使用 HTTPS 和 9443 端口，请向管理员获取测试版地址。');
+  if(url.username || url.password || url.search || url.hash || url.pathname!=='/')throw new Error('请填写完整的公司主机地址，不包含账号、路径或查询参数。');
+  return url.origin;
+}
 
 export function scheduleCron(frequency, time, custom = '') {
   if (frequency === 'custom') return custom.trim();

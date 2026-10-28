@@ -4,7 +4,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
-import {reviewBinding,scheduleCron,createAgentApi} from '../desktop/launcher/agent-api.mjs';
+import {reviewBinding,scheduleCron,createAgentApi,betaServerUrl} from '../desktop/launcher/agent-api.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const dependencies=createRequire(path.join(process.env.AGENT_UI_DEPENDENCY_ROOT || root,'package.json'));
@@ -22,11 +22,13 @@ const browser=await chromium.launch({headless:true});
 const errors=[];
 try{
   assert.equal(scheduleCron('weekdays','09:30'),'30 9 * * 1-5');
+  assert.equal(betaServerUrl(' https://company.example.ts.net:9443/ '),'https://company.example.ts.net:9443');
+  for(const url of ['https://company.example.ts.net:8443','http://company.example.ts.net:9443','https://company.example.ts.net','https://user@company.example.ts.net:9443','https://company.example.ts.net:9443/path'])assert.throws(()=>betaServerUrl(url));
   assert.equal(reviewBinding({task:{id:'t'},result:{version:2},review:{id:'r',resultVersion:1,revision:3}}),null);
   await assert.rejects(createAgentApi(null).request('status'),/尚未连接/);
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   await context.addInitScript(()=>{
-    window.fixture={role:'admin',calls:[],offline:false,version:1,status:'waiting_review',canApprove:true,approved:0,attachments:[],schedules:[],permissions:{schemaVersion:1,users:{'reviewer@example.test':{role:'admin',enabled:true,modules:['sales','purchase','warehouse','overview','exporter'],canRunTasks:true}}}};
+    window.fixture={role:'admin',calls:[],offline:false,version:1,status:'waiting_review',canApprove:true,approved:0,attachments:[],schedules:[],connection:{mode:'client',networkProvider:'system',serverUrl:'https://company.example.ts.net:9443',canConfigure:true},connectionPlans:0,connectionSaves:0,connectionPlanExpired:false,connectionFailure:false,connectionAdds:['HTTPS 9443 → http://127.0.0.1:27330'],permissions:{schemaVersion:1,users:{'reviewer@example.test':{role:'admin',enabled:true,modules:['sales','purchase','warehouse','overview','exporter'],canRunTasks:true}}}};
     const f=window.fixture;
     if(sessionStorage.getItem('fixture-role')==='viewer'){f.role='viewer';f.canApprove=false;}
     const task=()=>({id:'task-1',goal:'整理云仓运费并核对赔付',status:f.status,engine:'codex',createdAt:'2026-10-28T10:00:00Z',updatedAt:'2026-10-28T10:10:00Z',scope:{label:'2026 年 9 月 · 测试账本'}});
@@ -46,7 +48,13 @@ try{
       if(operation==='settings.get'||operation==='settings.save')return{settings:{defaultEngine:'codex',company:{baseUrl:'https://api.example.test/v1',model:'company-model',budgetLimit:100,hasKey:true},engines:{codex:{available:true,configured:true,version:'test'},hermes:{available:true,configured:true,version:'test'}}}};
       if(operation==='permissions.get')return{policy:f.permissions,revision:1};
       if(operation==='permissions.save'){f.permissions=payload.policy;return{policy:f.permissions,revision:2};}
-      if(operation==='connection.get'||operation==='connection.save')return{connection:{mode:'client',networkProvider:'system',serverUrl:'https://company.example.ts.net:8443',canConfigure:true}};
+      if(operation==='connection.get')return{connection:f.connection};
+      if(operation==='connection.plan'){f.connectionPlans++;return{token:'plan-'+f.connectionPlans,difference:{add:f.connectionAdds,preserve:['company.example.ts.net:443','company.example.ts.net:8443'],funnel:false},backup:'C:/server-only/connection-backup.json'};}
+      if(operation==='connection.save'){
+        if(f.connectionFailure)throw new Error('连接暂不可用，请稍后重试');
+        if(payload.mode==='server' && (f.connectionPlanExpired || payload.networkToken!=='plan-'+f.connectionPlans)){f.connectionPlanExpired=false;throw Object.assign(new Error('请先审查本次私网配置差异'),{code:'NETWORK_PLAN_EXPIRED'});}
+        f.connectionSaves++;f.connection={...f.connection,...payload,...(payload.mode==='server'?{serverUrl:'https://company.example.ts.net:9443'}:{})};return{connection:f.connection};
+      }
       if(operation==='connection.check')return{detail:'合成连接检查成功'};
       if(operation==='schedules.list')return{schedules:f.schedules};
       if(operation==='schedules.create'){f.schedules.push({...payload,id:'schedule-1'});return{schedule:f.schedules.at(-1)};}
@@ -100,6 +108,26 @@ try{
   await page.waitForFunction(()=>window.fixture.permissions.users['employee@example.test']);
   assert.deepEqual(await page.evaluate(()=>window.fixture.permissions.users['employee@example.test'].modules),['purchase']);
   await page.locator('#member-rows').screenshot({path:path.join(evidence,'settings-permissions-desktop.png')});
+  await page.locator('#connection-url').fill('https://company.example.ts.net:8443');await page.locator('#save-connection').click();
+  assert.match(await page.locator('#error-message').textContent(),/9443/);assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.operation==='connection.save').length),0,'Production port is rejected before the host API');
+  assert.equal(await page.locator('#connection-url').inputValue(),'https://company.example.ts.net:8443');
+  await page.locator('#connection-mode').selectOption('server');await page.locator('#save-connection').click();await page.locator('#connection-review').waitFor({state:'visible'});
+  assert.equal(await page.evaluate(()=>window.fixture.connectionSaves),0,'Planning never changes company connection');
+  const connectionReview=await page.locator('#connection-review').innerText();assert.match(connectionReview,/HTTPS 9443/);assert.match(connectionReview,/company.example.ts.net:8443/);assert.match(connectionReview,/不对公网开放/);assert.ok(!/127\.0\.0\.1|27330|Funnel|server-only|plan-/.test(connectionReview),'Review explains business changes without local paths or implementation details');
+  await page.locator('#connection-review').screenshot({path:path.join(evidence,'connection-review-desktop.png')});
+  await page.locator('#connection-mode').selectOption('standalone');assert.equal(await page.locator('#connection-review').isVisible(),false,'Editing form invalidates the previous proposal');
+  await page.locator('#connection-mode').selectOption('server');await page.evaluate(()=>window.fixture.offline=true);await page.locator('#save-connection').click();
+  assert.equal(await page.locator('#connection-mode').inputValue(),'server');assert.equal(await page.locator('#connection-review').isVisible(),false);assert.equal(await page.evaluate(()=>window.fixture.connectionSaves),0);
+  await page.evaluate(()=>window.fixture.offline=false);await page.locator('#save-connection').click();await page.locator('#connection-review').waitFor({state:'visible'});
+  await page.evaluate(()=>window.fixture.connectionPlanExpired=true);await page.locator('#confirm-connection').click();await page.waitForFunction(()=>document.querySelector('#connection-review-note').textContent.includes('方案已更新'));
+  assert.equal(await page.evaluate(()=>window.fixture.connectionSaves),0,'Expired proposal is replanned without an automatic save');
+  await page.setViewportSize({width:390,height:844});await page.locator('#connection-review').screenshot({path:path.join(evidence,'connection-review-mobile.png')});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+  await page.locator('#confirm-connection').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>window.fixture.connectionSaves===1);await page.waitForFunction(()=>document.querySelector('#connection-review').hidden);
+  const connectionSave=await page.evaluate(()=>window.fixture.calls.filter(c=>c.operation==='connection.save').at(-1));assert.equal(connectionSave.payload.networkToken,'plan-3');assert.equal(connectionSave.payload.serverUrl,'','Server address comes from host and cannot reuse the previous production URL');
+  await page.evaluate(()=>window.fixture.connectionAdds=[]);await page.locator('#save-connection').click();await page.locator('#connection-review').waitFor({state:'visible'});assert.match(await page.locator('#connection-review').innerText(),/入口已存在/);await page.locator('#cancel-connection').click();assert.equal(await page.evaluate(()=>window.fixture.connectionSaves),1);
+  await page.locator('#connection-mode').selectOption('client');await page.locator('#connection-url').fill('https://other.example.ts.net:9443');await page.locator('#connection-provider').selectOption('embedded');await page.evaluate(()=>window.fixture.connectionFailure=true);await page.locator('#save-connection').click();
+  assert.equal(await page.locator('#connection-url').inputValue(),'https://other.example.ts.net:9443');assert.equal(await page.locator('#connection-provider').inputValue(),'embedded');assert.equal(await page.locator('#save-connection').isEnabled(),true,'Connection failure preserves editable inputs');
+  await page.evaluate(()=>window.fixture.connectionFailure=false);await page.locator('#save-connection').click();await page.waitForFunction(()=>window.fixture.connectionSaves===2);await page.setViewportSize({width:1440,height:1000});
   await page.locator('#new-schedule').click();await page.locator('#schedule-goal').fill('每个工作日核对库存');await page.locator('#schedule-frequency').selectOption('weekdays');await page.locator('#schedule-time').fill('09:30');await page.locator('#save-schedule').click();await page.locator('.schedule-row').waitFor();
   assert.equal(await page.evaluate(()=>window.fixture.schedules[0].cron),'30 9 * * 1-5');assert.equal(await page.evaluate(()=>window.fixture.schedules[0].timezone),'Asia/Shanghai');
   await page.locator('.schedule-row').getByRole('button',{name:'暂停',exact:true}).click();await page.waitForFunction(()=>window.fixture.schedules[0].enabled===false);
@@ -118,6 +146,6 @@ try{
   await page.locator('#pending-tasks .task-row').first().click();await page.locator('#review-panel').waitFor({state:'visible'});assert.equal(await page.locator('#review-check').isDisabled(),true);assert.equal(await page.locator('#approve-result').isDisabled(),true);
   await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='company-model');assert.equal(await page.locator('#save-model').isDisabled(),true);assert.equal(await page.locator('#add-member').isDisabled(),true);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({ok:true,scope:'Browser interaction against synthetic API contract; not live engine/business acceptance',reviewVersionBinding:true,noDuplicateApproval:true,attachments:true,schedules:true,permissionsDisplay:true,networkFailure:true,unknownNoBlindRetry:true,narrowViewport:true,sharedProgress:true,evidence}));
+  console.log(JSON.stringify({ok:true,scope:'Browser interaction against synthetic API contract; not live engine/business acceptance',reviewVersionBinding:true,noDuplicateApproval:true,attachments:true,schedules:true,permissionsDisplay:true,networkFailure:true,connectionDifferenceReview:true,connectionExpiryReplan:true,productionPortRejected:true,connectionInputPreserved:true,unknownNoBlindRetry:true,narrowViewport:true,sharedProgress:true,evidence}));
   await context.close();
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
