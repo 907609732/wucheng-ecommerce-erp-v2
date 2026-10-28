@@ -24,6 +24,7 @@ export function assertAgentRegistry(paths,{allowMissing=false}={}){
     if(!c.root&&!c.exe)throw hostError('BETA_REGISTRY_UNSAFE','测试版模块程序目录未登记',409);
     if(c.nodePath&&(!path.isAbsolute(c.nodePath)||!inside(path.join(paths.programs,'node-runtime'),c.nodePath)))throw hostError('BETA_REGISTRY_UNSAFE','共享运行环境不属于测试版',409);
     if(['purchase','sales','overview'].includes(id)&&(!Number.isInteger(c.port)||c.port<27331||c.port>27379))throw hostError('BETA_PORT_INVALID','测试版端口不在独立范围',409);
+    if(id==='purchase'&&c.mobilePort!==27380)throw hostError('BETA_PORT_INVALID','测试版采购移动端必须使用独立端口 27380',409);
     if(Number.isInteger(c.port)){if(ports.has(c.port)||c.port===paths.gatewayPort)throw hostError('BETA_PORT_INVALID','测试版端口重复',409);ports.add(c.port);}
     noLinks(c.dataDir);
   }return registry;
@@ -31,12 +32,13 @@ export function assertAgentRegistry(paths,{allowMissing=false}={}){
 export function prepareAgentProfile(paths){
   fs.mkdirSync(paths.profile,{recursive:true,mode:0o700});
   if(!fs.existsSync(paths.registryFile)){
-    const registry=Object.fromEntries(WORKBENCH_MODULES.map((id,index)=>[id,{root:path.join(paths.programs,id),dataDir:path.join(paths.data,id),managed:true,allowInitialize:false,port:27331+index,...(['warehouse','exporter'].includes(id)?{exe:path.join(paths.programs,id,'module.exe')}:{}),nodePath:path.join(paths.programs,'node-runtime','node.exe')}]));
+    const registry=Object.fromEntries(WORKBENCH_MODULES.map((id,index)=>[id,{root:path.join(paths.programs,id),dataDir:path.join(paths.data,id),managed:true,allowInitialize:false,port:27331+index,...(id==='purchase'?{mobilePort:27380}:{}),...(['warehouse','exporter'].includes(id)?{exe:path.join(paths.programs,id,'module.exe')}:{}),nodePath:path.join(paths.programs,'node-runtime','node.exe')}]));
     atomicJson(paths.registryFile,registry);
   }
   assertAgentRegistry(paths);return {profile:paths.profile,registryFile:paths.registryFile,source:'agent-beta'};
 }
 export function guardAgentServices(services,paths){
+  services.agentManaged=true;
   const config=services.config.bind(services),ensure=services.ensure.bind(services),start=services.start.bind(services);
   if(path.resolve(services.registryFile)!==path.resolve(paths.registryFile))throw hostError('BETA_REGISTRY_UNSAFE','运行服务没有绑定独立测试注册表',409);
   services.config=id=>{assertAgentRegistry(paths);return config(id);};

@@ -8,7 +8,7 @@ import {agentEnvelope} from './trust.mjs';
 const loopback=address=>['127.0.0.1','::1','::ffff:127.0.0.1'].includes(address);
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 /** Keeps DPAPI and model credentials in Electron. Only the authenticated gateway calls this private endpoint. */
-export async function startAgentBridge({storeDir,request,maxBytes=48*1024*1024}={}){
+export async function startAgentBridge({storeDir,request,maxBytes=80*1024*1024}={}){
   const descriptor=path.join(storeDir,'bridge.json'),key=randomBytes(32).toString('hex');
   const server=http.createServer(async(req,res)=>{
     res.setHeader('content-type','application/json; charset=utf-8');res.setHeader('cache-control','no-store');

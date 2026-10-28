@@ -37,9 +37,9 @@ const defaults=()=>{
   };
 };
 export class ServiceManager{
-  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250}={}){
+  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false}={}){
     if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<50||startupTimeoutMs>300000||!Number.isInteger(startupPollMs)||startupPollMs<10||startupPollMs>1000)throw Error('扩展启动等待配置无效');
-    this.startupTimeoutMs=startupTimeoutMs;this.startupPollMs=startupPollMs;
+    this.startupTimeoutMs=startupTimeoutMs;this.startupPollMs=startupPollMs;this.agentManaged=agentManaged===true;
     const explicitRegistry=registryFile||process.env.LINGTU_REGISTRY_PATH,location=explicitRegistry?null:getWorkbenchLocation();
     this.registryFile=explicitRegistry||location.registryFile;this.pending=new Map();this.errors=new Map();
     this.policyFile=policyFile||(!explicitRegistry?path.join(location.profile,'workbench-server','access-policy.json'):undefined);
@@ -137,6 +137,7 @@ export class ServiceManager{
         record={schemaVersion:1,token:randomUUID(),ownerPid:process.pid,childPid:null,module:id,fingerprint,createdAt:new Date().toISOString()};
         writeStartLock(lock,record);
         try{
+          if(this.agentManaged)env.LINGTU_AGENT_MANAGED='1';
           const child=spawn(executable,args,{...(!native?{cwd:c.root}:{}),detached:true,windowsHide:true,shell:false,stdio:native?'ignore':['ignore',log,log],env});
           const spawned=new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});spawned.catch(()=>{});
           childExited=new Promise(resolve=>child.once('exit',(code,signal)=>{exitInfo={code,signal};resolve();}));

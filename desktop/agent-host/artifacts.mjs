@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {assertPrivateFile,hostError} from './common.mjs';
 
-export function artifactDownload(storeDir,item,{maxBytes=32*1024*1024}={}){
+export function artifactDownload(storeDir,item,{maxBytes=64*1024*1024}={}){
   if(!item||typeof item.taskId!=='string'||!/^[a-zA-Z0-9_-]+$/.test(item.taskId))throw hostError('ARTIFACT_SCOPE_DENIED','任务产物标识无效',403);
   const {file,stat}=assertPrivateFile(path.join(storeDir,'tasks',item.taskId),item.path);
   if(stat.size>maxBytes)throw hostError('ARTIFACT_TOO_LARGE','此产物超过下载大小上限，请拆分生成',413);
@@ -14,7 +14,7 @@ export function artifactDownload(storeDir,item,{maxBytes=32*1024*1024}={}){
 }
 export async function saveArtifactDownload(result,{dialog,window,downloads}){
   const item=result?.download;if(!item)return result;
-  if(typeof item.name!=='string'||item.name!==path.basename(item.name)||/[<>:"/\\|?*\x00-\x1f]/.test(item.name)||typeof item.bytes!=='string'||item.bytes.length>45*1024*1024)throw hostError('ARTIFACT_RESPONSE_INVALID','产物下载信息无效',502);
+  if(typeof item.name!=='string'||item.name!==path.basename(item.name)||/[<>:"/\\|?*\x00-\x1f]/.test(item.name)||typeof item.bytes!=='string'||item.bytes.length>90*1024*1024)throw hostError('ARTIFACT_RESPONSE_INVALID','产物下载信息无效',502);
   const bytes=Buffer.from(item.bytes,'base64');
   if(bytes.length!==item.size||createHash('sha256').update(bytes).digest('hex')!==item.sha256)throw hostError('ARTIFACT_RESPONSE_INVALID','产物完整性校验失败',502);
   const choice=await dialog.showSaveDialog(window,{title:'保存任务结果',defaultPath:path.join(downloads,item.name)});

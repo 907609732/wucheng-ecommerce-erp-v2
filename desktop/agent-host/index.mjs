@@ -10,7 +10,7 @@ import {composeAgentDependencies} from './composition.mjs';
 import {hostError} from './common.mjs';
 import {createCompanyIdentity} from './company-identity.mjs';
 
-export async function createAgentHost({paths,services,safeStorage,principal,identity:providedIdentity,loadDependencies=composeAgentDependencies,runtimeFactory,adapters,engines,createBackups,connectionHandlers={},onError=()=>{},startBridge=true}={}){
+export async function createAgentHost({paths,services,safeStorage,principal,identity:providedIdentity,loadDependencies=composeAgentDependencies,runtimeFactory,adapters,engines,createBackups,engineResourceDir,connectionHandlers={},onError=()=>{},startBridge=true}={}){
   const hostDir=path.join(paths.profile,'agent-host'),storeDir=path.join(paths.profile,'agent-runtime');
   const identity=providedIdentity||createHostIdentity({storeDir:hostDir,policyFile:path.join(paths.profile,'workbench-server','access-policy.json'),...(principal?{principal}:{})});
   const getCompanyIdentity=createCompanyIdentity({profile:paths.profile,storeDir}),resolveActor=id=>{getCompanyIdentity();return identity.resolveActor(id);};
@@ -21,8 +21,8 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
     if(!task||task.status!=='committing'||task.approvedBy!==claims.actorId||task.resultId!==claims.resultId||task.review?.id!==claims.approvalId||task.review.resultVersion!==claims.resultVersion||result?.version!==claims.resultVersion)return false;
     return result.prepared.some(step=>step.module===id&&step.capabilityId===claims.capabilityId&&step.changeDigest===claims.changeDigest&&step.binding.dataSetId===claims.dataSetId&&JSON.stringify(step.binding.revision)===JSON.stringify(claims.revision));
   }
-  const transport=createAgentModuleTransport({services,resolveActor,validateApproval:approved});
-  const dependencies=runtimeFactory?{runtimeFactory,adapters:adapters||[],engines:engines||{},createBackups}:await loadDependencies({transport});
+  const transport=createAgentModuleTransport({services,resolveActor,validateApproval:approved,artifactRoot:path.join(storeDir,'tasks')});
+  const dependencies=runtimeFactory?{runtimeFactory,adapters:adapters||[],engines:engines||{},createBackups}:await loadDependencies({transport,engineResourceDir});
   const adapterMap=new Map(dependencies.adapters.map(adapter=>[adapter.id,adapter]));
   const backupHooks=dependencies.createBackups?.({paths:{...paths,registry:paths.registryFile},services,storeDir,resolveActor,getCompanyIdentity,binding:async(id,ctx)=>{const adapter=adapterMap.get(id);if(!adapter)throw hostError('MODULE_UNAVAILABLE','此模块尚未接入备份绑定',503);return adapter.binding(ctx);}})||{};
   const systemKeyFile=path.join(hostDir,'.agent-approval-key');

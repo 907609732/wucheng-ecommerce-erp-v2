@@ -12,6 +12,6 @@ export function agentEnvelope(value){
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['operation','payload'].includes(k))||typeof value.operation!=='string'||!/^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)*$/.test(value.operation)||value.operation.length>100)throw hostError('AGENT_REQUEST_INVALID','任务接口参数无效');
   const payload=value.payload??{};
   if(!payload||typeof payload!=='object'||Array.isArray(payload)||['actor','trustedUi','approval','confirmed','role','sessionId'].some(k=>Object.hasOwn(payload,k)))throw hostError('IDENTITY_INPUT_DENIED','请求不能自选身份或提供确认凭据',403);
-  if(Buffer.byteLength(JSON.stringify(payload))>48*1024*1024)throw hostError('AGENT_INPUT_TOO_LARGE','任务附件或参数过大',413);
+  if(Buffer.byteLength(JSON.stringify(payload))>80*1024*1024)throw hostError('AGENT_INPUT_TOO_LARGE','任务附件或参数过大',413);
   return {operation:value.operation,payload};
 }
