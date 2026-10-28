@@ -22,5 +22,6 @@
       "src/main/agent-adapter.mjs"
     ]
   },
-  "betaVersion": "0.11.6"
+  "betaVersion": "0.11.6",
+  "purchaseMobilePort": 27380
 }
