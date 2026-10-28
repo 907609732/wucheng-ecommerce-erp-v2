@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import http from 'node:http';
+import {randomBytes} from 'node:crypto';
+import {createRequire} from 'node:module';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+
+// Real persistent task/review/scheduler runtime, synthetic business ledger and
+// deterministic engine. Live model and domain acceptance remain separate gates.
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const runtimeRoot=process.env.AGENT_RUNTIME_ROOT || root;
+const {createAgentRuntime}=await import(pathToFileURL(path.join(runtimeRoot,'desktop/agent-runtime/index.mjs')));
+const {signAgentApproval,verifyAgentApproval}=await import(pathToFileURL(path.join(runtimeRoot,'desktop/agent-runtime/approval.mjs')));
+const require=createRequire(path.join(process.env.AGENT_UI_DEPENDENCY_ROOT || root,'package.json'));
+const {chromium}=require('playwright');
+const storeDir=fs.mkdtempSync(path.join(os.tmpdir(),'erp-ui-runtime-'));
+const actor={id:'ui-test-admin',login:'ui-test@example.test',label:'合成测试审核员',enabled:true,role:'admin',modules:['sales'],canRunTasks:true,channel:'ui'};
+const meta={actor,trustedUi:true};
+let revision=1,commits=0,loseReceipt=false;
+const receipts=new Map(),key=randomBytes(32).toString('hex'),secrets=new Map([['company-api-key','synthetic-only-not-a-valid-api-key']]);
+const secretStore={has:name=>secrets.has(name),get:async name=>secrets.get(name),set:async(name,value)=>secrets.set(name,value),delete:async name=>secrets.delete(name)};
+const adapter={id:'sales',capabilities:[{id:'synthetic-import',kind:'prepare',title:'合成账单导入',inputSchema:{type:'object',properties:{amount:{type:'integer'}},required:['amount'],additionalProperties:false}}],binding:async()=>({dataSetId:'synthetic-ledger',revision}),prepare:async(_id,input,ctx)=>{
+  const file=path.join(storeDir,'tasks',ctx.taskId,'synthetic-result.csv');fs.writeFileSync(file,'amount\n'+input.amount);const artifact=ctx.registerArtifact({path:file,name:'synthetic-result.csv',mimeType:'text/csv'});
+  return {summary:'合成账本已准备，等待人员确认',blocks:[{type:'table',title:'待提交金额',columns:[{key:'amount',label:'金额（分）',type:'money'}],rows:[{amount:input.amount}]},{type:'files',files:[{id:artifact.id,name:artifact.name}]}],changes:[{label:'合成费用',before:'未入账',after:input.amount+' 分'}],evidence:[{title:'合成账单来源',artifactId:artifact.id}],commitData:{amount:input.amount}};
+},commit:async(step,ctx)=>{
+  const claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString());
+  verifyAgentApproval(ctx.approval,key,{actorId:ctx.actor.id,module:'sales',capabilityId:step.capabilityId,taskId:ctx.taskId,resultId:claims.resultId,resultVersion:claims.resultVersion,dataSetId:'synthetic-ledger',revision,changeDigest:step.changeDigest,idempotencyKey:ctx.idempotencyKey});
+  if(receipts.has(ctx.idempotencyKey))return{receipt:receipts.get(ctx.idempotencyKey)};
+  commits++;revision++;const receipt={id:'synthetic-receipt-'+commits,amount:step.commitData.amount};receipts.set(ctx.idempotencyKey,receipt);
+  if(loseReceipt)throw new Error('synthetic lost submission response');return{receipt};
+},receipt:async id=>receipts.has(id)?{state:'completed',receipt:receipts.get(id)}:{state:'unknown'}};
+const engine={check:async()=>({available:true,version:'synthetic-adapter'}),run:async({invoke})=>{await invoke('erp_prepare',{module:'sales',capabilityId:'synthetic-import',input:{amount:140000}});return{text:'合成准备完成'};}};
+let openedArtifact=null;
+const config={storeDir,resolveActor:async id=>id===actor.id?actor:null,adapters:[adapter],engines:{codex:engine,hermes:engine},secretStore,signApproval:async claims=>signAgentApproval(claims,key),environment:{mode:'test',label:'测试账本'},extensions:{'artifacts.open':async artifact=>{openedArtifact=artifact;return{saved:true,message:'测试产物已验证：'+artifact.name};},'permissions.get':async()=>({policy:{schemaVersion:1,users:{}},revision:1}),'connection.get':async()=>({connection:{mode:'standalone',canConfigure:false,detail:'合成主机连接'}})}};
+let runtime=createAgentRuntime(config);
+await runtime.request('settings.save',{company:{model:'synthetic-model'}},meta);
+const mime={'.html':'text/html','.mjs':'text/javascript','.css':'text/css','.png':'image/png'};
+const server=http.createServer((req,res)=>{const target=path.resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));if(!target.startsWith(root+path.sep)||!fs.existsSync(target)||!fs.statSync(target).isFile()){res.writeHead(404).end();return;}res.setHeader('Content-Type',mime[path.extname(target)] || 'application/octet-stream');res.end(fs.readFileSync(target));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const browser=await chromium.launch({headless:true});
+try{
+  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.exposeFunction('__erpHostRequest',async({operation,payload})=>{try{return await runtime.request(operation,payload,meta);}catch(error){return{ok:false,error:error.message,code:error.code};}});
+  await page.addInitScript(()=>{window.launcher={agentRequest:request=>window.__erpHostRequest(request),ready:async()=>({ready:true})};});
+  await page.goto('http://127.0.0.1:'+server.address().port+'/desktop/launcher/agent-index.html');
+  await page.waitForFunction(()=>!document.querySelector('#submit-goal').disabled);
+  await page.locator('#goal-files').setInputFiles({name:'input.csv',mimeType:'text/csv',buffer:Buffer.from('amount\n140000')});await page.locator('#goal-attachments li').waitFor();
+  await page.locator('#goal').fill('准备合成运费导入，先复核再入账');await page.locator('#submit-goal').click();
+  await page.locator('#review-panel').waitFor({state:'visible'});assert.equal(commits,0);assert.match(await page.locator('#result-content').textContent(),/140000/);
+  const taskId=runtime.store.list('task')[0].id;
+  await page.locator('#review-check').check();await page.locator('#approve-result').click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='已完成');
+  assert.equal(commits,1);assert.equal(runtime.store.get('task',taskId).status,'completed');assert.match(await page.locator('.receipt').textContent(),/提交结果已核对/);
+  await page.getByRole('button',{name:'查看 / 下载',exact:true}).click();assert.equal(openedArtifact.taskId,taskId);assert.equal(fs.readFileSync(openedArtifact.path,'utf8'),'amount\n140000');
+  await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='synthetic-model');
+  await page.locator('#new-schedule').click();await page.locator('#schedule-goal').fill('每个工作日准备合成账单');await page.locator('#schedule-frequency').selectOption('weekdays');await page.locator('#schedule-time').fill('09:30');await page.locator('#save-schedule').click();await page.locator('.schedule-row').waitFor();
+  const schedule=runtime.store.list('schedule')[0];assert.equal(schedule.cron,'30 9 * * 1-5');assert.equal(schedule.timezone,'Asia/Shanghai');
+  await page.locator('.schedule-row').getByRole('button',{name:'暂停',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.schedule-row').textContent.includes('已暂停'));assert.equal(runtime.store.get('schedule',schedule.id).enabled,false);
+  await page.locator('.schedule-row').getByRole('button',{name:'修改',exact:true}).click();await page.locator('#schedule-goal').fill('修改后仍暂停的合成计划');await page.locator('#save-schedule').click();await page.waitForFunction(()=>document.querySelector('.schedule-row').textContent.includes('修改后仍暂停'));assert.equal(runtime.store.get('schedule',schedule.id).enabled,false,'Editing a paused schedule must not resume it');
+  await runtime.close();runtime=createAgentRuntime(config);await page.reload();await page.waitForFunction(()=>document.querySelector('#recent-tasks').textContent.includes('准备合成运费导入'));
+  await page.locator('#recent-tasks .task-row').first().click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='已完成');assert.match(await page.locator('.receipt').textContent(),/提交结果已核对/);
+  loseReceipt=true;await page.locator('.main-nav [data-view=home]').click();await page.locator('#goal').fill('测试提交响应丢失后的回执核对');await page.locator('#submit-goal').click();await page.locator('#review-panel').waitFor({state:'visible'});await page.locator('#review-check').check();await page.locator('#approve-result').click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='核对提交状态');assert.equal(commits,2);
+  await runtime.close();runtime=createAgentRuntime(config);await page.getByRole('button',{name:'核对提交回执',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='已完成');assert.equal(commits,2,'Readback after restart must not duplicate the business write');
+  assert.deepEqual(errors,[]);
+  const out=path.join(root,'.codex-artifacts','agent-workspace-ui');fs.mkdirSync(out,{recursive:true});await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(out,'persistent-runtime-receipt.png'),fullPage:true});
+  console.log(JSON.stringify({ok:true,scope:'Real SQLite task/review/scheduler runtime with synthetic business adapter and deterministic engine; no external model or formal ledger access',receiptVerified:true,persistedAcrossRestart:true,unknownReadbackNoDuplicate:true,registeredArtifact:true,cronParser:true,pausedSchedulePreserved:true}));
+}finally{
+  await browser.close();await runtime.close();await new Promise(resolve=>server.close(resolve));
+  const resolved=path.resolve(storeDir),allowed=path.resolve(os.tmpdir())+path.sep;if(!resolved.startsWith(allowed)||!path.basename(resolved).startsWith('erp-ui-runtime-'))throw new Error('Unsafe test cleanup path');fs.rmSync(resolved,{recursive:true,force:true});
+}
