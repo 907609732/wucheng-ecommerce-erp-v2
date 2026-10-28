@@ -102,7 +102,7 @@ export function createWarehouseAgentAdapter(deps={}){
     case 'inventory':return readCainiaoInventory(databasePath);
     case 'sales':return worker('sales.query',input,ctx);
     case 'daily':return daily.status(ctx.actor);
-    case 'schedules.legacy':{actor(ctx,false,true);const state=await daily.status(ctx.actor);return readWarehouseLegacySchedules({settingsPath:configurationFiles[0],dailyConfig:state.config,configurationRevision:warehouseAgentDigest({configuration:configurationDigest(),dailyConfig:state.config})});}
+    case 'schedules.legacy':{actor(ctx,false,true);const state=await daily.status(ctx.actor);return readWarehouseLegacySchedules({settingsPath:configurationFiles[0],dailyConfig:state.config,dataSetId:binding(ctx).dataSetId,requestedBy:ctx.actor,configurationRevision:warehouseAgentDigest({configuration:configurationDigest(),dailyConfig:state.config})});}
     case 'sources':{if(input.artifactId){const a=artifact(input.artifactId,ctx);return {artifactId:a.id,sha256:a.hash,filename:path.basename(a.file),validation:a.validation,createdAt:a.createdAt};}return {runs:db.prepare('SELECT id,business_date,started_at,payload FROM warehouse_sync_runs ORDER BY started_at DESC LIMIT 100').all().map(r=>JSON.parse(r.payload))};}
     default:throw error('WAREHOUSE_NOT_QUERY','该能力需要准备结果',400);}}
   async function query(id,input={},ctx){const data=await rawQuery(id,input,ctx),blocks=[{type:'table',title:id,rows:id==='inventory'?data.items:id==='sales'?data.monthly:id==='daily'?data.employees:data.runs||[data]}];
@@ -125,7 +125,7 @@ export function createWarehouseAgentAdapter(deps={}){
     else if(id==='login.refresh')changes=[{operation:'login.refresh',hostInteractionRequired:true,message:'主机浏览器出现验证码或授权时由本人处理，失败不循环重试'}];
     sameBinding(before,ctx);const result={id:randomUUID(),version:1,capabilityId:id,input:structuredClone(input),summary:c.title,scope:{module:'warehouse',...before,businessDate:businessDate(now()),timeZone:'Asia/Shanghai'},blocks,evidence,changes,issues,commitData};
     commitData.preparedId=result.id;result.changeDigest=warehouseAgentDigest({capabilityId:id,input:result.input,commitData,changes});save('warehouse_agent_prepared',result.id,{...result,actorId:ctx.actor.id,taskId:ctx.taskId});
-    if(c.requiresReview===false){const {commitData:privateCommit,changeDigest:privateDigest,...automatic}=result;return {...automatic,requiresReview:false};}return result;
+    if(c.requiresReview===false){const {commitData:privateCommit,changeDigest:privateDigest,...automatic}=result;return {...automatic,state:issues.some(i=>i.blocking)?'blocked':'completed',requiresReview:false};}return result;
   }
   function receipt(key,ctx){actor(ctx);const row=db.prepare('SELECT * FROM warehouse_agent_receipts WHERE key=?').get(key);if(!row)return null;if(row.actor_id!==ctx.actor.id||row.task_id!==ctx.taskId)throw error('WAREHOUSE_RECEIPT_FORBIDDEN','不能读取其他任务回执',403);return JSON.parse(row.payload);}
   async function commitInner(proposed,ctx){actor(ctx,true);const p=load('warehouse_agent_prepared',proposed.commitData?.preparedId||proposed.id);if(p.actorId!==ctx.actor.id||p.taskId!==ctx.taskId)throw error('WAREHOUSE_PREPARED_FORBIDDEN','结果不属于当前人员或任务',403);
