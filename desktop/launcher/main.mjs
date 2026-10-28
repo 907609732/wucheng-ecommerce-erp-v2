@@ -34,6 +34,7 @@ import {createAgentHost} from '../agent-host/index.mjs';
 import {assertLauncherSender,agentEnvelope} from '../agent-host/trust.mjs';
 import {saveArtifactDownload} from '../agent-host/artifacts.mjs';
 import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent-host/launcher-policy.mjs';
+import {betaProcessesRunning} from '../agent-host/startup.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
@@ -275,7 +276,18 @@ async function refresh(){throw Error('测试版使用本包冻结组件，不连
 if (acquired) app.whenReady().then(async () => {
   app.setAppUserModelId(agentPaths.appId);
   hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host'),policyFile:path.join(profile,'workbench-server','access-policy.json')});
+  let activation,activationError;
+  if(app.isPackaged){
+    reportPreparation({phase:'preparing'});
+    try{
+      const pin=JSON.parse(fs.readFileSync(path.join(here,'../agent-host/packaged-manifest.json'),'utf8'));
+      const {createAgentActivation}=await import('../agent-host/activation.mjs');
+      activation=await createAgentActivation({paths:agentPaths,resourcesDir:process.resourcesPath,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths)})();
+      reportPreparation({phase:'ready'});
+    }catch(error){activationError=error;recoveryError='测试组件尚未就绪：'+error.message;diagnostics.write('error','workbench',recoveryError);}
+  }
   services = guardAgentServices(new ServiceManager({registryFile:location.registryFile,policyFile:path.join(profile,'workbench-server','access-policy.json')}),agentPaths);
+  if(activationError){const blocked=()=>{throw Object.assign(Error(recoveryError),{code:'BETA_COMPONENTS_NOT_READY'});};services.ensure=blocked;services.start=blocked;}
   previousCloudExecutable=services.config('warehouse').exe;
   cache=new SnapshotCache({root:path.join(profile,'client-cache'),encrypt:async plain=>{
     if(!safeStorage.isEncryptionAvailable())throw Error('Windows 安全存储不可用，不能保存离线缓存');
@@ -303,9 +315,8 @@ if (acquired) app.whenReady().then(async () => {
   };
   modules.lifecycle = withElectronLifecycle(createServiceLifecycle(lifecycleOptions), lifecycleOptions);
   if(fs.existsSync(modules.journalFile))recoveryError='测试版检测到旧组件更新记录，请重新运行测试包验收工具。';
-  // Beta payload and ledger copies are provisioned by the isolated migration tool.
-  // Never run legacy unified-data moves or reactivate production packages here.
-  const suiteState={ready:false,setupRequired:true};
+  // Only pinned Beta programs are activated here; ledger copies are provisioned separately.
+  const suiteState={ready:activation?.ready===true&&!activation.missingData.length,setupRequired:activation?.ready!==true||!!activation.missingData.length};
   if(headless){
     const {createWorkbenchDispatcher,legacyCliArgs}=await import('../shared/workbench-dispatcher.mjs');
     let localAgentActions;

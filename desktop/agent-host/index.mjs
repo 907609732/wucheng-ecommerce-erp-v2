@@ -9,6 +9,7 @@ import {artifactDownload} from './artifacts.mjs';
 import {composeAgentDependencies} from './composition.mjs';
 import {hostError} from './common.mjs';
 import {createCompanyIdentity} from './company-identity.mjs';
+import {createLegacyScheduleTakeover} from './schedules.mjs';
 
 export async function createAgentHost({paths,services,safeStorage,principal,identity:providedIdentity,loadDependencies=composeAgentDependencies,runtimeFactory,adapters,engines,createBackups,engineResourceDir,connectionHandlers={},onError=()=>{},startBridge=true}={}){
   const hostDir=path.join(paths.profile,'agent-host'),storeDir=path.join(paths.profile,'agent-runtime');
@@ -37,10 +38,12 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
     'permissions.get':identity.permissionsGet,'permissions.inspect':identity.permissionsInspect,'permissions.receipt':identity.permissionsReceipt,'permissions.save':identity.permissionsSave,
     'artifacts.open':item=>artifactDownload(storeDir,item),...backupHooks,...connectionHandlers
   }});
+  const takeover=createLegacyScheduleTakeover({warehouse:adapterMap.get('warehouse'),runtime,identity,getCompanyIdentity,onError});
   const dispatch=runtime.request;
-  runtime.request=(operation,payload,meta)=>{getCompanyIdentity();if(['permissions.inspect','permissions.receipt'].includes(operation)||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);return dispatch(operation,payload,meta);};
+  runtime.request=async(operation,payload,meta)=>{getCompanyIdentity();if(['permissions.inspect','permissions.receipt'].includes(operation)||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);const result=await dispatch(operation,payload,meta);return operation==='status'?{...result,legacyScheduleMigration:takeover.status()}:result;};
   let tickJob=null,closing=false;
-  const timer=setInterval(()=>{if(tickJob||closing)return;tickJob=Promise.resolve().then(()=>runtime.tick()).catch(onError).finally(()=>{tickJob=null;});},15000);timer.unref();
+  const timer=setInterval(()=>{if(tickJob||closing)return;tickJob=Promise.resolve().then(()=>takeover.run()).then(()=>runtime.tick()).catch(onError).finally(()=>{tickJob=null;});},15000);timer.unref();
   let bridge;try{bridge=startBridge?await startAgentBridge({storeDir:hostDir,request:runtime.request}):null;}catch(error){clearInterval(timer);await runtime.close();throw error;}
-  return {runtime,identity,transport,secretStore,storeDir,request:runtime.request,async close(){if(closing)return;closing=true;clearInterval(timer);await tickJob;await bridge?.close();await runtime.close();}};
+  void takeover.run();
+  return {runtime,identity,transport,secretStore,storeDir,request:runtime.request,async close(){if(closing)return;closing=true;clearInterval(timer);await takeover.close();await tickJob;await bridge?.close();await runtime.close();}};
 }
