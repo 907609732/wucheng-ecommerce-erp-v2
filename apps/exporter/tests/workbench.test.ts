@@ -149,3 +149,20 @@ it('real exporter CSV reaches registered task artifact by signed HTTP streaming,
  const invalidTransport:any=async()=>({fileId:file.fileId,filename:'orders.csv',available:true});invalidTransport.download=async()=>({id:'fake-link'});await expect(createExporterAgentAdapter({transport:invalidTransport}).query('file',{fileId:file.fileId},ctx)).rejects.toMatchObject({code:'ARTIFACT_RESULT_INVALID'});
  const missing=createExporterAgentAdapter({transport:async()=>({})});await expect(missing.prepare('export',{taskId:task.id,format:'csv'},ctx)).rejects.toMatchObject({code:'ARTIFACT_TRANSPORT_UNAVAILABLE'});
 });
+
+it('collection adapter waits by actual job ID without dispatching start twice',async()=>{
+ const calls:any[]=[],jobId='collection-job-1',states=[{id:jobId,status:'running',listOutcome:'pending'},{id:jobId,status:'completed',listOutcome:'complete',count:3}];
+ const transport=async(_module:any,route:any,options:any)=>{calls.push({route,body:options.body});return route.endsWith('/prepare')?{summary:'已启动',requiresReview:false,blocks:[{type:'json',data:{id:jobId,status:'running'}}],evidence:[{capabilityId:'start'}]}:states.shift();};
+ const adapter=createExporterAgentAdapter({transport,pollIntervalMs:1,maxWaitMs:1000}),out=await adapter.prepare('start',{platform:'taobao',from:'2026-01-01',to:'2026-01-31'},{taskId:'agent-goal',idempotencyKey:'start-once'});
+ expect(calls.filter(x=>x.route.endsWith('/prepare'))).toHaveLength(1);expect(calls.filter(x=>x.route.endsWith('/query')).every(x=>x.body.input.taskId===jobId)).toBe(true);expect(out.issues).toEqual([]);expect(out.scope.jobId).toBe(jobId);expect(out.evidence.at(-1)).toMatchObject({jobId,complete:true,status:'completed'});expect(out.blocks.at(-1).rows[0]).toMatchObject({jobId,count:3});
+});
+it('incomplete and human states remain blocking, including completed with an incomplete range',async()=>{
+ for(const state of [{status:'needs_login',listOutcome:'pending'},{status:'paused',listOutcome:'complete'},{status:'partial',listOutcome:'complete'},{status:'failed',listOutcome:'interrupted'},{status:'completed',listOutcome:'limit'},{status:'completed',listOutcome:'complete',plan:{buckets:[{status:'pending'}]}}]){
+ const adapter=createExporterAgentAdapter({transport:async()=>({id:'actual-job',...state})}),out=await adapter.query('task',{taskId:'actual-job'},{});expect(out.issues.some((x:any)=>x.blocking)).toBe(true);expect(out.blocks.at(-1).rows[0].jobId).toBe('actual-job');}
+ const human=createExporterAgentAdapter({transport:async()=>({summary:'打开平台',requiresReview:false,blocks:[{type:'json',data:{state:'waiting-host-action'}}]})});const out=await human.prepare('host-action',{platform:'taobao'},{});expect(out.issues.at(-1)).toMatchObject({blocking:true,code:'EXPORTER_HOST_ACTION_REQUIRED'});
+});
+it('collection polling times out with a recoverable job ID and respects cancellation',async()=>{
+ const transport=async(_module:any,route:any)=>route.endsWith('/prepare')?{summary:'启动',requiresReview:false,blocks:[{data:{id:'still-running',status:'running'}}]}:{id:'still-running',status:'running',listOutcome:'pending'};
+ const adapter=createExporterAgentAdapter({transport,pollIntervalMs:1,maxWaitMs:5}),out=await adapter.prepare('resume',{taskId:'still-running'},{});expect(out.issues.at(-1)).toMatchObject({blocking:true,code:'EXPORTER_JOB_WAIT_TIMEOUT',jobId:'still-running'});
+ const controller=new AbortController(),reason=Object.assign(Error('用户取消'),{name:'AbortError'});controller.abort(reason);await expect(adapter.prepare('start',{platform:'taobao',from:'2026-01-01',to:'2026-01-31'},{signal:controller.signal})).rejects.toBe(reason);
+});
