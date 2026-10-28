@@ -23,3 +23,7 @@ transport(moduleId,route,{method,body,ctx,signal,approval,idempotencyKey})；模
 审批：prepare服务端保存并返回commitData引用；commit对照服务端结果、真实签名actor及中央proof校验task/result/version/dataset/revision/digest。receipt先预留processing，未知结果禁止重复调用；完成后持久化结果。失败或进程崩溃后的processing需人工核实，不宣称已恢复自动执行。
 
 目前合成隔离账本测试不代表外部平台登录/反爬/验证码验收。未进行正式数据操作或平台真实采集。
+
+## 自动阶段协议
+
+start/pause/resume/retry/finish/enrichDetails/host-action/export/hidePage 登记为 prepare、requiresReview=false。模块真实执行现有处理器后返回 summary/blocks/evidence/requiresReview:false，不返回 changes 或 commitData。运行时必须为调用持久化 ctx.idempotencyKey；模块缺键拒绝，重复键回读原结果，内容不同拒绝。响应丢失且结果未知仅返回顶层 processing/ok:false，不能视作完成。transfer/clear/代理与设置变更仍须中央人审。host-action 仅打开人工操作页面，不能代替登录验证码授权。
