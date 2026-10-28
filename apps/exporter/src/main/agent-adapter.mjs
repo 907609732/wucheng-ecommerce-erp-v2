@@ -18,10 +18,21 @@ export function validateExporterInput(id,input){
 }
 export function createExporterAgentAdapter({transport}){
  const request=(op,body,ctx)=>(typeof transport==='function'?transport:transport.request)('exporter','/api/integration/v1/agent/'+op,{method:op==='state'?'GET':'POST',body:body?{...body,taskId:ctx?.taskId,idempotencyKey:ctx?.idempotencyKey}:undefined,ctx,signal:ctx?.signal,approval:ctx?.approval,idempotencyKey:ctx?.idempotencyKey});
+ const requireDownload=()=>{if(typeof transport.download!=='function')throw Object.assign(Error('主机尚未提供真实文件产物下载能力'),{code:'ARTIFACT_TRANSPORT_UNAVAILABLE'});};
+ async function artifact(file,ctx){
+  requireDownload();if(!file?.fileId||!/^[A-Za-z0-9:_-]{1,300}$/.test(file.fileId)||file.available===false)throw Object.assign(Error('导出文件不存在或已经失效'),{code:'EXPORT_FILE_UNAVAILABLE'});
+  const result=await transport.download('exporter','/api/integration/v1/workbench/files/'+encodeURIComponent(file.fileId),{ctx,filename:file.filename,expectedSha256:file.sha256,maxBytes:512*1024*1024}),item=result?.artifact||result,id=item?.artifactId||item?.id;
+  if(typeof id!=='string'||!id||!Number.isSafeInteger(item?.size)||item.size<0||typeof item?.sha256!=='string'||!/^[a-f0-9]{64}$/i.test(item.sha256))throw Object.assign(Error('主机未返回已登记且可校验的真实文件产物'),{code:'ARTIFACT_RESULT_INVALID'});
+  return {artifactId:id,name:item.name||file.filename,mimeType:item.mimeType||'application/octet-stream',size:item.size,sha256:item.sha256};
+ }
+ async function exportResult(output,ctx){
+  if(output?.ok===false)return output;const file=output?.blocks?.map(b=>b.data).find(d=>d?.fileId);if(!file)throw Object.assign(Error('导出结果缺少真实文件标识'),{code:'EXPORT_RESULT_INVALID'});
+  const item=await artifact(file,ctx);return {...output,blocks:[...output.blocks,{type:'files',title:'订单导出文件',files:[item]}],evidence:[...(output.evidence||[]),{...item,label:item.name}]};
+ }
  return {id:'exporter',capabilities:[...exporterQueries.map(id=>({id,title:exporterLabels[id][0],kind:'query',description:exporterLabels[id][1],inputSchema:exporterSchemas[id],requiresReview:false})),...exporterActions.map(id=>({id,title:exporterLabels[id][0],kind:'prepare',description:exporterLabels[id][1],inputSchema:exporterSchemas[id],requiresReview:!exporterAutomatic.includes(id)}))],
  async binding(ctx){const s=await request('state',undefined,ctx);if(!s.dataSetId||s.revision===undefined)throw Error('导出台账本身份不可用');return {dataSetId:s.dataSetId,revision:s.revision};},
- async query(capabilityId,input,ctx){const data=await request('query',{capabilityId,input},ctx);return {summary:exporterLabels[capabilityId][0],blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data}]};},
- prepare:(capabilityId,input,ctx)=>request('prepare',{capabilityId,input},ctx),
+ async query(capabilityId,input,ctx){if(capabilityId==='file')requireDownload();const data=await request('query',{capabilityId,input},ctx),output={summary:exporterLabels[capabilityId][0],blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data}]};return capabilityId==='file'?exportResult(output,ctx):output;},
+ async prepare(capabilityId,input,ctx){if(capabilityId==='export')requireDownload();const output=await request('prepare',{capabilityId,input},ctx);return capabilityId==='export'?exportResult(output,ctx):output;},
  commit(prepared,ctx){let claims;try{claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString('utf8'));}catch{throw Error('中央审批凭据缺失');}return request('commit',{prepared,preparedId:prepared.commitData?.id,resultId:claims.resultId,resultVersion:claims.resultVersion},ctx);},
- receipt:(idempotencyKey,ctx)=>request('receipt',{idempotencyKey},ctx)};
+ async receipt(idempotencyKey,ctx){const output=await request('receipt',{idempotencyKey},ctx);return output?.requiresReview===false&&output.blocks?.some(b=>b.data?.fileId)?exportResult(output,ctx):output;}};
 }

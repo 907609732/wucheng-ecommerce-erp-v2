@@ -1,3 +1,6 @@
+import {exportOrders} from '../src/core/exporter';
+import {pipeline} from 'node:stream/promises';
+import {Readable} from 'node:stream';
 import {createExporterAgentAdapter,exporterSchemas,exporterLabels,validateExporterInput} from '../src/main/agent-adapter.mjs';
 import {signAgentApproval,agentDigest,approvalHeaders} from '../src/main/agent-approval.mjs';
 import {afterEach,describe,expect,it} from 'vitest';
@@ -17,11 +20,11 @@ const express=createRequire(import.meta.url)('express');
 const resources:{dir:string;store:Store;server?:Server}[]=[];
 afterEach(async()=>{for(const r of resources.splice(0)){if(r.server)await new Promise<void>(resolve=>r.server!.close(()=>resolve()));r.store.close();fs.rmSync(r.dir,{recursive:true,force:true});}});
 function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-exporter-workbench-'));const store=new Store(path.join(dir,'orders.sqlite'));const resource={dir,store,server:undefined as Server|undefined};resources.push(resource);return resource;}
-async function api(){
+async function api({realExport=false}={}){
   const fixtureData=fixture(),{dir,store}=fixtureData,app=express(),calls:string[]=[];
   const getDataSetIdentity=createWorkbenchMigration(store).getDataSetIdentity;
   const integration=installLocalIntegration(app,{id:'lingtu-order-export',root:dir,dataDir:dir,version:'0.2.0',getDataSetIdentity});
-  const workbench=installExporterWorkbench(integration.router,store,{dataDir:dir,version:'0.2.0',getDataSetIdentity,handlers:{busy:()=>false,changed:()=>{},invoke:(name,...args)=>{calls.push(name);if(name==='start')return store.create(args[0] as any);if(name==='executionLogs')return [];},exportFile:async(_input,directory)=>{const file=path.join(directory,'orders.csv');fs.writeFileSync(file,'orderId\n12345678901234567890');return {path:file,count:1,missing:0};},transfer:async(id,actor)=>({batchId:'batch-'+id,route:'/apps/purchase/integration-review.html?batch=test',actor:actor.id})}});
+  const workbench=installExporterWorkbench(integration.router,store,{dataDir:dir,version:'0.2.0',getDataSetIdentity,handlers:{busy:()=>false,changed:()=>{},invoke:(name,...args)=>{calls.push(name);if(name==='start')return store.create(args[0] as any);if(name==='executionLogs')return [];},exportFile:async(_input,directory)=>{if(realExport)return exportOrders(store.get(_input.taskId),store.orders(_input.taskId),directory,_input.format,_input.images);const file=path.join(directory,'orders.csv');fs.writeFileSync(file,'orderId\n12345678901234567890');return {path:file,count:1,missing:0};},transfer:async(id,actor)=>({batchId:'batch-'+id,route:'/apps/purchase/integration-review.html?batch=test',actor:actor.id})}});
   integration.state.workbench=workbench;installWorkbenchMigration(integration,{db:store.db,dir},(_facade:any,options:any)=>createWorkbenchMigration(store,options),{dataDir:dir,sourceInstance:'target'});integration.finish();const server=app.listen(0,'127.0.0.1');fixtureData.server=server;await new Promise<void>(resolve=>server.once('listening',resolve));
   const port=(server.address() as any).port,base='http://127.0.0.1:'+port,key=provisionWorkbenchKey(dir),token=fs.readFileSync(path.join(dir,'.integration-key'),'utf8').trim();
   async function request(route:string,{method='GET',body,role='admin',channel='ui',canRunTasks=false,requestId=randomUUID(),actorPatch={},extraHeaders={}}:any={}){
@@ -30,7 +33,7 @@ async function api(){
     const response=await fetch(base+requestPath,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...signWorkbenchActor(actor,key),...extraHeaders},body:body===undefined?undefined:JSON.stringify(body)});
     const result=response.headers.get('content-type')?.includes('json')?await response.json():await response.text();return {status:response.status,result};
   }
-  return {...fixtureData,calls,request,key};
+  return {...fixtureData,calls,request,key,base,token};
 }
 describe('exporter authoritative-server bridge',()=>{
   it('requires signed identity and exact route; never exposes cookie or host paths',async()=>{
@@ -133,4 +136,16 @@ it('all exporter capabilities have closed Chinese schemas enforced by real HTTP'
  for(const input of [{taskId:t.id,limit:501},{taskId:t.id,offset:-1},{taskId:t.id,limit:1.5},{taskId:t.id,extra:true}])expect((await request('/agent/query',{method:'POST',body:{capabilityId:'orders',input}})).status).toBe(400);
  const page=await request('/agent/query',{method:'POST',body:{capabilityId:'orders',input:{taskId:t.id,limit:1,offset:0}}});expect(page.status).toBe(200);expect(page.result).toMatchObject({taskId:t.id,moneyUnit:'fen',dateBasis:'order-created-at',limit:1,total:0,nextOffset:null});expect(JSON.stringify(page.result)).not.toContain('private');
  expect((await request('/agent/query',{method:'POST',body:{capabilityId:'file',input:{fileId:'C:/private/file'}}})).status).toBe(400);
+});
+
+it('real exporter CSV reaches registered task artifact by signed HTTP streaming, file query and receipt recovery',async()=>{
+ const {store,request,dir,base,key,token}=await api({realExport:true}),task=store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});
+ store.add(task.id,[{platform:'taobao',account:'synthetic-account',id:'12345678901234567890',createdAt:'2026-01-05 10:00:00',paidAt:'2026-01-05',shippedAt:'',completedAt:'',status:'交易成功',shop:'合成供应商',sellerId:'seller',paidFen:1234,freightFen:0,refundFen:0,refundStatus:'无退款',receiver:'收货人',phone:'13800000000',address:'合成地址',logistics:'',tracking:'',remark:'',detailUrl:'',items:[{id:'item',title:'螺丝',spec:'M3',quantity:1,unitPriceFen:1234,imageUrl:'',productUrl:''}],extra:{},missing:[],source:'response',capturedAt:new Date().toISOString()}]);
+ const taskDir=path.join(dir,'runtime','tasks','artifact-task');fs.mkdirSync(taskDir,{recursive:true});const registered:any[]=[],ctx:any={taskId:'artifact-task',idempotencyKey:'artifact-export-once',registerArtifact:({path:file,name,mimeType}:any)=>{expect(path.relative(taskDir,file)).not.toMatch(/^\.\./);const buffer=fs.readFileSync(file),item={id:randomUUID(),taskId:'artifact-task',path:file,name,mimeType,size:buffer.length,sha256:createHash('sha256').update(buffer).digest('hex')};registered.push(item);return item;}};
+ const transport:any=async(_module:any,route:any,options:any)=>{const out=await request(route.replace('/api/integration/v1',''),{method:options.method,body:options.body,channel:'mcp',canRunTasks:true});if(out.status!==200)throw Error(out.result.error);return out.result;};
+ transport.download=async(module:any,route:any,options:any)=>{expect(module).toBe('exporter');expect(route).toMatch(/^\/api\/integration\/v1\/workbench\/files\/[a-f0-9-]+$/);const now=Date.now(),actor:WorkbenchActor={v:1,id:'tailscale:tester@example.test',login:'tester@example.test',role:'editor',modules:['exporter'],canRunTasks:true,channel:'mcp',sessionId:'download-session',requestId:randomUUID(),issuedAt:now,expiresAt:now+30000,module,method:'GET',path:route};const response=await fetch(base+route,{headers:{Authorization:'Bearer '+token,...signWorkbenchActor(actor,key)}});expect(response.status).toBe(200);const target=path.join(taskDir,randomUUID()+'.csv');await pipeline(Readable.fromWeb(response.body as any),fs.createWriteStream(target));expect(fs.statSync(target).size).toBeLessThan(options.maxBytes);return options.ctx.registerArtifact({path:target,name:options.filename,mimeType:response.headers.get('content-type')});};
+ const adapter=createExporterAgentAdapter({transport}),result=await adapter.prepare('export',{taskId:task.id,format:'csv',images:false},ctx),file=result.blocks[0].data,fileBlock=result.blocks.find((b:any)=>b.type==='files');expect(fileBlock.files[0].artifactId).toBe(registered[0].id);expect(fileBlock.files[0].sha256).toBe(registered[0].sha256);expect(fs.readFileSync(registered[0].path,'utf8')).toContain('12345678901234567890');expect(fs.readFileSync(registered[0].path,'utf8')).toContain('12.34');expect(JSON.stringify(result)).not.toContain(taskDir);
+ const queried=await adapter.query('file',{fileId:file.fileId},ctx);expect(queried.blocks.find((b:any)=>b.type==='files').files[0].artifactId).toBeTruthy();const recovered=await adapter.receipt('artifact-export-once',ctx);expect(recovered.blocks.find((b:any)=>b.type==='files').files[0].artifactId).toBeTruthy();expect(registered).toHaveLength(3);expect(store.db.prepare('SELECT count(*) n FROM workbench_files').get()!.n).toBe(1);expect(new Set(registered.map(x=>x.sha256)).size).toBe(1);
+ const invalidTransport:any=async()=>({fileId:file.fileId,filename:'orders.csv',available:true});invalidTransport.download=async()=>({id:'fake-link'});await expect(createExporterAgentAdapter({transport:invalidTransport}).query('file',{fileId:file.fileId},ctx)).rejects.toMatchObject({code:'ARTIFACT_RESULT_INVALID'});
+ const missing=createExporterAgentAdapter({transport:async()=>({})});await expect(missing.prepare('export',{taskId:task.id,format:'csv'},ctx)).rejects.toMatchObject({code:'ARTIFACT_TRANSPORT_UNAVAILABLE'});
 });
