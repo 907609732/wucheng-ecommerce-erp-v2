@@ -19,4 +19,5 @@ test('real HTTP business mutation requires signed actor and central proof, recor
  r=await request('/commit',body,proof);assert.equal(r.status,200,await r.clone().text());const result=await r.json();assert.equal(result.receipt.result.name,input.name);
  r=await request('/commit',body,proof);assert.equal(r.status,200,await r.clone().text());assert.deepEqual(await r.json(),result);
  assert.equal(store.db.prepare('SELECT count(*) n FROM addresses').get().n,1);
+ const queried=await (await request('/query',{capabilityId:'addresses',input:{},taskId:'task'})).json();assert.equal(queried.blocks[0].rows[0].name,input.name);assert.equal(queried.data[0].name,input.name);assert.ok(queried.evidence[0].dataSetId);
 });

@@ -11,7 +11,7 @@ export function createPurchaseAgentService({store,key,binding,operations}){
  const receipt=(id,ctx)=>{const a=actor(ctx),r=db.prepare('SELECT body FROM agent_receipts WHERE actor_id=? AND idempotency_key=?').get(a.id,id);return r?JSON.parse(r.body):null;};
  return {
   binding:ctx=>{actor(ctx);return binding();},receipt,
-  query:(id,input,ctx)=>operation(id,'query',ctx).query(input||{},ctx),
+  async query(id,input,ctx){const data=await operation(id,'query',ctx).query(input||{},ctx);return {summary:purchaseAgentCapabilities.find(c=>c.id===id).title,blocks:[{type:'table',rows:Array.isArray(data)?data:[data]}],evidence:[binding()],data};},
   async prepare(capabilityId,input={},ctx){
    const op=operation(capabilityId,'prepare',ctx),before=binding();
    if('confirmed'in input||'approval'in input||'actor'in input||'password'in input)throw fail('UNTRUSTED_AUTH','模型输入不能携带授权材料',403);
@@ -30,11 +30,11 @@ export function createPurchaseAgentService({store,key,binding,operations}){
    // Synchronous domain transactions include receipt persistence. Async operations
    // must provide their own durable job key and cannot be wrapped in SQLite BEGIN.
    if(op.async){
-    db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(a.id,ctx.idempotencyKey,digest,JSON.stringify({state:'processing',idempotencyKey:ctx.idempotencyKey}));
-    try{const value=await op.commit(p.input,p.privateData,ctx),result={receipt:{id:randomUUID(),approvalId:proof.approvalId,idempotencyKey:ctx.idempotencyKey,capabilityId:p.capabilityId,...binding(),result:value}};db.prepare('UPDATE agent_receipts SET body=? WHERE actor_id=? AND idempotency_key=?').run(JSON.stringify(result),a.id,ctx.idempotencyKey);return result;}
-    catch(error){db.prepare('UPDATE agent_receipts SET body=? WHERE actor_id=? AND idempotency_key=?').run(JSON.stringify({state:'unknown',error:error.message,code:error.code,idempotencyKey:ctx.idempotencyKey}),a.id,ctx.idempotencyKey);throw error;}
+    db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(a.id,ctx.idempotencyKey,digest,JSON.stringify({state:'processing',ok:false,idempotencyKey:ctx.idempotencyKey}));
+    try{const value=await op.commit(p.input,p.privateData,ctx),result={state:'completed',ok:true,receipt:{id:randomUUID(),approvalId:proof.approvalId,idempotencyKey:ctx.idempotencyKey,capabilityId:p.capabilityId,...binding(),result:value}};db.prepare('UPDATE agent_receipts SET body=? WHERE actor_id=? AND idempotency_key=?').run(JSON.stringify(result),a.id,ctx.idempotencyKey);return result;}
+    catch(error){db.prepare('UPDATE agent_receipts SET body=? WHERE actor_id=? AND idempotency_key=?').run(JSON.stringify({state:'unknown',ok:false,error:error.message,code:error.code,idempotencyKey:ctx.idempotencyKey}),a.id,ctx.idempotencyKey);throw error;}
    }
-   return store.transaction(()=>{const value=op.commit(p.input,p.privateData,ctx);if(value?.then)throw fail('ASYNC_TRANSACTION','异步操作不可在同步事务中提交');const result={receipt:{id:randomUUID(),approvalId:proof.approvalId,idempotencyKey:ctx.idempotencyKey,capabilityId:p.capabilityId,...binding(),result:value}};db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(a.id,ctx.idempotencyKey,digest,JSON.stringify(result));return result;});
+   return store.transaction(()=>{const value=op.commit(p.input,p.privateData,ctx);if(value?.then)throw fail('ASYNC_TRANSACTION','异步操作不可在同步事务中提交');const result={state:'completed',ok:true,receipt:{id:randomUUID(),approvalId:proof.approvalId,idempotencyKey:ctx.idempotencyKey,capabilityId:p.capabilityId,...binding(),result:value}};db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(a.id,ctx.idempotencyKey,digest,JSON.stringify(result));return result;});
   }
  };
 }

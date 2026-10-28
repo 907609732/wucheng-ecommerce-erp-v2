@@ -37,7 +37,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   if(!config.enabled){db.exec('DELETE FROM mobile_sessions');pairing=null;ownedJobs.clear();}
   return config;
  };
- desktopApp.get('/phone',(_req,res)=>res.sendFile(path.join(root,'public/mobile-admin.html')));
+ desktopApp.get('/phone',(_req,res)=>res.sendFile('mobile-admin.html',{root:path.join(root,'public')}));
  const admin=express.Router();
  const tailscale=createTailscale();
  admin.get('/tailscale/status',async(_req,res)=>res.json({...await tailscale.status(config.origin),mobileEnabled:config.enabled}));
@@ -72,8 +72,8 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   next();
  });
  app.use(express.json({limit:'1mb'}));
- app.get('/',(_req,res)=>res.sendFile(path.join(root,'public/mobile.html')));
- for(const name of ['delivery-required.mjs','order-query.mjs','order-attributes.mjs','classification.mjs','order-number.mjs','mobile.js','mobile-query.js','mobile.css','surface-theme.css','upload-limits.mjs','supplier-picker.js','order-form-view.js','shipments.mjs','address-parse.mjs'])app.get('/'+name,(_req,res)=>res.sendFile(path.join(root,'public',name)));
+ app.get('/',(_req,res)=>res.sendFile('mobile.html',{root:path.join(root,'public')}));
+ for(const name of ['delivery-required.mjs','order-query.mjs','order-attributes.mjs','classification.mjs','order-number.mjs','mobile.js','mobile-query.js','mobile.css','surface-theme.css','upload-limits.mjs','supplier-picker.js','order-form-view.js','shipments.mjs','address-parse.mjs'])app.get('/'+name,(_req,res)=>res.sendFile(name,{root:path.join(root,'public')}));
  app.post('/api/mobile/pair',(req,res)=>{
   if(now()<blockedUntil)throw fail(429,'尝试过多，请十分钟后重试');
   const value=digest(String(req.body.code||'').trim());
@@ -103,7 +103,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   if(!username||username.length>40||/[\x00-\x1f]/.test(username))throw fail(400,'请填写1至40字的录入人姓名');
   db.prepare('UPDATE mobile_sessions SET username=? WHERE id=?').run(username,req.mobileSession.id);res.json({username});
  });
- app.get('/vendor/address-parse.js',(_req,res)=>res.sendFile(path.join(root,'node_modules/address-parse/dist/bundle.js')));
+ app.get('/vendor/address-parse.js',(_req,res)=>res.sendFile('bundle.js',{root:path.join(root,'node_modules/address-parse/dist')}));
  app.get('/api/mobile/addresses',(_req,res)=>res.json(addresses.list({tag:'收货地址'}).filter(a=>!a.supplier)));
  app.post('/api/mobile/addresses',(req,res)=>{
   const value=normalizeAddress({name:req.body.name,phone:req.body.phone,address:req.body.address,tags:['收货地址']});
