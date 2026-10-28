@@ -1,8 +1,8 @@
 {
   "format": "agent-beta-coverage/v1",
-  "generatedAt": "2026-10-28T10:31:20.024Z",
+  "generatedAt": "2026-10-28T10:35:51.466Z",
   "sourceNote": "Current checked-in manifests and builtin descriptors; dynamic route/UI/CLI reconciliation remains pending.",
-  "globalSourceHash": "afc36fc5652423e7c7a4137fc3d1f6cd09bdc53ae9284e045f8b751f8c4ca594",
+  "globalSourceHash": "57306af240c93943c6a7256af159d7dd67cec5e0f4af5c44bdb2c95b776fea62",
   "modules": [
     {
       "id": "warehouse",
