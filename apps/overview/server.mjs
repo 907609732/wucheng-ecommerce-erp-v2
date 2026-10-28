@@ -4,6 +4,7 @@ import {installWorkbenchMigration} from './lib/workbench-migration-routes.mjs';
 import {createWorkbenchMigration} from './lib/workbench-migration.mjs';
 import {installWorkbenchAudit} from './lib/workbench-module.mjs';
 import {installOverviewEdits} from './lib/integration-edits.mjs';
+import {installOverviewAgentRoutes} from './lib/agent-routes.mjs';
 import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +24,7 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  const s=openStore(dataDir),app=express(),token=randomBytes(32).toString('hex'),previews=new Map();const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1}}),restoreUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024,files:1}});
  const integration=installLocalIntegration(app,{id:'lingtu-business-overview',version:JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version,root,dataDir,busy:()=>edits.busy()||!!cainiao.info().activeJobId,capabilities:['overview.read','dashboard.read','edits.prepare','edits.review-ui','bills.read']});
  const edits=installOverviewEdits(integration,s,()=>healthy());
+ integration.agentBlocked=()=>edits.busy();
  integration.router.get('/bills',(_q,r)=>r.json({bills:s.bills(),payments:s.payments()}));
  integration.router.get('/overview',(q,r)=>r.json(getReport(q.query.month)));
  integration.router.get('/dashboard',(q,r)=>r.json(getDashboard(q.query)));installWorkbenchMigration(integration,s,createWorkbenchMigration,{sources:()=>healthy()});installWorkbenchAudit(integration,s);integration.finish();
@@ -30,6 +32,8 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  const src=()=>loadSources(sources);const healthy=()=>{const x=src();if(x.errors.length)throw fail(x.errors.map(x=>x.message).join('；'),503);return x;};const getReport=m=>report(s,src(),month(m||lastMonth()));
  const getDashboard=q=>dashboard(s,src(),{grain:q.grain||'month',period:q.period||q.month||lastMonth()});
  const cainiao=registerCainiao(app,s,cainiaoOptions);
+ s.agentTransactionGuard=()=>{if(cainiao.active)throw Object.assign(fail('云仓下载正在归档原件，请完成或暂停后提交财务变更',409),{code:'BACKGROUND_TASK_BUSY'});};
+ installOverviewAgentRoutes({app,integration,store:s,sources:src,cainiao});
  app.get('/api/health',(_req,res)=>res.json({app:'lingtu-business-overview',version:integration.state.version,localOnly:true}));
  app.get('/api/bootstrap',(_req,res)=>{const x=src();let salesPort=17870;try{salesPort=Number(fs.readFileSync(path.join(path.dirname(sources.sales),'server.port'),'utf8').trim())||17870;}catch{}res.json({token,month:lastMonth(),categories:CATEGORIES,shops:x.shops,sources:{purchase:{path:sources.purchase,url:'http://127.0.0.1:17868'},sales:{path:sources.sales,url:'http://127.0.0.1:'+salesPort}},errors:x.errors});});
  app.get('/api/overview',(req,res)=>res.json(getReport(req.query.month)));
@@ -62,6 +66,6 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  app.get('/api/audit',(_req,res)=>res.json(s.all('SELECT * FROM audit ORDER BY id DESC LIMIT 200')));
  for(const [url,p]of Object.entries({'chart.js':'chart.js/dist/chart.umd.js','tabulator.js':'tabulator-tables/dist/js/tabulator.min.js','tabulator.css':'tabulator-tables/dist/css/tabulator.min.css'}))app.get('/vendor/'+url,(_req,res)=>res.sendFile(path.join(root,'node_modules',p)));
  app.use(express.static(path.join(root,'public')));integration.workbench.finalize();
- app.use((err,_req,res,_next)=>{const msg=err.code==='SQLITE_CONSTRAINT_UNIQUE'||/UNIQUE constraint/.test(err.message)?'账单编号、关联记录或付款流水号重复':err.message;res.status(err.status||(/UNIQUE constraint/.test(err.message)?409:400)).json({error:msg});});return {app,store:s,cainiao,integration};
+ app.use((err,_req,res,_next)=>{const msg=err.code==='SQLITE_CONSTRAINT_UNIQUE'||/UNIQUE constraint/.test(err.message)?'账单编号、关联记录或付款流水号重复':err.message;res.status(err.status||err.statusCode||(/UNIQUE constraint/.test(err.message)?409:400)).json({error:msg,...(err.code?{code:err.code}:{})});});return {app,store:s,cainiao,integration};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){const {app,store,cainiao,integration}=createApp();const port=Number(process.env.OVERVIEW_PORT||17890);const server=app.listen(port,'127.0.0.1',()=>console.log('灵兔经营收支总览：http://127.0.0.1:'+port));integration.attach(server);server.on('error',e=>{console.error(e.message);store.close();process.exitCode=1;});const stop=async()=>{await cainiao.close();server.close(()=>{store.close();process.exit(0);});};integration.onStop=stop;process.on('SIGINT',stop);process.on('SIGTERM',stop);}

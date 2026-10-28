@@ -36,14 +36,19 @@ export class CainiaoDownloads{
  info(){return {...this.browser.status(),activeJobId:this.active?.id||this.liveLock()?.jobId||null,multiMonthReady:this.multiMonthReady()};}
  connect(){if(this.active)throw fail('下载运行中，请先暂停任务再重新连接',409);if(this.browser.status().status==='connecting')return;void this.browser.connect();}
  async disconnect(){if(this.active)throw fail('请先取消运行中的任务',409);await this.browser.disconnect();}
- start(input){
+ validateStart(input){
   if(this.active||this.liveLock())throw fail('已有下载任务运行中或运行锁需要核对',409);const conn=this.browser.status();if(conn.status!=='connected')throw fail('请先连接已登录的 Chrome',409);
   if(input.account!==conn.account)throw fail('当前账户已变化，请重新确认页面账户',409);
   const months=monthRange(input.from,input.to||input.from);if(months.length>1&&!this.multiMonthReady())throw fail('先完成 2026 年 9 月真实下载核验，再使用多月下载',409);
-  const job={id:id(),account:conn.account,accountKey:hash(conn.account).slice(0,16),months,interimMonths:months.filter(m=>m===chinaMonth()),createdAt:now(),status:'pending',force:input.force===true,message:'准备查询账单',items:months.flatMap(month=>Object.keys(REPORTS).map(type=>({month,type,status:'pending',fileIds:[]})))};
+  return {account:conn.account,months};
+ }
+ start(input){
+  const {account,months}=this.validateStart(input);
+  const job={id:id(),account,accountKey:hash(account).slice(0,16),months,interimMonths:months.filter(m=>m===chinaMonth()),createdAt:now(),status:'pending',force:input.force===true,message:'准备查询账单',items:months.flatMap(month=>Object.keys(REPORTS).map(type=>({month,type,status:'pending',fileIds:[]})))};
   this.save(job);this.launch(job);return this.get(job.id);
  }
- resume(jid){if(this.active||this.liveLock())throw fail('已有下载任务运行中',409);const job=this.get(jid);if(this.browser.status().status!=='connected'||this.browser.status().account!==job.account)throw fail('请连接此任务对应的菜鸟账户',409);if(job.items.every(done))return job;this.launch(job);return this.get(jid);}
+ validateResume(jid){if(this.active||this.liveLock())throw fail('已有下载任务运行中',409);const job=this.get(jid);if(this.browser.status().status!=='connected'||this.browser.status().account!==job.account)throw fail('请连接此任务对应的菜鸟账户',409);return job;}
+ resume(jid){const job=this.validateResume(jid);if(job.items.every(done))return job;this.launch(job);return this.get(jid);}
  cancel(jid){const job=this.get(jid);if(this.active?.id===jid){this.cancelled.add(jid);job.message='正在停止本地后续操作，平台已生成任务保留';}else{if(this.liveLock()?.jobId===jid)throw fail('该任务由另一个系统进程运行，请在其页面停止',409);job.status='cancelled';job.message='已停止，原件及平台任务保留，可继续';}this.save(job);return job;}
  launch(job){this.acquireLock(job);this.cancelled.delete(job.id);job.status='running';this.active=job;this.save(job);this.running=this.run(job).catch(e=>{job.status='paused';job.message=humanError(e);this.save(job);}).finally(()=>{this.releaseLock(job);this.active=null;});}
  check(job){if(this.cancelled.has(job.id))throw Object.assign(Error('已停止，已下载原件和平台任务保留'),{cancelled:true});}

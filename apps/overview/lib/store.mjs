@@ -1,6 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {id,now,hash,fail,required,date,month,integer,sum,CATEGORIES} from './util.mjs';
 import {sourceTarget} from './sources.mjs';
 export const billIdentity=b=>hash(b.kind==='freight'?[b.kind,b.party,b.billNo,b.period,b.owner]:[b.kind,b.party,b.billNo]);
@@ -28,7 +29,14 @@ export function openStore(dir){fs.mkdirSync(dir,{recursive:true});for(const p of
  CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,entity TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE TRIGGER IF NOT EXISTS immutable_audit_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT,'AUDIT_IMMUTABLE');END;
  CREATE TRIGGER IF NOT EXISTS immutable_audit_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT,'AUDIT_IMMUTABLE');END;`);
- let depth=0;
+ let depth=0,transactionOwner=null;
+ const ownerContext=new AsyncLocalStorage(),checkOwner=()=>{if(ownerContext.getStore()?.closed)throw Object.assign(fail('事务已结束，不能从脱离的异步任务写入账本',409),{code:'STORE_TRANSACTION_CLOSED'});if(transactionOwner!==null&&ownerContext.getStore()!==transactionOwner)throw Object.assign(fail('其他请求正在提交账本事务，请稍后重试',409),{code:'STORE_TRANSACTION_BUSY'});};
+ // Keep the native DatabaseSync instance (node:sqlite backup requires its brand),
+ // but guard even direct db.prepare(...).run/get/all calls and cached statements.
+ const nativePrepare=db.prepare.bind(db),nativeExec=db.exec.bind(db),nativeClose=db.close.bind(db);
+ db.exec=(...args)=>{checkOwner();return nativeExec(...args);};
+ db.prepare=(...args)=>{checkOwner();const statement=nativePrepare(...args);for(const method of ['run','get','all','iterate']){const native=statement[method]?.bind(statement);if(native)statement[method]=(...values)=>{checkOwner();const result=native(...values);if(method!=='iterate')return result;return {next(...p){checkOwner();return result.next(...p);},return(...p){checkOwner();return result.return?.(...p)||{done:true};},[Symbol.iterator](){return this;}};};}return statement;};
+ db.close=(...args)=>{checkOwner();return nativeClose(...args);};
  const s={db,dir,all:(q,...p)=>db.prepare(q).all(...p),get:(q,...p)=>db.prepare(q).get(...p),run:(q,...p)=>db.prepare(q).run(...p),tx(fn){const nested=depth>0,name='nested_'+depth;db.exec(nested?'SAVEPOINT '+name:'BEGIN IMMEDIATE');depth++;try{const v=fn();db.exec(nested?'RELEASE '+name:'COMMIT');return v;}catch(e){db.exec(nested?'ROLLBACK TO '+name:'ROLLBACK');if(nested)db.exec('RELEASE '+name);throw e;}finally{depth--;}},audit(a,e,p){s.run('INSERT INTO audit(action,entity,payload,created_at) VALUES(?,?,?,?)',a,e,JSON.stringify(p),now());},close(){db.close();}};
  s.bills=()=>s.all('SELECT * FROM bills ORDER BY created_at DESC,id').map(r=>({...JSON.parse(r.payload),id:r.id,version:r.version,voided:!!r.voided,batchId:r.batch_id,createdAt:r.created_at}));
  s.payments=()=>s.all('SELECT * FROM payments ORDER BY created_at,id').map(r=>({...JSON.parse(r.payload),id:r.id,billId:r.bill_id,voided:!!r.voided,createdAt:r.created_at}));
@@ -44,5 +52,6 @@ export function openStore(dir){fs.mkdirSync(dir,{recursive:true});for(const p of
  s.voidBill=(rid,{version,reason})=>s.tx(()=>{const b=s.bill(rid);if(b.version!==version||b.voided)throw fail('账单已变化',409);required(reason,'作废原因');if(s.paid(rid)!==0)throw fail('仍有净付款，不能作废');s.run('UPDATE bills SET voided=1,version=version+1 WHERE id=?',rid);s.audit('bill.void',rid,{before:b,reason});return {ok:true};});
  s.addPayment=(rid,input,{reservedId}={})=>s.tx(()=>{if(reservedId&&!/^[a-f0-9-]{36}$/i.test(reservedId))throw fail('内部预留付款标识无效');const b=s.bill(rid);if(b.voided)throw fail('已作废账单不能付款');if(input.version!==b.version)throw fail('账单已变化，请刷新后付款',409);const p={date:date(input.date),direction:input.direction,amountCents:integer(input.amountCents),reference:required(input.reference,'付款流水号'),component:input.component||'general',note:String(input.note||'').slice(0,500)};if(!['pay','refund'].includes(p.direction)||!p.amountCents)throw fail('付款类型或金额无效');if(!['general','net','remittance','employer'].includes(p.component))throw fail('付款项目无效');const next=s.paid(rid)+(p.direction==='refund'?-p.amountCents:p.amountCents);if(next<0||next>b.amountCents)throw fail('付款不能超过账单应付，退款不能超过已付');validatePaymentTimeline([...s.payments().filter(x=>x.billId===rid&&!x.voided),p],b.amountCents);const pid=reservedId||id();s.run('INSERT INTO payments(id,bill_id,reference,payload,created_at) VALUES(?,?,?,?,?)',pid,rid,p.reference,JSON.stringify(p),now());s.run('UPDATE bills SET version=version+1 WHERE id=?',rid);s.audit('payment.create',pid,{billId:rid,...p});return {id:pid,...p};});
  s.voidPayment=(pid,{reason})=>s.tx(()=>{required(reason,'撤销原因');const p=s.payments().find(x=>x.id===pid&&!x.voided);if(!p)throw fail('付款记录不存在',404);const remaining=s.payments().filter(x=>x.billId===p.billId&&!x.voided&&x.id!==pid);validatePaymentTimeline(remaining,s.bill(p.billId).amountCents);s.run('UPDATE payments SET voided=1 WHERE id=?',pid);s.run('UPDATE bills SET version=version+1 WHERE id=?',p.billId);s.audit('payment.void',pid,{before:p,reason});return {ok:true};});
+ s.agentTransaction=async fn=>{checkOwner();s.agentTransactionGuard?.();if(depth)throw fail('Agent事务不能嵌套进入',409);const owner={closed:false};transactionOwner=owner;return ownerContext.run(owner,async()=>{let begun=false;try{db.exec('BEGIN IMMEDIATE');begun=true;depth++;const result=await fn();db.exec('COMMIT');return result;}catch(e){if(begun)db.exec('ROLLBACK');throw e;}finally{if(begun)depth--;owner.closed=true;transactionOwner=null;}});};
  return s;
 }

@@ -24,6 +24,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
   let writes=0,server,stopping=false,maintenance=nativeMaintenance;
   const refreshMaintenance=()=>{if(fs.existsSync(maintenanceFile)){try{maintenanceOwner=JSON.parse(fs.readFileSync(maintenanceFile,'utf8'));}catch{maintenanceOwner={maintenance:true,corrupt:true};}maintenance=true;}else{maintenanceOwner=null;maintenance=nativeMaintenance;}return maintenance;};refreshMaintenance();
   app.use((req,res,next)=>{
+    if(api.agentBusy?.()&&!req.path.startsWith('/api/integration/v1/agent/'))return res.status(503).json({error:'正在原子提交 Agent 业务，请稍后重试',code:'AGENT_COMMIT_BUSY'});
     refreshMaintenance();
     if(stopping&&req.path!=='/api/integration/v1/capabilities')return res.status(503).json({error:'服务正在停止，请稍后重试'});
     if(maintenance&&!['GET','HEAD','OPTIONS'].includes(req.method)&&!['/api/integration/v1/stop','/api/integration/v1/maintenance/activate'].includes(req.path)&&!req.path.startsWith('/api/integration/v1/workbench/migration/'))return res.status(503).json({error:'模块正在安装检查中，暂不允许修改账本',code:'MODULE_MAINTENANCE'});
@@ -49,13 +50,14 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
     r.json({nonce});
   });
   router.use((q,r,next)=>{
+    if(q.path.startsWith('/agent/')&&q.workbenchActor){q.integration={role:'agent',actor:q.workbenchActor};return next();}
     const sid=String(q.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('integration_review='))?.slice(19);
     const s=sessions.get(sid);
     if(s&&s.expires>Date.now()&&equal(q.headers['x-review-token'],s.nonce)&&(!q.workbenchActor?!s.actorId:q.workbenchActor.channel==='ui'&&s.actorId===q.workbenchActor.id&&s.actorSession===q.workbenchActor.sessionId)){q.integration={role:'ui',session:sid,actor:q.workbenchActor};return next();}
     if(equal(q.headers.authorization,`Bearer ${key}`)){q.integration={role:'agent',actor:q.workbenchActor};return next();}
     r.status(401).json({error:'本机连接已过期，请重新打开核对页面',code:'INTEGRATION_AUTH'});
   });
-  router.use(express.json({limit:'20mb'}));
+  router.use(express.json({limit:'160mb'}));
   const requireReview=(q,_r,next)=>{if(q.integration.role!=='ui'||q.workbenchActor&&(q.workbenchActor.channel!=='ui'||q.workbenchActor.role==='viewer'))throw integrationError('此操作必须在核对页面由你确认',403,'UI_CONFIRMATION_REQUIRED');next();};
   router.post('/maintenance/activate',async(q,r)=>{
     if(q.integration.role!=='agent'||q.body.confirm!==true)throw integrationError('仅允许启动台完成模块激活',403);
