@@ -1,0 +1,13 @@
+{
+  "version": "0.21.0",
+  "sourceCommit": "0a195aa4636494812a52ab7068a5ab822d050abf",
+  "files": {
+    "acp_adapter/server.py": "dcad3c59a9b8a460d293a0825ed1faeede5ae3848303825165f58b7f5eec13d4",
+    "acp_adapter/session.py": "c174dae53d7fbc292416973174f20c738ca6d65e7618a8a3a96662e85a971625",
+    "run_agent.py": "9f789a3cd61821e8894882b6a035b6885d749a35ab045d9b16928bb4155b049c",
+    "model_tools.py": "8af21e3a3ec73444f9612d1d17640c62f5b19b8d201ce0cb836e79f0ccdddc86",
+    "agent/tool_executor.py": "409b9f349c58376365ef4f9a94f374d5886e9b387cc257b1e9d50fdcb0495d61",
+    "agent/conversation_loop.py": "86474bf782d9418c4203dd662c46227784698d53090f6664ddb3cdf6119d20df",
+    "agent/api_request_hooks.py": "c7c248e71714afa0047885fa0a1414efbc6f8288cea3ec21470bc9353b4b1a43"
+  }
+}
