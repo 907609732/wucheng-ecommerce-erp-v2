@@ -27,3 +27,7 @@ transport(moduleId,route,{method,body,ctx,signal,approval,idempotencyKey})；模
 ## 自动阶段协议
 
 start/pause/resume/retry/finish/enrichDetails/host-action/export/hidePage 登记为 prepare、requiresReview=false。模块真实执行现有处理器后返回 summary/blocks/evidence/requiresReview:false，不返回 changes 或 commitData。运行时必须为调用持久化 ctx.idempotencyKey；模块缺键拒绝，重复键回读原结果，内容不同拒绝。响应丢失且结果未知仅返回顶层 processing/ok:false，不能视作完成。transfer/clear/代理与设置变更仍须中央人审。host-action 仅打开人工操作页面，不能代替登录验证码授权。
+
+## 输入及结果契约
+
+`agent-adapter.mjs` 导出每项封闭 JSON Schema 与中文能力语义；模块服务端使用同源校验。平台枚举、日期与起止关系、原提取计划校验、任务/订单/文件ID、导出格式、开关、分页均拒绝额外字段和错误类型。orders/logs 支持 offset/limit（默认100，最多500），返回 total/nextOffset；orders 明示 moneyUnit=fen 与 dateBasis=order-created-at。file 查询使用导出结果中的 fileId，仅本人或管理员可读取元信息；本机路径、cookie、游标及凭据不返回 Agent。

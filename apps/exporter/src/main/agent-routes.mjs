@@ -2,15 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {agentDigest,verifyAgentApproval,approvalFromHeaders} from './agent-approval.mjs';
-import {exporterQueries,exporterActions,exporterAutomatic} from './agent-adapter.mjs';
+import {exporterQueries,exporterActions,exporterAutomatic,validateExporterInput,exporterLabels} from './agent-adapter.mjs';
 const fail=(code,message,status=400)=>Object.assign(Error(message),{code,status});
-export function installExporterAgentRoutes(router,{store,handlers,key,binding,guard,cleanTask,platformById,transferSnapshot,dataDir,platforms=[]}){
+export function installExporterAgentRoutes(router,{store,handlers,key,binding,guard,cleanTask,platformById,transferSnapshot,dataDir,platforms=[],validateStart=()=>{}}){
  store.db.exec('CREATE TABLE IF NOT EXISTS agent_prepared(id TEXT PRIMARY KEY,actor TEXT NOT NULL,payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS agent_receipts(actor TEXT NOT NULL,id TEXT NOT NULL,digest TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(actor,id))');
- const route=(name,fn)=>router.post('/agent/'+name,guard(),async(q,r,next)=>{try{r.json(await fn(q));}catch(e){e.status=e.status||e.statusCode||400;next(e);}});
+ const route=(name,fn)=>router.post('/agent/'+name,guard(),async(q,r,next)=>{try{r.json(publicValue(await fn(q)));}catch(e){e.status=e.status||e.statusCode||400;next(e);}});
  const state=()=>({...binding(),platforms:platforms.map(({id,name,mode})=>({id,name,mode})),tasks:store.tasks().map(cleanTask),busy:handlers.busy()});
- router.get('/agent/state',guard(),(_q,r)=>r.json(state()));
- const query=(id,input={})=>{if(!exporterQueries.includes(id))throw fail('CAPABILITY_UNKNOWN','未知查询');if(id==='state')return state();if(id==='logs')return handlers.invoke('executionLogs',platformById(input.platform).id);const task=store.get(input.taskId);if(id==='task')return cleanTask(task);if(id==='orders')return {task:cleanTask(task),orders:store.orders(task.id)};return transferSnapshot(task,store.orders(task.id));};
- route('query',q=>query(q.body.capabilityId,q.body.input));
+ router.get('/agent/state',guard(),(_q,r)=>r.json(publicValue(state())));
+ const query=(id,input={},actor)=>{validateExporterInput(id,input);if(!exporterQueries.includes(id))throw fail('CAPABILITY_UNKNOWN','未知查询');if(id==='state')return state();if(id==='file'){const f=store.db.prepare('SELECT * FROM workbench_files WHERE id=?').get(input.fileId);if(!f||f.owner_id!==actor.id&&actor.role!=='admin')throw fail('FILE_NOT_FOUND','文件不存在或不可访问',404);return {fileId:f.id,filename:f.filename,createdAt:f.created_at,available:fs.existsSync(f.path),downloadUrl:'/api/workbench/v1/modules/exporter/files/'+f.id};}if(id==='logs')return Promise.resolve(handlers.invoke('executionLogs',platformById(input.platform).id)).then(rows=>{const values=Array.isArray(rows)?rows:rows.entries||[],offset=input.offset||0,limit=input.limit||100;return {platform:input.platform,offset,limit,total:values.length,entries:values.slice(offset,offset+limit),nextOffset:offset+limit<values.length?offset+limit:null};});const task=store.get(input.taskId);if(id==='task')return cleanTask(task);if(id==='orders'){const orders=store.orders(task.id),offset=input.offset||0,limit=input.limit||100;return {task:cleanTask(task),taskId:task.id,offset,limit,total:orders.length,nextOffset:offset+limit<orders.length?offset+limit:null,moneyUnit:'fen',dateBasis:'order-created-at',orders:orders.slice(offset,offset+limit)};}return transferSnapshot(task,store.orders(task.id));};
+ const publicValue=v=>Array.isArray(v)?v.map(publicValue):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).filter(([k])=>!['accountCookie','cursor','exportedPath','path','directory','filePath','certificate','token','password','authorization'].includes(k)).map(([k,x])=>[k,publicValue(x)])):typeof v==='string'?v.replace(/[A-Za-z]:[\\/][^\r\n"<>|]*/g,'[主机路径]'):v;
+ route('query',async q=>publicValue(await query(q.body.capabilityId,q.body.input,q.workbenchActor)));
  route('receipt',q=>{const row=store.db.prepare('SELECT payload FROM agent_receipts WHERE actor=? AND id=?').get(q.workbenchActor.id,q.body.idempotencyKey);return row?JSON.parse(row.payload):null;});
  const perform=async(a,i,actor)=>{
   let result;
@@ -26,6 +27,7 @@ return result;
  };
  route('prepare',async q=>{
   const {capabilityId,input={}}=q.body,actor=q.workbenchActor;
+  validateExporterInput(capabilityId,input);if(capabilityId==='start')validateStart(input);
   if(!exporterActions.includes(capabilityId))throw fail('CAPABILITY_UNKNOWN','未知操作');
   if(actor.role==='viewer')throw fail('READ_ONLY','当前用户仅可查看',403);
   if(['start','pause','resume','retry','finish','enrichDetails','host-action'].includes(capabilityId)&&!(actor.role==='admin'||actor.canRunTasks))throw fail('TASK_PERMISSION_REQUIRED','无采集权限',403);
@@ -45,12 +47,12 @@ return result;
    const digest=agentDigest({capabilityId,input,taskId:q.body.taskId}),old=store.db.prepare('SELECT * FROM agent_receipts WHERE actor=? AND id=?').get(actor.id,id);
    if(old){if(old.digest!==digest)throw fail('IDEMPOTENCY_CONFLICT','自动请求键内容变化',409);return JSON.parse(old.payload);}
    store.db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(actor.id,id,digest,JSON.stringify({state:'processing',ok:false,idempotencyKey:id}));
-   const data=await perform(capabilityId,input,actor),output={summary:'导出台自动阶段：'+capabilityId,requiresReview:false,blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data,...binding()}]};
+   const data=await perform(capabilityId,input,actor),output={summary:exporterLabels[capabilityId][0],requiresReview:false,blocks:[{type:'json',data}],evidence:[{module:'exporter',capabilityId,data,...binding()}]};
    store.db.prepare('INSERT INTO workbench_audit VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),actor.id,actor.sessionId,actor.channel,'agent.'+capabilityId,String(input.taskId||''),'completed',new Date().toISOString());
    store.db.prepare('UPDATE agent_receipts SET payload=? WHERE actor=? AND id=?').run(JSON.stringify(output),actor.id,id);return output;
   }
   const changes=[{operation:capabilityId,input}],id=randomUUID(),commitData={id};
-  const prepared={capabilityId,input,...current,summary:'导出台：'+capabilityId,scope:{taskId:input.taskId,platform:input.platform},blocks:[],evidence:input.taskId?[{task:cleanTask(store.get(input.taskId)),count:store.orders(input.taskId).length}]:[],changes,issues:capabilityId==='host-action'?[{code:'HUMAN_PLATFORM_ACTION',message:'登录、验证码及平台授权由用户在主机完成'}]:[],commitData};
+  const prepared={capabilityId,input,...current,summary:exporterLabels[capabilityId][0],scope:{taskId:input.taskId,platform:input.platform},blocks:[],evidence:input.taskId?[{task:cleanTask(store.get(input.taskId)),count:store.orders(input.taskId).length}]:[],changes,issues:capabilityId==='host-action'?[{code:'HUMAN_PLATFORM_ACTION',message:'登录、验证码及平台授权由用户在主机完成'}]:[],commitData};
   store.db.prepare('INSERT INTO agent_prepared VALUES(?,?,?)').run(id,actor.id,JSON.stringify(prepared));return prepared;
  });
  route('commit',async q=>{
@@ -61,7 +63,7 @@ return result;
   const proof=approvalFromHeaders(q.headers),claims=verifyAgentApproval(proof,key,{actorId:actor.id,module:'exporter',idempotencyKey:q.body.idempotencyKey,taskId:q.body.taskId,resultId:q.body.resultId,resultVersion:q.body.resultVersion,capabilityId:p.capabilityId,dataSetId:p.dataSetId,revision:p.revision,changeDigest:digest});
   const old=store.db.prepare('SELECT * FROM agent_receipts WHERE actor=? AND id=?').get(actor.id,claims.idempotencyKey);if(old){if(old.digest!==digest)throw fail('IDEMPOTENCY_CONFLICT','重复请求不同',409);return JSON.parse(old.payload);}
   const current=binding();if(current.dataSetId!==p.dataSetId||current.revision!==p.revision)throw fail('REVISION_CHANGED','账本已变化，请重新复核',409);
-  const i=p.input,a=p.capabilityId;if(actor.role==='viewer'||a==='clear'&&actor.role!=='admin')throw fail('PERMISSION_DENIED','权限已变化',403);
+  const i=p.input,a=p.capabilityId;validateExporterInput(a,i);if(actor.role==='viewer'||a==='clear'&&actor.role!=='admin')throw fail('PERMISSION_DENIED','权限已变化',403);
   if(['start','pause','resume','retry','finish','enrichDetails','host-action'].includes(a)&&!(actor.role==='admin'||actor.canRunTasks))throw fail('TASK_PERMISSION_REQUIRED','无采集权限',403);
   store.db.prepare('INSERT INTO agent_receipts VALUES(?,?,?,?)').run(actor.id,claims.idempotencyKey,digest,JSON.stringify({state:'processing',ok:false,idempotencyKey:claims.idempotencyKey}));
   const result=await perform(a,i,actor);

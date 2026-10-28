@@ -1,3 +1,5 @@
+import {checkRange} from '../core/values';
+import {createPlan} from '../core/extraction-plan';
 import {installExporterAgentRoutes} from './agent-routes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -100,6 +102,6 @@ export function installExporterWorkbench(router:any,store:Store,options:{dataDir
     if(handlers.busy())throw fail('任务正在运行，不能清理',409,'SERVICE_BUSY');
     store.clear(platformById(q.params.platform).id as PlatformId);handlers.changed();return {ok:true,revision:dataSet().revision};
   }));
-  installExporterAgentRoutes(router,{store,handlers,key,binding:dataSet,guard,cleanTask,platformById,transferSnapshot,platforms,dataDir:options.dataDir});
+  installExporterAgentRoutes(router,{store,handlers,key,binding:dataSet,guard,cleanTask,platformById,transferSnapshot,platforms,validateStart:(input:StartInput)=>{checkRange(input.from,input.to);if(input.plan)createPlan(input.platform,input.from,input.to,input.plan);},dataDir:options.dataDir});
   return {protocolVersion:1};
 }

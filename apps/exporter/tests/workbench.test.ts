@@ -1,4 +1,4 @@
-import {createExporterAgentAdapter} from '../src/main/agent-adapter.mjs';
+import {createExporterAgentAdapter,exporterSchemas,exporterLabels,validateExporterInput} from '../src/main/agent-adapter.mjs';
 import {signAgentApproval,agentDigest,approvalHeaders} from '../src/main/agent-approval.mjs';
 import {afterEach,describe,expect,it} from 'vitest';
 import {createRequire} from 'node:module';
@@ -119,5 +119,18 @@ it('automatic collection preparation dispatches once without a review draft',asy
  const {request,store,calls}=await api();const body={capabilityId:'start',input:{platform:'taobao',from:'2026-01-01',to:'2026-01-31'},taskId:'agent-automatic',idempotencyKey:'automatic-1'};
  const first=await request('/agent/prepare',{method:'POST',channel:'mcp',canRunTasks:true,body});expect(first.status).toBe(200);expect(first.result.requiresReview).toBe(false);expect(first.result.commitData).toBeUndefined();expect(first.result.changes).toBeUndefined();expect(first.result.blocks[0].data.id).toBeTruthy();
  const second=await request('/agent/prepare',{method:'POST',channel:'mcp',canRunTasks:true,body});expect(second.result).toEqual(first.result);expect(store.tasks()).toHaveLength(1);expect(calls.filter(x=>x==='start')).toHaveLength(1);
+ const exported=await request('/agent/prepare',{method:'POST',channel:'mcp',body:{capabilityId:'export',input:{taskId:store.tasks()[0].id,format:'csv'},taskId:'agent-automatic',idempotencyKey:'auto-export'}});expect(exported.status).toBe(200);const fileId=exported.result.blocks[0].data.fileId;
+ const file=await request('/agent/query',{method:'POST',body:{capabilityId:'file',input:{fileId}}});expect(file.status).toBe(200);expect(file.result).toMatchObject({fileId,available:true});expect(JSON.stringify(file.result)).not.toContain('workbench-exports');
+ expect((await request('/agent/query',{method:'POST',role:'editor',actorPatch:{id:'other-user'},body:{capabilityId:'file',input:{fileId}}})).status).toBe(404);
+
  expect((await request('/agent/prepare',{method:'POST',role:'editor',channel:'mcp',body:{...body,idempotencyKey:'denied'}})).status).toBe(403);
+});
+
+it('all exporter capabilities have closed Chinese schemas enforced by real HTTP',async()=>{
+ for(const [id,schema] of Object.entries(exporterSchemas) as any){expect(schema.additionalProperties).toBe(false);expect(schema.properties).toBeTruthy();expect(schema.required).toBeInstanceOf(Array);expect(exporterLabels[id][0]).toMatch(/[\u4e00-\u9fff]/);expect(()=>validateExporterInput(id,{unknownField:1})).toThrow();}
+ for(const input of [{platform:'unknown',from:'2026-01-01',to:'2026-01-31'},{platform:'taobao',from:'2026-02-30',to:'2026-03-02'},{platform:'taobao',from:'2026-02-02',to:'2026-02-01'},{platform:'taobao',from:'2026-01-01',to:'2026-01-31',plan:{granularity:'year',segments:[]}}])expect(()=>validateExporterInput('start',input)).toThrow();
+ const {request,store}=await api();const t=store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});store.update(t.id,{cursor:'C:/private/cursor',plan:{buckets:[{cursor:'C:/private/token'}]} as any});
+ for(const input of [{taskId:t.id,limit:501},{taskId:t.id,offset:-1},{taskId:t.id,limit:1.5},{taskId:t.id,extra:true}])expect((await request('/agent/query',{method:'POST',body:{capabilityId:'orders',input}})).status).toBe(400);
+ const page=await request('/agent/query',{method:'POST',body:{capabilityId:'orders',input:{taskId:t.id,limit:1,offset:0}}});expect(page.status).toBe(200);expect(page.result).toMatchObject({taskId:t.id,moneyUnit:'fen',dateBasis:'order-created-at',limit:1,total:0,nextOffset:null});expect(JSON.stringify(page.result)).not.toContain('private');
+ expect((await request('/agent/query',{method:'POST',body:{capabilityId:'file',input:{fileId:'C:/private/file'}}})).status).toBe(400);
 });
