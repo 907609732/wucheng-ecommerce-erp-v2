@@ -1,0 +1,13 @@
+{
+  "format": "agent-beta-migration-rules/v1",
+  "pathColumns": {
+    "warehouse": {"inventory_data_validations": ["source_file"], "warehouse_monthly_sales": ["source_file"], "warehouse_monthly_sales_validations": ["source_file"], "workbench_files": ["path"]},
+    "purchase": {"imports": ["file_path"], "order_attachments": ["file_path", "thumb_path"], "workbench_files": ["path"]},
+    "sales": {"imports": ["original_path"], "freight_attachments": ["original_path"], "workbench_files": ["path"]},
+    "overview": {"imports": ["path"], "workbench_files": ["path"]},
+    "exporter": {"workbench_files": ["path"]}
+  },
+  "jsonFields": {"exporter": {"tasks": {"payload": {"strip": ["accountCookie", "cursor", "detailExport"], "stripRecursive": ["accountCookie", "cursor", "detailExport"], "paths": ["exportedPath"], "set": {"cursor": "", "historicalOnly": true}, "pauseIncomplete": true}}}},
+  "secretColumns": {},
+  "secretSettings": {"exporter": ["proxyPassword", "accessToken", "refreshToken", "apiKey"]}
+}
