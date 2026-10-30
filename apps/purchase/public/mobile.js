@@ -28,8 +28,8 @@ let messageTimer;
 const mobileQuery=mountMobileQuery({api,run,esc,onEdit:beginEdit});
 const message=(text,error=false)=>{clearTimeout(messageTimer);$('#message').textContent=text;$('#message').classList.toggle('error',error);if(!error&&text.includes('配对成功'))messageTimer=setTimeout(()=>$('#message').textContent='',3000);};
 async function api(route,options={}){
- let r;try{r=await fetch('/api/mobile'+route,{...options,cache:'no-store',headers:{'x-mobile-csrf':csrf,...options.headers}});}catch{throw Error('无法连接电脑。请检查 Tailscale、电脑和采购软件是否在线；当前内容尚未确认保存。');}
- const data=await r.json();if(!r.ok){if(r.status===401){$('#pair').hidden=false;$('#workspace').hidden=true;}throw Error(data.error||'操作失败');}return data;
+ let r;try{r=await fetch('/api/mobile'+route,{...options,cache:'no-store',headers:{'x-mobile-csrf':csrf,...(window.workbenchTransport?{'x-review-token':csrf}:{}),...(window.workbenchTransport&&options.headers?.['x-request-id']?{'Idempotency-Key':options.headers['x-request-id']}:{}),...options.headers}});}catch{throw Error('无法连接电脑。请检查 Tailscale、电脑和采购软件是否在线；当前内容尚未确认保存。');}
+ const data=await r.json();if(!r.ok){if(r.status===401){$('#pair').hidden=false;$('#workspace').hidden=true;}throw Object.assign(Error(data.error||'操作失败'),{status:r.status});}return data;
 }
 const post=(route,body,headers={})=>api(route,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify(body)});
 const usernameButton=document.createElement('button');usernameButton.type='button';usernameButton.id='username-settings';usernameButton.textContent='录入人';usernameButton.setAttribute('aria-label','设置录入人');document.querySelector('.mobile-topbar').insertBefore(usernameButton,$('#logout'));
@@ -118,9 +118,9 @@ form.onsubmit=e=>{e.preventDefault();run(async()=>{
  const wasEditing=!!editing;const saved=editing?await api('/orders/'+editing,{method:'PUT',headers:{'content-type':'application/json','x-request-id':requestId},body:payload}):await post('/orders',body,{'x-request-id':requestId});reset();message((wasEditing?'修改已保存到电脑：':'已保存到电脑：')+saved.order.orderNo);try{await loadOptions();}catch{message('已保存到电脑：'+saved.order.orderNo+'；供应商列表暂未刷新，请刷新页面');}if(wasEditing){showQuery();await mobileQuery.showOrder(saved.order.id);}
  });};
 $('#pair-form').onsubmit=e=>{e.preventDefault();run(async()=>{const r=await post('/pair',{code:$('#pair-form').elements.code.value});csrf=r.csrf;$('#pair-form').reset();$('#pair').hidden=true;$('#workspace').hidden=false;await loadOptions();chooseUsername();message('配对成功，请选择录入人');});};
-$('#logout').onclick=()=>run(async()=>{await post('/logout',{});location.reload();});
+$('#logout').onclick=()=>run(async()=>{await post('/logout',{});if(window.workbenchTransport)location.assign('/');else location.reload();});
 function showEntry(){$('#entry').hidden=false;$('#query').hidden=true;$('#entry-tab').setAttribute('aria-pressed','true');$('#query-tab').setAttribute('aria-pressed','false');}
 $('#entry-tab').onclick=showEntry;
 function showQuery(){$('#entry').hidden=true;$('#query').hidden=false;$('#entry-tab').setAttribute('aria-pressed','false');$('#query-tab').setAttribute('aria-pressed','true');window.scrollTo(0,0);}
 $('#query-tab').onclick=()=>{showQuery();run(()=>mobileQuery.open());};
-reset();run(async()=>{try{const code=scannedPair;scannedPair=null;const s=code?await post('/pair',{code}):await api('/session');csrf=s.csrf;$('#pair').hidden=true;$('#workspace').hidden=false;await loadOptions();currentUsername=s.username||'';usernameButton.textContent=currentUsername||'录入人';chooseUsername();if(code)message('扫码配对成功，请选择录入人');}catch(e){$('#pair').hidden=false;message(e.message,true);}});
+reset();run(async()=>{try{const code=scannedPair;scannedPair=null;const s=code?await post('/pair',{code}):await api('/session').catch(e=>window.workbenchTransport&&[401,403].includes(e.status)?post('/pair',{}):Promise.reject(e));csrf=s.csrf;$('#pair').hidden=true;$('#workspace').hidden=false;await loadOptions();currentUsername=s.username||'';usernameButton.textContent=currentUsername||'录入人';chooseUsername();if(code)message('扫码配对成功，请选择录入人');}catch(e){$('#pair').hidden=false;message(e.message,true);}});

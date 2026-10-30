@@ -1602,6 +1602,195 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "purchase:GET:/workbench-theme.css"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/pair",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/pair"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/session",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/session"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/username",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/username"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/addresses",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/addresses"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/addresses",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/addresses"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/form-options",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/form-options"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/logout",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/logout"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/orders",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/orders"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/orders/recent",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/orders/recent"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/orders/latest",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/orders/latest"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/orders/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/orders/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "PUT",
+      "path": "/api/mobile/orders/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:PUT:/api/mobile/orders/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/uploads",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/uploads"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/uploads/source/:id",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/uploads/source/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/uploads/attachment/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/uploads/attachment/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/text",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/text"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/attachments",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/attachments"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/orders/:id/attachments",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/orders/:id/attachments"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/ocr",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/ocr"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/mobile/ocr/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/mobile/ocr/:id"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/mobile/orders",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/mobile/orders"
     }
   ]
 }

@@ -41,7 +41,7 @@ import {createMobileAccess} from './lib/mobile-access.mjs';
 import {openSupplierManagement} from './lib/supplier-management.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
-export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile}={}){
+export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile,mobileAgentManaged=process.env.LINGTU_AGENT_MANAGED==='1'}={}){
  const app=express(),store=openStore(dataDir),previews=new Map(),jobs=new Map();let ocrBusy=false,mobile,agentFiles;
  const taskCenter=openTaskCenter(store),personnel=openPurchasePersonnel(store),taskBoard=openTaskAssignment(store,taskCenter,personnel);
  const transfers=openOrderTransfers(store);
@@ -273,7 +273,7 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.get('/vendor/tabulator.css',(req,res)=>res.sendFile('tabulator.min.css',{root:path.join(root,'node_modules/tabulator-tables/dist/css')}));
  app.use(express.static(path.join(root,'public')));
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);let message=err.message||'操作失败';if(message.includes('UNIQUE constraint'))message='该平台、账号下的订单号已存在';if(err.code==='LIMIT_FILE_SIZE')message=['/api/attachments','/api/ocr'].includes(req.path)?'单个文件超过限制，最多 50 MB，请缩小后重试':'文件不能超过 25 MB';if(err.code==='LIMIT_FILE_COUNT'||err.code==='LIMIT_UNEXPECTED_FILE')message='一次最多上传 20 个文件，请减少后重试';if(message==='MONTH_LOCKED'){err.status=423;err.code='MONTH_LOCKED';message='该月份的平台采购数据已锁定，请先到「月度确认」取消确认后再修改。';}res.status(err.status||400).json({error:message,code:err.code,conflicts:err.conflicts,locks:err.locks,availableOn:err.availableOn,availableAt:err.availableAt,preview:err.preview,report:err.report});});
- mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,isMaintenance:integration.maintenance});
+ mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,agentManaged:mobileAgentManaged,isMaintenance:integration.maintenance});
  const agentOperations=purchaseAgentOperations({store,taskBoard,taskCenter,supplierManagement,addresses,attachments,jobs,personnel});
  agentOperations.edits={query:i=>i.id?edits.get(i.id):edits.list()};
  agentOperations['edit.commit']={async:true,prepare:i=>{const d=edits.previewAgent(i.id,i.revision);return {summary:'复核并保存历史待确认修改',scope:{draftId:d.id,orderId:d.target},evidence:[{id:d.id,revision:d.revision,reason:d.reason}],changes:[{before:d.before,after:d.proposed}],commitData:{revision:d.revision}};},commit:(i,d,c)=>edits.commitAgent(i.id,d.revision,c),recover:i=>{const d=edits.get(i.id);return d.state==='committed'&&d.result?.verified?{...d.result,postVerified:true}:null;}};

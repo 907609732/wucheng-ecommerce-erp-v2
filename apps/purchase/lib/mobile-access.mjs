@@ -1,3 +1,4 @@
+import {provisionWorkbenchKey} from './workbench-actor.mjs';
 import {requireDelivery} from '../public/delivery-required.mjs';
 import express from 'express';
 import fs from 'node:fs';
@@ -15,8 +16,9 @@ import {mobileWorkbenchIdentity,mobileBusinessWrite,mobilePolicyPath} from './mo
 const digest=v=>createHash('sha256').update(v).digest('hex');
 const secret=()=>randomBytes(32).toString('hex');
 const fail=(status,message)=>Object.assign(Error(message),{status});
-export function createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp,now=Date.now,policyFile,isMaintenance=()=>false}){
- const db=store.db,app=express();
+export function createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp,now=Date.now,policyFile,isMaintenance=()=>false,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1'}){
+ const db=store.db,app=express(),mobileRoutes=[],workbenchKey=agentManaged?provisionWorkbenchKey(store.dir):undefined;
+ for(const method of ['get','post','put','delete']){const register=app[method].bind(app);app[method]=(route,...handlers)=>{if(typeof route==='string'&&route.startsWith('/api/mobile')&&handlers.length)mobileRoutes.push({method,route});return register(route,...handlers);};}
  db.exec(`CREATE TABLE IF NOT EXISTS mobile_sessions(id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, csrf TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS mobile_requests(id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, order_id TEXT NOT NULL REFERENCES orders(id), created_at INTEGER NOT NULL);`);
  db.exec(`CREATE TABLE IF NOT EXISTS mobile_upload_history(id TEXT PRIMARY KEY,filenames TEXT NOT NULL,created_at TEXT NOT NULL,order_id TEXT,session_id TEXT NOT NULL);`);
@@ -63,10 +65,10 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  app.disable('x-powered-by');
  app.use((req,res,next)=>{
   res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"});
-  if(!config.enabled)return res.status(503).json({error:'手机入口未开启'});
-  if(req.headers.host!==new URL(config.origin).host)return res.status(403).json({error:'访问地址不正确'});
-  if(!['GET','HEAD'].includes(req.method)&&req.headers.origin!==config.origin)return res.status(403).json({error:'请求来源不正确'});
-  try{req.workbenchActor=mobileWorkbenchIdentity(req,{policyFile:mobilePolicyPath(policyFile),origin:config.origin});}catch(e){return res.status(e.status||403).json({error:e.message});}
+  if(!agentManaged&&!config.enabled)return res.status(503).json({error:'手机入口未开启'});
+  if(!agentManaged&&req.headers.host!==new URL(config.origin).host)return res.status(403).json({error:'访问地址不正确'});
+  if(!agentManaged&&!['GET','HEAD'].includes(req.method)&&req.headers.origin!==config.origin)return res.status(403).json({error:'请求来源不正确'});
+  try{req.workbenchActor=mobileWorkbenchIdentity(req,{policyFile:agentManaged?undefined:mobilePolicyPath(policyFile),origin:config.origin,managed:agentManaged,workbenchKey});}catch(e){return res.status(e.status||403).json({error:e.message});}
   if(mobileBusinessWrite(req)&&isMaintenance())return res.status(503).json({error:'采购台正在维护，请稍后再保存',code:'MODULE_MAINTENANCE'});
   if(mobileBusinessWrite(req)){activeWrites++;let finished=false;const done=()=>{if(finished)return;finished=true;activeWrites--;if(req.workbenchActor)try{db.prepare('INSERT INTO workbench_request_audit(actor,method,path,status,created_at) VALUES(?,?,?,?,?)').run(JSON.stringify(req.workbenchActor),req.method,req.path,res.statusCode,new Date().toISOString());}catch{}};res.once('finish',done);res.once('close',done);}
   next();
@@ -76,10 +78,12 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  for(const name of ['delivery-required.mjs','order-query.mjs','order-attributes.mjs','classification.mjs','order-number.mjs','mobile.js','mobile-query.js','mobile.css','surface-theme.css','upload-limits.mjs','supplier-picker.js','order-form-view.js','shipments.mjs','address-parse.mjs'])app.get('/'+name,(_req,res)=>res.sendFile(name,{root:path.join(root,'public')}));
  app.post('/api/mobile/pair',(req,res)=>{
   if(now()<blockedUntil)throw fail(429,'尝试过多，请十分钟后重试');
+  if(!agentManaged){
   const value=digest(String(req.body.code||'').trim());
   if(!pairing||pairing.expires<=now()||!timingSafeEqual(Buffer.from(value),Buffer.from(pairing.hash))){
    if(++attempts>=5){blockedUntil=now()+600000;attempts=0;}
    throw fail(401,'配对码错误或已过期，请在电脑重新生成');
+  }
   }
   pairing=null;attempts=0;const id=randomUUID(),valueSecret=secret(),csrf=secret();
   db.prepare('INSERT INTO mobile_sessions(id,secret_hash,csrf,created_at,expires_at) VALUES (?,?,?,?,?)').run(id,digest(valueSecret),csrf,now(),now()+30*86400000);
@@ -91,13 +95,14 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('purchase_mobile='))?.slice(16)||'';
   const [id,value]=raw.split('.'),session=id&&db.prepare('SELECT * FROM mobile_sessions WHERE id=? AND expires_at>?').get(id,now());
   if(!session||digest(value||'')!==session.secret_hash)return res.status(401).json({error:'请先在电脑上配对手机'});
+  if(agentManaged&&!session.workbench_actor)return res.status(401).json({error:'此旧手机会话尚未绑定真实登录，请重新从共享工作台进入'});
   if(req.workbenchActor){if(session.workbench_actor&&session.workbench_actor!==req.workbenchActor.id)return res.status(403).json({error:'手机配对会话属于其他 Tailscale 用户，请重新配对'});if(!session.workbench_actor)db.prepare('UPDATE mobile_sessions SET workbench_actor=? WHERE id=?').run(req.workbenchActor.id,id);}
-  if(!['GET','HEAD'].includes(req.method)&&req.headers['x-mobile-csrf']!==session.csrf)return res.status(403).json({error:'会话校验失败，请刷新页面'});
+  if(!['GET','HEAD'].includes(req.method)&&(req.headers['x-mobile-csrf']||(agentManaged?req.headers['x-review-token']:undefined))!==session.csrf)return res.status(403).json({error:'会话校验失败，请刷新页面'});
   req.mobileSession=session;next();
  });
  if(!db.prepare('PRAGMA table_info(mobile_sessions)').all().some(c=>c.name==='username'))db.exec("ALTER TABLE mobile_sessions ADD COLUMN username TEXT NOT NULL DEFAULT ''");
  db.exec("INSERT OR IGNORE INTO order_origins(order_id,channel,username) SELECT order_id,'mobile','' FROM mobile_requests");
- app.get('/api/mobile/session',(req,res)=>res.json({csrf:req.mobileSession.csrf,username:req.mobileSession.username}));
+ app.get('/api/mobile/session',(req,res)=>res.json({csrf:req.mobileSession.csrf,username:req.mobileSession.username,managed:agentManaged}));
  app.post('/api/mobile/username',(req,res)=>{
   const username=typeof req.body.username==='string'?req.body.username.trim():'';
   if(!username||username.length>40||/[\x00-\x1f]/.test(username))throw fail(400,'请填写1至40字的录入人姓名');
@@ -131,7 +136,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  });
  app.get('/api/mobile/orders/:id',(req,res)=>{const o=store.get(req.params.id);if(!o)throw fail(404,'订单不存在');res.json(o);});
  app.put('/api/mobile/orders/:id',(req,res)=>{
-  const requestId=req.headers['x-request-id'];
+  const requestId=req.headers['x-request-id']||(agentManaged?req.headers['idempotency-key']:undefined);
   if(typeof requestId!=='string'||!/^[0-9a-f-]{36}$/i.test(requestId))throw fail(400,'缺少有效的提交编号');
   const allowed=['platform','account','orderNo','date','paidAt','supplier','supplierContact','amountCents','refundCents','shippingCents','status','note','items','recipient','address','phone','logisticsCompany','trackingNo','classification','attachmentIds','updatedAt'];
   const input=Object.fromEntries(allowed.filter(k=>Object.hasOwn(req.body,k)).map(k=>[k,req.body[k]]));
@@ -198,7 +203,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   return record&&store.get(record.order_id);
  };
  app.post('/api/mobile/orders',async(req,res)=>{
-  const id=req.headers['x-request-id'];if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id))throw fail(400,'缺少有效的提交编号');
+  const id=req.headers['x-request-id']||(agentManaged?req.headers['idempotency-key']:undefined);if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id))throw fail(400,'缺少有效的提交编号');
   // Only attachments uploaded by this mobile session may be bound to a new order.
   const allowed=['platform','account','orderNo','date','paidAt','supplier','supplierContact','amountCents','refundCents','shippingCents','status','note','items','recipient','address','phone','logisticsCompany','trackingNo','classification','ocrJobId','recognizedText','attachmentIds'];
   req.body=Object.fromEntries(allowed.filter(k=>Object.hasOwn(req.body,k)).map(k=>[k,req.body[k]]));
@@ -218,6 +223,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  });
  app.use((_req,res)=>res.status(404).json({error:'手机端不支持此操作'}));
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);res.status(err.status||400).json({error:err.code==='MONTH_LOCKED'?'该月份已锁定，请在电脑处理':err.message||'操作失败'});});
+ if(agentManaged)for(const {method,route}of mobileRoutes)desktopApp[method](route,(q,r,next)=>app.handle(q,r,next));
  return {app,configure,busy:()=>activeWrites>0,commit(req,fn){return store.transaction(()=>{
   const {id,hash}=req.mobileSubmission,old=lookup(id,hash);if(old)return old;
   const result=fn(),order=store.find(validateOrder(req.body));
