@@ -63,6 +63,8 @@ win.webContents.on('will-navigate',event=>event.preventDefault());win.webContent
 win.on('resize',()=>report('window.resized',{bounds:win.getContentBounds(),zoom:win.webContents.getZoomFactor()}));
 await win.loadFile(page);
 report('launcher.loaded',{url:win.webContents.getURL()});
+win.show();win.focus();
+report('window.shown',{visible:win.isVisible(),minimized:win.isMinimized(),focused:win.isFocused(),bounds:win.getBounds()});
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',event=>{if(closing)return;event.preventDefault();closing=true;void(async()=>{try{await runtime.close();}catch(error){report('fixture.close-failed',{code:error.code||'SOURCE_FIXTURE_CLOSE_FAILED'});}finally{report('fixture.closed',{acceptancePassed:false});app.quit();}})();});
 }).catch(async error=>{

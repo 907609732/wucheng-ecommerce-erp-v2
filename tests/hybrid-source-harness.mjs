@@ -55,7 +55,8 @@ if(!process.argv.includes('--launch')){
     for(const name of Object.keys(env))if(/(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET)|^(?:CODEX_HOME|HERMES_HOME|ELECTRON_RUN_AS_NODE|LINGTU_REGISTRY_PATH|LINGTU_WORKBENCH_POLICY_FILE)$/i.test(name))delete env[name];
     env.HYBRID_SOURCE_FIXTURE_ROOT=fixtureRoot;
     const log=fs.openSync(path.join(output,'electron.log'),'a');
-    try{child=spawn(electron,[path.join(root,'tests','fixtures','hybrid-source-electron')],{cwd:root,env,windowsHide:true,stdio:['ignore',log,log],shell:false});}finally{fs.closeSync(log);}
+    // This child is the interactive acceptance window, not a background helper.
+    try{child=spawn(electron,[path.join(root,'tests','fixtures','hybrid-source-electron')],{cwd:root,env,windowsHide:false,stdio:['ignore',log,log],shell:false});}finally{fs.closeSync(log);}
     const stop=()=>{if(child?.exitCode===null)child.kill();};process.once('SIGINT',stop);process.once('SIGTERM',stop);
     console.log(JSON.stringify({scope:manifest.scope,fixtureRoot,output,windowTitle:'五成 ERP · 三合一隔离验收',pid:child.pid,acceptancePassed:false}));
     exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
