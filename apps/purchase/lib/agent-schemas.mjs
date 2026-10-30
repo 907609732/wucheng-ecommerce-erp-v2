@@ -27,6 +27,12 @@ const refs=arr(obj({id,updatedAt},['id','updatedAt']),100000,1);
 const addressFields={id,updatedAt,name:text('联系人/供应商名称'),phone:text('电话',40),address:text('地址',4000),note:text('备注',2000),tags:arr(text('标签',20),20),platform,supplier:text('关联店铺；须与平台同时填写')};
 const shop=obj({platform,name:text('店铺名称'),url:text('完整无凭据http/https网址',2000),account:text('账号'),note:text('备注',2000)},['platform']);
 export const purchaseSchemas={
+ 'people.mapping':obj(),
+ edits:obj({id,...paging}),'edit.commit':obj({id,revision},['id','revision']),
+ 'audit.detail':obj({auditId:integer('审计明细记录ID',1)},['auditId']),
+ 'suppliers.summary':obj({...paging,q:text('供应商关键词'),platform}),
+ 'image.file':obj({id,assetId:{type:'string',pattern:'^[a-f0-9]{64}$',description:'image.prepare/cache返回的缓存图片assetId'}},['id','assetId']),
+ 'people.bind':obj({staffId:id,actorId:{...id,pattern:'^(?:tailscale:[^\\s,]+|windows:S-1-5-(?:[0-9]+-)*[0-9]+)$',description:'主页people.assignable返回并经用户明确选择的真实人员ID；不按姓名猜测'},revision,reason:text('明确选择对应人员的依据；重名由用户选择',2000)},['staffId','actorId','revision','reason']),
  orders:obj({...filter,...paging,id}),dashboard:obj({year:integer('公历年份',1900,9999),basis:filter.basis,platform,category,month:integer('月份，1至12',1,12)},['year']),
  sources:obj({...paging}),audit:obj({id,page:integer('页码',1,1000000),pageSize:integer('每页条数',1,100),q:text('审计搜索',4000)}),
  suppliers:obj({...paging,id,q:text('供应商关键词'),platform}),addresses:obj({...paging,q:text('联系人/地址搜索'),tag:text('标签',20)}),tasks:obj({month},['month']),months:obj({month,platform},['month']),attachments:obj({id},['id']),
@@ -42,6 +48,7 @@ export const purchaseSchemas={
  'import.analyze':obj({fileId:id,platform,account:text('实际采购账号'),sheet:text('Excel工作表名称'),headerRow:integer('表头所在行，从1开始；自动检测不准确时指定',1,50001)},['fileId','platform']),
  'import.remap':obj({previewId:id,account:text('实际采购账号'),sheet:text('工作表名称'),headerRow:integer('重新指定表头行，从1开始',1,50001),amountMode:{enum:['order','line'],description:'order整单金额；line商品行金额'},mapping:obj(Object.fromEntries(Object.entries(fields).map(([key,f])=>[key,{anyOf:[integer(f.label+'对应的从0起列索引',0,100000),{type:'string',pattern:'^(?:[0-9]+)?$'}],description:f.label+'；空字符串表示不映射'}])))},['previewId']),
  'ocr.start':obj({fileIds:arr(id,20,1)},['fileIds']),
+ 'ocr.cancel':{...obj({jobId:id,startRequestKey:{...id,description:'可信主机取消响应丢失的启动请求时使用；一般使用jobId'}}),oneOf:[{required:['jobId'],not:{required:['startRequestKey']}},{required:['startRequestKey'],not:{required:['jobId']}}]},
  'ocr.commit':obj({jobId:id,order:obj(orderFields,orderRequired)},['jobId','order']),
  transfers:obj({id}),'transfer.verify':obj({id},['id']),
  'transfer.save':obj({id,revision,decisions:obj({account:text('核实后的实际采购账号'),rows:{type:'object',maxProperties:20000,additionalProperties:obj({refundCents:money,refundEvidence:text('退款核对依据，无退款明确填写0并说明',2000),classification,fields:obj(Object.fromEntries(['date','paidAt','supplier','status','amountCents','refundCents','shippingCents','recipient','phone','address','logisticsCompany','trackingNo','note','items','classification'].map(f=>[f,{enum:['keep','source'],description:'keep保留账本值，source采用采集值'}])))})}},['account','rows'])},['id','revision','decisions']),
@@ -52,8 +59,8 @@ export const purchaseSchemas={
  'orders.classification':obj({orders:refs,category},['orders','category']),
  'supplier.save':obj({id,revision:integer('供应商查询返回的版本',1),name:text('供应商名'),contact:text('联系人'),phone:text('电话',40),wechat:text('微信'),note:text('备注',10000),shops:arr(shop,100),addresses:arr(obj({label:text('地址标签',100),name:text('联系人'),phone:text('电话',40),address:text('详细地址',4000),note:text('备注',2000)}),100),products:arr(obj({name:text('产品名称',400),spec:text('规格',1000),sku:text('编号'),unit:text('单位',100),priceCents:{anyOf:[money,{type:'null'}]},note:text('备注',2000)},['name']),500)},['name']),
  'address.save':obj(addressFields,['name']),'address.remove':obj({id,updatedAt},['id','updatedAt']),
- 'task.action':obj({month,taskId:id,action:{enum:['assign','start','submit','accept','return']},revision,assigneeId:id,dueOn:date,instructions:text('任务说明',2000),note:text('提交或退回说明',2000),ack:bool,result:{enum:['done','no_activity']}},['month','taskId','action','revision']),
- 'task.mark':obj({month,taskId:id,status:{enum:['pending','done','no_activity']},operator:text('经办人',100),note:text('核对说明',2000),ack:bool,revision},['month','taskId','status','operator','revision']),
+ 'task.action':obj({month,taskId:id,action:{enum:['assign','start','submit','accept','return']},revision,assigneeId:{...id,description:'已绑定的历史采购人员ID，优先使用assigneeActorId'},assigneeActorId:{...id,description:'主页真实工作台人员ID；必须已有显式历史采购映射'},dueOn:date,instructions:text('任务说明',2000),note:text('提交或退回说明',2000),ack:bool,result:{enum:['done','no_activity']}},['month','taskId','action','revision']),
+ 'task.mark':obj({month,taskId:id,status:{enum:['pending','done','no_activity']},operator:text('可省略；经办人从已绑定的可信登录身份取得，不能指定他人',100),note:text('核对说明',2000),ack:bool,revision},['month','taskId','status','revision']),
  'month.confirm':obj({month,platform,revision},['month','platform','revision']),
  'month.cancel':obj({month,platform,version:text('查询返回的确认版本；只有管理员中央审批可解锁',300)},['month','platform','version']),
  'audit.rollback':obj({auditId:integer('审计记录ID',1),scope:{enum:['entry','batch']},versions:arr(obj({auditId:integer('审计ID',1),orderId:id,updatedAt},['auditId','orderId','updatedAt']),100000,1),reason:text('回滚原因',500)},['auditId','scope','versions']),
@@ -63,7 +70,7 @@ export const purchaseSchemas={
 classification.allOf=[{if:{properties:{mode:{const:'single'}}},then:{required:['category']}},{if:{properties:{mode:{const:'split'}}},then:{required:['parts']}}];
 purchaseSchemas['address.save'].allOf=[{if:{required:['id']},then:{required:['updatedAt']}}];
 purchaseSchemas['supplier.save'].allOf=[{if:{required:['id']},then:{required:['revision']}}];
-purchaseSchemas['task.action'].allOf=[{if:{properties:{action:{const:'assign'}}},then:{required:['assigneeId']}},{if:{properties:{action:{const:'submit'}}},then:{required:['ack','note'],properties:{ack:{const:true},note:{minLength:1}}}},{if:{properties:{action:{const:'return'}}},then:{required:['note'],properties:{note:{minLength:1}}}}];
+purchaseSchemas['task.action'].allOf=[{if:{properties:{action:{const:'assign'}}},then:{oneOf:[{required:['assigneeId'],not:{required:['assigneeActorId']}},{required:['assigneeActorId'],not:{required:['assigneeId']}}]}},{if:{properties:{action:{const:'submit'}}},then:{required:['ack','note'],properties:{ack:{const:true},note:{minLength:1}}}},{if:{properties:{action:{const:'return'}}},then:{required:['note'],properties:{note:{minLength:1}}}}];
 const ajv=new Ajv({allErrors:true,strict:false});
 const validators=new Map(Object.entries(purchaseSchemas).map(([id,s])=>[id,ajv.compile(s)]));
 export function validatePurchaseAgentInput(id,input){const validate=validators.get(id);if(!validate||!validate(input))throw Object.assign(Error('采购参数不符合能力说明：'+ajv.errorsText(validate?.errors,{separator:'；'})),{code:'CAPABILITY_INPUT_INVALID',status:400});}

@@ -26,8 +26,7 @@ export function registerReviewedEdits(integration,{db,transaction,backup,types})
     db.prepare('INSERT INTO integration_edit_drafts(id,type,target,before_json,proposed_json,reason,revision,created_at) VALUES(?,?,?,?,?,?,?,?)').run(id,input.type,input.target,JSON.stringify(before),JSON.stringify(proposed),reason,revision,new Date().toISOString());
     event(id,'prepared',{revision});return {...get(id),reviewUrl:'/integration-edits.html?draft='+id};
   };
-  const commit=async(id,revision,session,actor)=>{
-    if(!session)throw fail('请在页面查看差异并确认',403);
+  const commitReviewed=async(id,revision,{session,actor,approvalId})=>{
     let d=get(id);if(d.state==='committed')return d.result;
     if(busy)throw fail('正在保存另一项修改，请稍后重试',409);
     busy=true;
@@ -41,14 +40,18 @@ export function registerReviewedEdits(integration,{db,transaction,backup,types})
         if(hash(adapter.comparable(actual))!==hash(expected))throw fail('写入后校验不一致，本次修改已撤销',409,'EDIT_MISMATCH');
         const result={id,verified:true,record:JSON.parse(JSON.stringify(actual))};
         db.prepare("UPDATE integration_edit_drafts SET state='committed',result_json=? WHERE id=?").run(JSON.stringify(result),id);
-        event(id,'confirmed-and-committed',{revision,session,actor:actor||null,reason:d.reason,before:d.before,after:actual});return result;
+        event(id,'confirmed-and-committed',{revision,session:session||null,approvalId:approvalId||null,actor:actor||null,reason:d.reason,before:d.before,after:actual});return result;
       });
     }catch(e){event(id,'rejected',{message:e.message});throw e;}finally{busy=false;}
   };
+  const commit=(id,revision,session,actor)=>{if(!session)throw fail('请在页面查看差异并确认',403);return commitReviewed(id,revision,{session,actor});};
+  const previewAgent=(id,revision)=>{const d=get(id);if(d.state!=='draft'||d.revision!==revision||hash(types[d.type].read(d.target))!==hash(d.before))throw fail('记录或草稿已变化，请重新核对',409,'EDIT_CHANGED');return d;};
+  const commitAgent=(id,revision,ctx)=>{const proof=ctx?.verifiedApproval;if(!proof||ctx.actor?.role==='viewer'||!ctx.actor?.modules?.includes('purchase')||proof.actorId!==ctx.actor?.id||proof.module!=='purchase'||proof.capabilityId!=='edit.commit'||proof.taskId!==ctx.taskId)throw fail('缺少本次修改的中央复核授权',403,'AGENT_APPROVAL_REQUIRED');return commitReviewed(id,revision,{actor:ctx.actor,approvalId:proof.approvalId});};
+  const list=()=>db.prepare('SELECT id,type,target,reason,state,revision,created_at FROM integration_edit_drafts ORDER BY created_at DESC').all();
   const {router:r,requireReview:ui}=integration;
   r.get('/edits',(q,s)=>s.json({drafts:db.prepare(`SELECT id,type,target,reason,state,created_at FROM integration_edit_drafts ${q.query.state==='draft'?"WHERE state='draft'":''} ORDER BY created_at DESC LIMIT 100`).all()}));
   r.post('/edits',(q,s)=>s.json(create(q.body)));
   r.get('/edits/:id',(q,s)=>s.json(get(q.params.id)));
   r.post('/edits/:id/commit',ui,async(q,s)=>s.json(await commit(q.params.id,q.body.revision,q.integration.session,q.integration.actor)));
-  return {get,create,commit,busy:()=>busy};
+  return {get,create,commit,list,previewAgent,commitAgent,busy:()=>busy};
 }

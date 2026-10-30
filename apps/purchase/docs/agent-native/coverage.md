@@ -59,7 +59,7 @@
 
 原件上传单次8MiB；大文件使用files.upload.part，每片8MiB、完整文件50MiB，表格分析25MiB、OCR总200MiB。所有分片与完成文件均检查所属人员、字节偏移和SHA256。
 
-最终冻结源码 `500b2b4dcdfb1ceec03172f19ba34e1e1b63e887`：采购完整回归192/192，导出台147/147，采购语法检查通过。覆盖真实HTTP→文件→OCR/表格→审批→数据库→原件/附件/来源回读及恢复。详见 validation.json。
+历史验证源码（不代表2026-10-29增量已验收） `500b2b4dcdfb1ceec03172f19ba34e1e1b63e887`：采购完整回归192/192，导出台147/147，采购语法检查通过。覆盖真实HTTP→文件→OCR/表格→审批→数据库→原件/附件/来源回读及恢复。详见 validation.json。
 
 ## 中央任务附件与产物桥接
 
@@ -68,3 +68,5 @@
 `files.get`、`source.file {id}`、`attachment.file {id}`、报表 `export` 调用可信 `transport.download(moduleId,route,{ctx,expectedSha256,filename,maxBytes})`，返回真实注册artifact。结果使用UI支持的 `files` 区块与 `artifactId` 证据，不暴露本机路径。内部原件下载接口已登记为manifest的download类型；分片内部请求保留原任务身份并显式采用内部协议capability上下文。
 
 新增合成链路用例 `tests/agent-attachment-bridge.test.mjs` 支持 `PURCHASE_HOST_TRANSPORT` 指向主机组真实helper源码，供全体代码冻结后统一联调。测试文件与已有结果保留；当前新增交付的最终验收状态为“待总控统一运行”。运行时的任务上传入口也须保留50MiB上限，避免在中央入口缩减采购原有范围。
+
+2026-10-29续接增量与旧入口逐项对应见 `CAPABILITY-MATRIX-20261029.md`；代码已补，所有新增/原有测试等待总控统一冻结后执行，不沿用上述历史通过结论。

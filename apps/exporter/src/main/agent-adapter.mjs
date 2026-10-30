@@ -22,10 +22,10 @@ export function createExporterAgentAdapter({transport,pollIntervalMs=1000,maxWai
  const pollActions=new Set(['start','resume','retry','enrichDetails']),jobActions=new Set([...pollActions,'pause','finish']);
  const throwCancelled=ctx=>{if(ctx?.signal?.aborted)throw ctx.signal.reason||Object.assign(Error('采集等待已取消'),{name:'AbortError'});};
  const taskComplete=task=>task?.status==='completed'&&task.listOutcome==='complete'&&!task.plan?.buckets?.some(b=>b.status!=='completed')&&!task.plan?.segments?.some(s=>s.status!=='completed');
- const taskBlock=(task,jobId)=>({type:'table',title:'实际采集任务状态',columns:[{key:'jobId',label:'采集任务ID'},{key:'status',label:'实际状态'},{key:'listOutcome',label:'列表完整性'},{key:'count',label:'已获取订单数'},{key:'message',label:'执行说明'}],rows:[{jobId,status:task?.status||task?.state||'unknown',listOutcome:task?.listOutcome||'unknown',count:task?.count??null,message:task?.message||'可使用此采集任务ID继续查询'}]});
+ const taskBlock=(task,jobId)=>({type:'table',module:'exporter',jobId,status:task?.status||task?.state||'unknown',title:'实际采集任务状态',columns:[{key:'jobId',label:'采集任务ID'},{key:'status',label:'实际状态'},{key:'listOutcome',label:'列表完整性'},{key:'count',label:'已获取订单数'},{key:'message',label:'执行说明'}],rows:[{jobId,status:task?.status||task?.state||'unknown',listOutcome:task?.listOutcome||'unknown',count:task?.count??null,message:task?.message||'可使用此采集任务ID继续查询'}]});
  function jobResult(output,task,jobId,{timedOut=false,human=false}={}){
   const completed=!human&&taskComplete(task),status=task?.status||task?.state||'unknown';
-  const issue={blocking:true,code:human?'EXPORTER_HOST_ACTION_REQUIRED':timedOut?'EXPORTER_JOB_WAIT_TIMEOUT':'EXPORTER_JOB_INCOMPLETE',jobId:jobId||null,status,message:human?'需要用户在主机完成平台登录、验证码或授权，尚未完成采集目标':timedOut?'等待已达到时限；实际采集任务仍未完成，请按采集任务ID继续查询':`采集任务状态为 ${status}，列表完整性为 ${task?.listOutcome||'unknown'}；不能作为目标完成，请按采集任务ID查询或处理缺项`};
+  const issue={module:'exporter',blocking:true,code:human?'EXPORTER_HOST_ACTION_REQUIRED':timedOut?'EXPORTER_JOB_WAIT_TIMEOUT':'EXPORTER_JOB_INCOMPLETE',jobId:jobId||null,status,message:human?'需要用户在主机完成平台登录、验证码或授权，尚未完成采集目标':timedOut?'等待已达到时限；实际采集任务仍未完成，请按采集任务ID继续查询':`采集任务状态为 ${status}，列表完整性为 ${task?.listOutcome||'unknown'}；不能作为目标完成，请按采集任务ID查询或处理缺项`};
   return {...output,summary:completed?'实际采集任务已完成并确认列表范围':human?'平台操作等待人工接管':'采集目标尚未完成',scope:{...(output.scope||{}),jobId:jobId||null},blocks:[...(output.blocks||[]),taskBlock(task,jobId||null)],evidence:[...(output.evidence||[]),{module:'exporter',jobId:jobId||null,status,listOutcome:task?.listOutcome||'unknown',complete:completed}],issues:[...(output.issues||[]),...(completed?[]:[issue])]};
  }
  async function settleJob(output,capabilityId,input,ctx){
@@ -47,7 +47,8 @@ export function createExporterAgentAdapter({transport,pollIntervalMs=1000,maxWai
  const requireDownload=()=>{if(typeof transport.download!=='function')throw Object.assign(Error('主机尚未提供真实文件产物下载能力'),{code:'ARTIFACT_TRANSPORT_UNAVAILABLE'});};
  async function artifact(file,ctx){
   requireDownload();if(!file?.fileId||!/^[A-Za-z0-9:_-]{1,300}$/.test(file.fileId)||file.available===false)throw Object.assign(Error('导出文件不存在或已经失效'),{code:'EXPORT_FILE_UNAVAILABLE'});
-  const result=await transport.download('exporter','/api/integration/v1/workbench/files/'+encodeURIComponent(file.fileId),{ctx,filename:file.filename,expectedSha256:file.sha256,maxBytes:512*1024*1024}),item=result?.artifact||result,id=item?.artifactId||item?.id;
+  if(Number(file.size??file.bytes)>64*1024*1024)throw Object.assign(Error('导出文件超过64MiB任务产物上限，请按平台和日期分批导出，或关闭附带图片后重试'),{code:'EXPORT_FILE_TOO_LARGE'});
+  let result;try{result=await transport.download('exporter','/api/integration/v1/workbench/files/'+encodeURIComponent(file.fileId),{ctx,filename:file.filename,expectedSha256:file.sha256,maxBytes:64*1024*1024});}catch(error){if(error.code==='ARTIFACT_TOO_LARGE')throw Object.assign(Error('导出文件超过64MiB，请按平台和日期分批导出，或关闭附带图片后重试'),{code:'EXPORT_FILE_TOO_LARGE'});throw error;}const item=result?.artifact||result,id=item?.artifactId||item?.id;
   if(typeof id!=='string'||!id||!Number.isSafeInteger(item?.size)||item.size<0||typeof item?.sha256!=='string'||!/^[a-f0-9]{64}$/i.test(item.sha256))throw Object.assign(Error('主机未返回已登记且可校验的真实文件产物'),{code:'ARTIFACT_RESULT_INVALID'});
   return {artifactId:id,name:item.name||file.filename,mimeType:item.mimeType||'application/octet-stream',size:item.size,sha256:item.sha256};
  }

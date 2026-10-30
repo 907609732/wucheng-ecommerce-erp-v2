@@ -11,3 +11,12 @@ test('每项采购能力均有封闭参数契约并拒绝授权材料、未知�
  validate('task.action',{month:'2026-10',taskId:'collect:淘宝',action:'start',revision:'revision'});
  validate('orders',{});validate('sources',{});
 });
+
+test('only proposed order drafts declare editable fields; task mapping and cancellation remain closed',()=>{
+ const editable=purchaseAgentCapabilities.filter(c=>c.resultEditFields?.length).map(c=>c.id).sort();assert.deepEqual(editable,['ocr.commit','order.create','order.update']);
+ for(const c of purchaseAgentCapabilities.filter(c=>c.resultEditFields))assert.equal(c.resultEditFields.includes('updatedAt')||c.resultEditFields.includes('id'),false);
+ validate('ocr.cancel',{jobId:'job'});validate('ocr.cancel',{startRequestKey:'start'});assert.throws(()=>validate('ocr.cancel',{}));assert.throws(()=>validate('ocr.cancel',{jobId:'job',startRequestKey:'start'}));
+ validate('task.action',{month:'2026-10',taskId:'collect:淘宝',action:'assign',revision:'rev',assigneeActorId:'tailscale:alice@example.test'});
+ assert.throws(()=>validate('task.action',{month:'2026-10',taskId:'task',action:'assign',revision:'rev',assigneeId:'legacy',assigneeActorId:'tailscale:alice@example.test'}));
+ validate('people.bind',{staffId:'legacy',actorId:'windows:S-1-5-21-123',revision:'rev',reason:'管理员选择'});assert.throws(()=>validate('people.bind',{staffId:'legacy',actorId:'仅姓名',revision:'rev',reason:'猜测'}));
+});

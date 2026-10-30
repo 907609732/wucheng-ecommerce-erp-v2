@@ -31,3 +31,8 @@ start/pause/resume/retry/finish/enrichDetails/host-action/export/hidePage 登记
 ## 输入及结果契约
 
 `agent-adapter.mjs` 导出每项封闭 JSON Schema 与中文能力语义；模块服务端使用同源校验。平台枚举、日期与起止关系、原提取计划校验、任务/订单/文件ID、导出格式、开关、分页均拒绝额外字段和错误类型。orders/logs 支持 offset/limit（默认100，最多500），返回 total/nextOffset；orders 明示 moneyUnit=fen 与 dateBasis=order-created-at。file 查询使用导出结果中的 fileId，仅本人或管理员可读取元信息；本机路径、cookie、游标及凭据不返回 Agent。
+
+
+## 2026-10-29增量（待统一验收）
+
+下载请求统一使用主机默认64MiB预算，修复旧512MiB请求在小文件上同样遭ARTIFACT_LIMIT_INVALID的问题。导出/file元信息返回真实bytes；超限明确提示按平台/日期拆分或关闭图片，保留领域原件，不放宽主机预算。job状态区块、issue、evidence统一module=exporter与真实jobId，完成证据仍需status completed＋listOutcome complete＋计划完整。新增用例未执行，不复用旧测试结论。完整旧入口对应见采购docs/agent-native/CAPABILITY-MATRIX-20261029.md。

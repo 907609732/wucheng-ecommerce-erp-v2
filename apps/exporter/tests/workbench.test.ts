@@ -166,3 +166,11 @@ it('collection polling times out with a recoverable job ID and respects cancella
  const adapter=createExporterAgentAdapter({transport,pollIntervalMs:1,maxWaitMs:5}),out=await adapter.prepare('resume',{taskId:'still-running'},{});expect(out.issues.at(-1)).toMatchObject({blocking:true,code:'EXPORTER_JOB_WAIT_TIMEOUT',jobId:'still-running'});
  const controller=new AbortController(),reason=Object.assign(Error('用户取消'),{name:'AbortError'});controller.abort(reason);await expect(adapter.prepare('start',{platform:'taobao',from:'2026-01-01',to:'2026-01-31'},{signal:controller.signal})).rejects.toBe(reason);
 });
+
+it('artifact download uses the real host 64MiB budget and oversized exports request splitting',async()=>{
+ const transport:any=async()=>({fileId:'file-id',filename:'orders.csv',available:true,bytes:5});
+ transport.download=async(_m:any,_r:any,options:any)=>{expect(options.maxBytes).toBe(64*1024*1024);return {id:'artifact',size:5,sha256:'ab'.repeat(32)};};
+ const out=await createExporterAgentAdapter({transport}).query('file',{fileId:'file-id'},{});expect(out.blocks.at(-1).files[0].artifactId).toBe('artifact');
+ const oversized:any=async()=>({fileId:'file-id',filename:'orders.zip',available:true,bytes:64*1024*1024+1});oversized.download=async()=>{throw Error('must not download oversized original');};
+ await expect(createExporterAgentAdapter({transport:oversized}).query('file',{fileId:'file-id'},{})).rejects.toMatchObject({code:'EXPORT_FILE_TOO_LARGE'});
+});

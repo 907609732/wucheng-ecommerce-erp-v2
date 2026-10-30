@@ -16,5 +16,19 @@ test('processing and interrupted OCR remain blocking with query ID; AbortSignal 
  const adapter=createPurchaseAgentAdapter({transport,jobWaitMs:0}),pending=await adapter.prepare('ocr.start',{fileIds:['file-2']},{taskId:'task',idempotencyKey:'once'});
  assert.equal(pending.issues[0].blocking,true);assert.equal(pending.issues[0].jobId,'job-2');assert.deepEqual(pending.blocks.at(-1).nextInput,{jobId:'job-2'});
  const stopped=await createPurchaseAgentAdapter({transport:async()=>({data:{jobId:'job-2',status:'interrupted'},blocks:[],evidence:[]})}).query('ocr.status',{jobId:'job-2'},{});assert.equal(stopped.issues[0].blocking,true);
- const controller=new AbortController();controller.abort();await assert.rejects(createPurchaseAgentAdapter({transport,pollIntervalMs:1}).prepare('ocr.start',{fileIds:['file-2']},{taskId:'task',idempotencyKey:'same-job',signal:controller.signal}),e=>e.name==='AbortError');assert.equal(starts,2);
+ const controller=new AbortController();controller.abort();await assert.rejects(createPurchaseAgentAdapter({transport,pollIntervalMs:1}).prepare('ocr.start',{fileIds:['file-2']},{taskId:'task',idempotencyKey:'same-job',signal:controller.signal}),e=>e.name==='AbortError');assert.equal(starts,1);
+});
+
+test('global abort stops the original OCR with a fresh signal even after bounded wait returned',async()=>{
+ const controller=new AbortController(),cancels=[];
+ const transport=async(_m,_r,{body,signal,ctx})=>{if(body.capabilityId==='ocr.cancel'){assert.equal(signal.aborted,false);assert.equal(ctx.capabilityId,'ocr.cancel');cancels.push(body.input);return {data:{jobId:'same-job',status:'cancelling'}};}return {requiresReview:false,data:{jobId:'same-job',status:'running'},blocks:[],evidence:[]};};
+ const adapter=createPurchaseAgentAdapter({transport,jobWaitMs:0});
+ await adapter.prepare('ocr.start',{fileIds:['file']},{taskId:'task',idempotencyKey:'start-key',signal:controller.signal});controller.abort();await new Promise(r=>setImmediate(r));
+ assert.deepEqual(cancels,[{jobId:'same-job'}]);
+});
+test('an aborted start response uses the original durable key to cancel a late server start',async()=>{
+ const controller=new AbortController();let cancelled;
+ const transport=async(_m,_r,{body,signal})=>{if(body.capabilityId==='ocr.cancel'){assert.equal(signal.aborted,false);cancelled=body.input;return {data:{cancelRequested:true}};}controller.abort();throw controller.signal.reason;};
+ await assert.rejects(createPurchaseAgentAdapter({transport}).prepare('ocr.start',{fileIds:['file']},{taskId:'task',idempotencyKey:'original-start',signal:controller.signal}));
+ assert.deepEqual(cancelled,{startRequestKey:'original-start'});
 });

@@ -26,6 +26,7 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
    selected=!!role&&(!staff||!!staff.active);
    readOnly=actor.role==='viewer'||!role||!!staff&&!staff.active||Array.isArray(actor.modules)&&!actor.modules.includes('purchase');
    if(readOnly&&actor.role!=='viewer')selected=false;
+   if(actor.channel==='mcp'&&!staff)selected=false;
   }else{
    const entry=sessions.get(cookie(req));
    if(entry&&entry.expiresAt>Date.now()){
@@ -78,5 +79,25 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
    return saved;
   });
  }
- return {current,select,list,save};
+ function mapping(req){
+  const a=req.workbenchActor;if(!a?.id||!a.modules?.includes('purchase'))throw fail('需要可信工作台身份','PERSONNEL_ACTOR_REQUIRED');
+  const identity=current(req),rows=a.role==='admin'?db.prepare('SELECT * FROM purchase_staff ORDER BY name,id').all().map(full):[];
+  return {identity,actorId:a.id,mapped:!!identity.staff,staff:rows,selectionRequired:!identity.staff,notice:'人员主数据在主页管理。此处只连接历史采购人员与真实工作台ID；禁止按姓名自动绑定。重名须请用户明确选择staffId及主页人员ID。'};
+ }
+ function previewBinding(req,input){
+  const a=req.workbenchActor;if(a?.role!=='admin'||!a.modules?.includes('purchase'))throw fail('历史人员归属须管理员复核','PERSONNEL_BOSS_REQUIRED');
+  const before=get(input.staffId);if(!before?.active)throw fail('请选择启用的历史采购人员','PERSONNEL_STAFF_INVALID',400);
+  if(full(before).revision!==input.revision)throw fail('人员映射已变化，请重新查询','PERSONNEL_REVISION_CHANGED',409);
+  if(typeof input.actorId!=='string'||!(/^(?:tailscale:[^\s,]+|windows:S-1-5-(?:\d+-)*\d+)$/.test(input.actorId)))throw fail('须选择主页目录返回的真实人员ID，不可填写姓名','PERSONNEL_ACTOR_INVALID',400);
+  const conflict=db.prepare('SELECT id FROM purchase_staff WHERE workbench_actor_id=? AND id<>?').get(input.actorId,before.id);
+  if(conflict)throw fail('该账号已绑定其他历史采购人员，不能合并或猜测归属','PERSONNEL_ACTOR_CONFLICT',409);
+  return {before:full(before),after:{...full(before),workbenchActorId:input.actorId},reason:input.reason};
+ }
+ function bind(req,input){return store.transaction(()=>{
+  const detail=previewBinding(req,input),before=get(input.staffId),now=new Date(Math.max(Date.now(),Date.parse(before.updated_at)+1)).toISOString();
+  db.prepare('UPDATE purchase_staff SET workbench_actor_id=?,updated_at=? WHERE id=?').run(input.actorId,now,before.id);
+  const after=full(get(before.id));db.prepare('INSERT INTO purchase_staff_events(staff_id,actor_id,action,before_json,after_json,created_at) VALUES(?,?,?,?,?,?)').run(before.id,req.workbenchActor.id,'bind-workbench',JSON.stringify(detail.before),JSON.stringify({...after,reason:input.reason}),now);
+  return {staff:after,historicalAssignmentsPreserved:true};
+ });}
+ return {current,select,list,save,mapping,previewBinding,bind};
 }
