@@ -233,7 +233,7 @@ async function ensureGateway(){
 }
 async function getAgentHost(){
   if(agentHost)return agentHost;
-  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,...(app.isPackaged?{engineResourceDir:path.join(process.resourcesPath,'agent-engines')}:{}),onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
+  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,...(app.isPackaged?{engineResourceDir:path.join(process.resourcesPath,'workbench-gateway','desktop','agent-runtime')}:{}),onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
   return agentHostStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};
