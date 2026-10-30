@@ -8,7 +8,6 @@ import {ServiceManager} from '../shared/service-manager.mjs';
 import {createServiceLifecycle} from '../modules/service-lifecycle.mjs';
 import {withElectronLifecycle} from '../modules/electron-lifecycle.mjs';
 import {installDeskViews} from '../local-desks.mjs';
-import {createPersonnelSelection,personnelPartition,decoratePersonnelURL,assertPersonnelSupport} from './personnel.mjs';
 import {requestedUserDataPath} from '../shared/user-data-path.mjs';
 import {parseCliRequest} from '../shared/ai-interface.mjs';
 import {readCliChildResult} from '../shared/cli-child-result.mjs';
@@ -62,7 +61,7 @@ if (!acquired) app.quit();
 let win, modules, services, desks, updater, recoveryError, tray, quitting=false, preparation, preparationStatus, rendererReady=false, previousCloudExecutable;
 const moduleArgument=args=>args.find(value=>/^--open-module=(warehouse|purchase|sales|overview|exporter)$/.test(value))?.split('=')[1];
 let requestedModule=headless?undefined:moduleArgument(process.argv);
-function deliverRequestedModule(){if(rendererReady&&personnel.state().selected&&requestedModule){const id=requestedModule;requestedModule=undefined;send('desks:navigate',{id});}}
+function deliverRequestedModule(){if(rendererReady&&requestedModule){const id=requestedModule;requestedModule=undefined;send('desks:navigate',{id});}}
 function reportPreparation(value){
   if(headless||process.argv.includes('--hidden')||process.env.LINGTU_SKIP_BUNDLED_ACTIVATION)return;
   const label=value.phase==='ready'?'准备完成':'正在准备工作台';
@@ -125,20 +124,7 @@ let networkProposal;
 const remote=()=>connection.read().mode==='client';
 const embedded=()=>remote()&&connection.read().networkProvider==='embedded';
 const clientPartition=()=> 'persist:workbench-'+crypto.createHash('sha256').update(connection.read().serverUrl).digest('hex').slice(0,24);
-const salesPageSessions=new Set();
-const deskPartition=(id,role=personnel.requireSelected())=>personnelPartition(id,remote()?clientPartition():'persist:lingtu-'+id,role);
-const personnel=createPersonnelSelection({
-  resetViews:()=>desks?.reset(),
-  clearPages:async({next})=>{
-    if(next)salesPageSessions.add(session.fromPartition(deskPartition('sales',next)));
-    // These are sales-only partitions. Tailnet's transport Session and its
-    // authentication/proxy credentials are intentionally left intact.
-    for(const target of salesPageSessions){
-      await target.clearCache();
-      await target.clearStorageData({storages:['cookies','localstorage','indexdb','cachestorage','serviceworkers']});
-    }
-  }
-});
+const deskPartition=id=>remote()?clientPartition():'persist:lingtu-'+id;
 const safeEncrypt=async plain=>{
   if(!safeStorage.isEncryptionAvailable())throw Error('Windows 安全存储不可用，不能保存私网连接信息');
   return safeStorage.encryptStringAsync?await safeStorage.encryptStringAsync(plain):safeStorage.encryptString(plain);
@@ -359,39 +345,21 @@ if (acquired) app.whenReady().then(async () => {
   });
   win.setMenu(null);
   win.setMenuBarVisibility(false);
-  const verifySalesPersonnel=async(id,cap)=>{
-    if(id!=='sales')return cap;
-    try{
-      let info;
-      if(remote())info=await remoteConnection().call('sales','/api/personnel/session');
-      else{
-        const response=await fetch(cap.url+'/api/personnel/session',{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(10000)});
-        if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))return assertPersonnelSupport(null);
-        info=await response.json();
-      }
-      assertPersonnelSupport(info);return cap;
-    }catch(error){
-      if(error.code==='PERSONNEL_UPDATE_REQUIRED')throw error;
-      throw Object.assign(Error('销售台身份接口尚未就绪，请更新工作台和销售台后重试。'),{code:'PERSONNEL_UPDATE_REQUIRED',cause:error});
-    }
-  };
   const viewManager={registryFile:services.registryFile,config:id=>{requireHost();return services.config(id);},
-    ensure:async id=>{if(remote()){remoteConnection();await preparePrivateSession(clientSession);return verifySalesPersonnel(id,await remoteManager.ensure(id));}if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');return verifySalesPersonnel(id,await services.ensure(id));},
+    ensure:async id=>{if(remote()){remoteConnection();await preparePrivateSession(clientSession);return remoteManager.ensure(id);}if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');return services.ensure(id);},
     status:options=>remote()?(remoteConnection(),remoteManager.status()):services.status(options),stop:id=>{requireHost();return services.stop(id);}};
   desks = installDeskViews(win, {manager:viewManager,isRemote:remote,partitionFor:deskPartition,includeWarehouse:true,
     beforeOpen:async id=>{
-      personnel.requireSelected();
       if(id==='sales'){
-        const target=session.fromPartition(deskPartition(id));salesPageSessions.add(target);
+        const target=session.fromPartition(deskPartition(id));
         if(remote()){guardPrivateSession(target);await preparePrivateSession(target);}
       }
     },
-    decorateURL:(id,url)=>decoratePersonnelURL(id,url,personnel.requireSelected()),
     notify:message=>send('modules:message',message)});
   const legacyHandlers=new Map();
   const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
     trusted(event);assertLauncherOperationAllowed(name);const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
-    if(name!=='agent:request'&&/^(?:personnel:select|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireAdmin(hostIdentity.localActor(),true);
+    if(name!=='agent:request'&&/^(?:launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireMember(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
     catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='agent:request')return {ok:false,code:error.code||'AGENT_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
   });};
@@ -402,8 +370,6 @@ if (acquired) app.whenReady().then(async () => {
   let diagnosticWindow=0,diagnosticCount=0;
   handle('diagnostics:event',value=>{if(Date.now()-diagnosticWindow>60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>50)return {limited:true};if(!value||typeof value.text!=='string'||value.text.length>6000||!['info','warning','error'].includes(value.level))throw Error('日志事件无效');diagnostics.write(value.level==='warning'?'warn':value.level,value.source==='network'?'network':'workbench',value.text);return {recorded:true};});
   handle('modules:list', list);
-  handle('personnel:state',()=>personnel.state());
-  handle('personnel:select',async role=>{if(remote()){const status=await remoteConnection().request('/agent/request',{method:'POST',body:{operation:'status',payload:{}},migration:true});if(role==='boss'&&status.actor.role!=='admin')throw Error('当前成员不是管理员');}return personnel.select(role);});
   handle('launcher:ready',()=>{rendererReady=true;deliverRequestedModule();return {ready:true};});
   handle('launcher:preferences',()=>launcherPreferences());
   handle('launcher:preferences-save',value=>{if(typeof value?.startAtLogin!=='boolean')throw Error('开机启动设置无效');const next={schemaVersion:1,startAtLogin:value.startAtLogin};configureLauncherLogin(next);persistPreferences(next);return next;});
@@ -513,7 +479,6 @@ if (acquired) app.whenReady().then(async () => {
     return publicNetworkStatus(status);
   }));
   handle('connection:cached',async id=>{
-    personnel.requireSelected();if(id==='sales')personnel.requireBoss();
     assertPrivateRequestAllowed();
     if(!remote()||!MODULE_IDS.includes(id)||!connection.read().pins)throw Error('没有对应身份的离线缓存');
     return cache.get(connection.cacheScope(id),id);
@@ -552,12 +517,11 @@ if (acquired) app.whenReady().then(async () => {
   handle('modules:cancel', id => {requireHost();return modules.cancel(id);});
   handle('modules:uninstall', async id => {requireHost();const result=await modules.uninstall(id);desks.invalidate(id);return result;});
   handle('modules:open', async (id, route) => {
-    personnel.requireSelected();
     assertPrivateRequestAllowed();
     if(remote()){
       await remoteConnection().connect();const result=await desks.open(id,route);
       // Cache only successful, authenticated business reads. Never cache secrets or attachments implicitly.
-      if(id!=='sales'||personnel.state().role==='boss')void transport.snapshot(id).catch(()=>{});return result;
+      void transport.snapshot(id).catch(()=>{});return result;
     }
     if(fs.existsSync(modules.journalFile))throw Error('模块正在激活或等待恢复检查，请稍后打开');
     if (['exporter','warehouse'].includes(id)) {

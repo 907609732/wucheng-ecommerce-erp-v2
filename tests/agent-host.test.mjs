@@ -14,28 +14,25 @@ import {createAgentModuleTransport} from '../desktop/agent-host/module-transport
 import {startAgentBridge,createAgentBridgeClient} from '../desktop/agent-host/bridge.mjs';
 import {artifactDownload,saveArtifactDownload} from '../desktop/agent-host/artifacts.mjs';
 import {provisionWorkbenchKey,verifyWorkbenchActor} from '../desktop/workbench/actor.mjs';
+import {createGatewayStore} from '../desktop/workbench/store.mjs';
 import {prepareServe,enableServe} from '../desktop/workbench-client/tailscale-serve.mjs';
 import {serverAddress} from '../desktop/workbench-client/connection.mjs';
 import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../desktop/agent-host/launcher-policy.mjs';
 
 function temp(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'erp-agent-host-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
 const owner={id:'windows:S-1-5-21-100-100-100-1001',login:'windows:S-1-5-21-100-100-100-1001',label:'Test Owner'};
-const user={role:'editor',modules:['purchase'],canRunTasks:true,enabled:true};
-function fixture(t){const root=temp(t),policyFile=path.join(root,'policy.json'),identity=createHostIdentity({storeDir:root,policyFile,principal:owner});return {root,policyFile,identity,meta:{actor:identity.localActor(),trustedUi:true}};}
+function fixture(t){const root=temp(t),hostDir=path.join(root,'profile','agent-host'),gatewayDir=path.join(root,'profile','workbench-server'),policyFile=path.join(gatewayDir,'access-policy.json'),identity=createHostIdentity({storeDir:hostDir,principal:owner});return {root,hostDir,gatewayDir,policyFile,identity,observe(login){const store=createGatewayStore(gatewayDir);try{store.observeMember(login);}finally{store.close();}},meta:{actor:identity.localActor(),trustedUi:true}};}
 
 test('real Windows identity uses the process SID, not a renderer-selected role',{skip:process.platform!=='win32'},()=>{
   assert.match(windowsPrincipal().id,/^windows:S-1-5-/);
   assert.throws(()=>windowsPrincipal({run:()=> 'not-an-identity'}),{code:'WINDOWS_IDENTITY_UNAVAILABLE'});
 });
-test('permissions re-read enabled membership and reject stale updates and self-selected admin',t=>{
-  const f=fixture(t),before=f.identity.permissionsGet({},f.meta),policy={schemaVersion:1,users:{'member@example.test':structuredClone(user)}};
-  const saved=f.identity.permissionsSave({policy,revision:before.revision},f.meta);
-  assert.equal(f.identity.resolveActor('tailscale:member@example.test').role,'editor');
-  assert.throws(()=>f.identity.permissionsSave({policy,revision:before.revision},f.meta),{code:'REVISION_CONFLICT'});
-  assert.throws(()=>f.identity.permissionsGet({}, {actor:{id:'tailscale:member@example.test',role:'admin'},trustedUi:true}),{code:'ADMIN_REQUIRED'});
-  policy.users['member@example.test'].enabled=false;f.identity.permissionsSave({policy,revision:saved.revision},f.meta);
-  assert.equal(f.identity.resolveActor('tailscale:member@example.test'),null);
-  const other=createHostIdentity({storeDir:f.root,policyFile:f.policyFile,principal:{...owner,id:'windows:S-1-5-21-200-200-200-1001'}});
+test('host resolves only real observed logins with equal company access, never old policy grants',t=>{
+  const f=fixture(t);f.observe('member@example.test');fs.writeFileSync(f.policyFile,JSON.stringify({schemaVersion:1,users:{'member@example.test':{enabled:false,role:'viewer',modules:[],canRunTasks:false},'forged@example.test':{enabled:true,role:'admin',modules:['purchase'],canRunTasks:true}}}));
+  const member=f.identity.resolveActor('tailscale:member@example.test');assert.equal(member.role,'admin');assert.equal(member.modules.length,5);assert.equal(member.canRunTasks,true);
+  assert.equal(f.identity.resolveActor('tailscale:forged@example.test'),null);
+  assert.throws(()=>f.identity.requireMember({id:'tailscale:forged@example.test',role:'admin'},true),{code:'AUTHENTICATED_UI_REQUIRED'});
+  const other=createHostIdentity({storeDir:f.hostDir,principal:{...owner,id:'windows:S-1-5-21-200-200-200-1001'}});
   assert.throws(()=>other.localActor(),{code:'HOST_OWNER_DENIED'});
 });
 test('secret store encrypts bytes and supports Electron async decrypt result',async t=>{
@@ -47,19 +44,10 @@ test('secret store encrypts bytes and supports Electron async decrypt result',as
   const unavailable=createSafeSecretStore({storeDir:root,safeStorage:{...safeStorage,getSelectedStorageBackend:()=> 'basic_text'}});
   await assert.rejects(()=>unavailable.set('company-api-key',value),{code:'SAFE_STORAGE_UNAVAILABLE'});
 });
-test('permission change and operation receipt survive one atomic policy-file write',t=>{
-  const f=fixture(t),before=f.identity.permissionsGet({},f.meta),policy={schemaVersion:1,users:{'member@example.test':structuredClone(user)}},idempotencyKey='permissions-test-operation';
-  const meta={...f.meta,approval:{payload:'synthetic-proof'},idempotencyKey};
-  const saved=f.identity.permissionsSave({policy,revision:before.revision,idempotencyKey},meta);
-  assert.equal(saved.receipt.idempotencyKey,idempotencyKey);
-  assert(!('_agentReceipts' in f.identity.permissionsGet({},f.meta).policy));
-  const restarted=createHostIdentity({storeDir:f.root,policyFile:f.policyFile,principal:owner});
-  assert.deepEqual(restarted.permissionsReceipt({idempotencyKey},f.meta).receipt,saved.receipt);
-  const repeated=restarted.permissionsSave({policy,revision:before.revision,idempotencyKey},meta);assert.deepEqual(repeated.receipt,saved.receipt);
-  const next=restarted.permissionsGet({},f.meta);next.policy.users['member@example.test'].enabled=false;restarted.permissionsSave(next,f.meta);
-  assert.equal(restarted.permissionsReceipt({idempotencyKey},f.meta).state,'completed');
-  assert.throws(()=>restarted.permissionsSave({policy:next.policy,revision:next.revision,idempotencyKey},meta),{code:'IDEMPOTENCY_CONFLICT'});
-  assert.throws(()=>restarted.permissionsSave({policy,revision:before.revision,idempotencyKey:'new-operation'},f.meta),{code:'AGENT_APPROVAL_REQUIRED'});
+test('removed permission APIs cannot mutate or reactivate an old policy file',t=>{
+  const f=fixture(t);fs.mkdirSync(f.gatewayDir,{recursive:true});fs.writeFileSync(f.policyFile,'historical file preserved');
+  for(const operation of ['permissionsGet','permissionsInspect','permissionsReceipt','permissionsSave'])assert.throws(()=>f.identity[operation]({},f.meta),{code:'FEATURE_REMOVED'});
+  assert.equal(fs.readFileSync(f.policyFile,'utf8'),'historical file preserved');
 });
 test('IPC requires exact packaged top frame and rejects identity injection',t=>{
   const page=path.join(temp(t),'agent-index.html'),frame={url:pathToFileURL(page).href},contents={mainFrame:frame},win={isDestroyed:()=>false,webContents:contents};
@@ -77,16 +65,17 @@ test('beta registry cannot fall back to production, follow junctions, or start w
   assert.throws(()=>agentBetaPaths({localAppData:root,root:path.join(root,'formal')}),{code:'BETA_LOCATION_INVALID'});
 });
 test('real HTTP module transport signs current identity, forces MCP channel and denies unreviewed commit',async t=>{
-  const f=fixture(t),current=f.identity.permissionsGet({},f.meta);f.identity.permissionsSave({policy:{schemaVersion:1,users:{'member@example.test':structuredClone(user)}},revision:current.revision},f.meta);
+  const f=fixture(t);f.observe('member@example.test');
   const dataDir=path.join(f.root,'module');fs.mkdirSync(dataDir);const key=provisionWorkbenchKey(dataDir);fs.writeFileSync(path.join(dataDir,'.integration-key'),randomBytes(32).toString('hex'));
-  let requests=0;const server=http.createServer(async(req,res)=>{requests++;const actor=verifyWorkbenchActor(req.headers,key,{module:'purchase',method:req.method,path:req.url});assert.equal(actor.role,'editor');assert.equal(actor.channel,'mcp');res.setHeader('content-type','application/json');res.end(JSON.stringify({ok:true,actorId:actor.id,bound:true}));});
+  let requests=0;const server=http.createServer(async(req,res)=>{requests++;const actor=verifyWorkbenchActor(req.headers,key,{module:'purchase',method:req.method,path:req.url});assert.equal(actor.role,'admin');assert.equal(actor.modules.length,5);assert.equal(actor.channel,'mcp');res.setHeader('content-type','application/json');res.end(JSON.stringify({ok:true,actorId:actor.id,bound:true}));});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>{server.closeIdleConnections();server.close(resolve);}));
   const transport=createAgentModuleTransport({services:{config:()=>({dataDir}),ensure:async()=>({url:'http://127.0.0.1:'+server.address().port,dataSetId:'test-ledger',revision:1})},resolveActor:f.identity.resolveActor});
   const ctx={actor:{id:'tailscale:member@example.test',role:'admin',sessionId:'test-session'}};
   const result=await transport('purchase','/api/integration/v1/agent/prepare',{method:'POST',body:{item:1},ctx});assert.equal(result.bound,true);assert.equal(requests,1);
   await assert.rejects(()=>transport('purchase','/api/integration/v1/agent/commit',{method:'POST',body:{},ctx}),{code:'AGENT_APPROVAL_REQUIRED'});assert.equal(requests,1);
-  const now=f.identity.permissionsGet({},f.meta);now.policy.users['member@example.test'].enabled=false;f.identity.permissionsSave(now,f.meta);
-  await assert.rejects(()=>transport('purchase','/api/integration/v1/agent/query',{method:'POST',ctx}),{code:'MODULE_DENIED'});
+  fs.writeFileSync(f.policyFile,'old permissions no longer apply');
+  assert.equal((await transport('purchase','/api/integration/v1/agent/query',{method:'POST',ctx})).bound,true);
+  await assert.rejects(()=>transport('purchase','/api/integration/v1/agent/query',{method:'POST',ctx:{actor:{id:'tailscale:unknown@example.test',role:'admin'}}}),{code:'MODULE_DENIED'});
   await assert.rejects(()=>transport.signApproval({actorId:owner.id},'purchase'),{code:'AGENT_APPROVAL_REQUIRED'});
 });
 test('private HTTP bridge authenticates gateway and never accepts renderer identity fields',async t=>{
@@ -113,7 +102,8 @@ test('Beta Tailscale proposal preserves every original HTTPS entry and does not 
 });
 test('Beta startup and maintenance cannot activate stable packages or bypass result review',()=>{
   for(const op of ['modules:refresh','modules:install','modules:uninstall','modules:offline','modules:offline-install','modules:offline-plan','migration:commit','launcher:update-install','personnel:select','permissions:save','desks:stop','unknown:write'])assert.throws(()=>assertLauncherOperationAllowed(op),{code:'BETA_MAINTENANCE_DISABLED'});
-  for(const op of ['agent:request','modules:list','diagnostics:read','permissions:get'])assert.doesNotThrow(()=>assertLauncherOperationAllowed(op));
+  for(const op of ['agent:request','modules:list','diagnostics:read'])assert.doesNotThrow(()=>assertLauncherOperationAllowed(op));
+  for(const op of ['permissions:get','personnel:state','personnel:select'])assert.throws(()=>assertLauncherOperationAllowed(op),{code:'BETA_MAINTENANCE_DISABLED'});
   for(const request of [{command:'import'},{command:'extension-call',action:'start'},{command:'extension-call',action:'prepare',confirmSideEffect:true}])assert.throws(()=>assertLegacyAgentReadOnly(request),{code:'LEGACY_AGENT_WRITE_DISABLED'});
   assert.doesNotThrow(()=>assertLegacyAgentReadOnly({command:'extension-call',action:'query'}));
   const main=fs.readFileSync(new URL('../desktop/launcher/main.mjs',import.meta.url),'utf8');

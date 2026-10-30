@@ -5,22 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createHostIdentity} from '../desktop/agent-host/identity.mjs';
+import {createGatewayStore} from '../desktop/workbench/store.mjs';
 import {artifactPreview} from '../desktop/agent-host/artifacts.mjs';
 import {prepareResultCorrections} from '../desktop/agent-runtime/result-corrections.mjs';
 
 function directory(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'erp-resume-boundaries-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
 
-test('assignable directory rechecks rights and returns only permitted execution identities',t=>{
-  const root=directory(t),principal={id:'windows:owner',login:'windows:owner',label:'Local Owner'},policyFile=path.join(root,'policy.json'),identity=createHostIdentity({storeDir:root,policyFile,principal});
-  const member=(modules,extra={})=>({role:'editor',enabled:true,canRunTasks:true,modules,...extra});
-  const policy={schemaVersion:1,users:{'employee@example.test':member(['purchase']),'other@example.test':member(['sales']),'viewer@example.test':member(['purchase'],{role:'viewer'}),'stopped@example.test':member(['purchase'],{enabled:false}),'query@example.test':member(['purchase'],{canRunTasks:false})}};
-  fs.writeFileSync(policyFile,JSON.stringify(policy));
+test('assignable directory uses real observed logins without configurable business restrictions',t=>{
+  const root=directory(t),principal={id:'windows:owner',login:'windows:owner',label:'Local Owner'},profile=path.join(root,'profile'),identity=createHostIdentity({storeDir:path.join(profile,'agent-host'),principal}),gateway=createGatewayStore(path.join(profile,'workbench-server'));
+  try{gateway.observeMember('employee@example.test');gateway.observeMember('other@example.test');}finally{gateway.close();}
   const actor=identity.resolveActor('tailscale:employee@example.test'),rows=identity.listAssignableActors({modules:['purchase']},{actor}).people;
-  assert.deepEqual(rows.map(row=>row.id).sort(),['tailscale:employee@example.test','windows:owner']);
+  assert.deepEqual(rows.map(row=>row.id).sort(),['tailscale:employee@example.test','tailscale:other@example.test','windows:owner']);
   assert(rows.every(row=>Object.keys(row).sort().join(',')==='id,label,modules'));
-  assert.throws(()=>identity.listAssignableActors({modules:['sales']},{actor}),{code:'PEOPLE_SCOPE_DENIED'});
-  policy.users['employee@example.test'].canRunTasks=false;fs.writeFileSync(policyFile,JSON.stringify(policy));
-  assert.throws(()=>identity.listAssignableActors({modules:['purchase']},{actor:{...actor,role:'admin'}}),{code:'TASK_PERMISSION_REQUIRED'});
+  assert.equal(identity.listAssignableActors({modules:['sales']},{actor}).people.length,3);
+  assert.equal(identity.resolveActor('tailscale:model-invented@example.test'),null);
+  assert.throws(()=>identity.listAssignableActors({modules:['purchase']},{actor:{id:'tailscale:model-invented@example.test',role:'admin'}}),{code:'IDENTITY_REQUIRED'});
 });
 
 test('preview verifies scope, hash and media bytes rather than trusting a MIME label',t=>{
@@ -46,10 +45,12 @@ test('human corrections preserve the original prepared result and require fresh 
   f.payload.corrections.resultVersion=3;f.payload.corrections.edits[0].before=99;assert.throws(()=>prepareResultCorrections(f),{code:'RESULT_ROW_CHANGED'});
 });
 
-test('generic corrections cannot alter read-only data, reused row keys, committed or unauthorized results',()=>{
+test('generic corrections require a logged-in member and a fresh editable draft, without obsolete role gates',()=>{
   let f=correctionFixture();f.payload.corrections.edits[0].field='draftId';assert.throws(()=>prepareResultCorrections(f),{code:'RESULT_FIELD_READ_ONLY'});
   f=correctionFixture();f.result.blocks[0].rows.push({draftId:'stable-row',amountCents:100});assert.throws(()=>prepareResultCorrections(f),{code:'RESULT_ROW_CHANGED'});
   f=correctionFixture();f.result.receipt={state:'verified'};assert.throws(()=>prepareResultCorrections(f),{code:'RESULT_NOT_EDITABLE'});
-  f=correctionFixture();f.actor.canRunTasks=false;assert.throws(()=>prepareResultCorrections(f),{code:'TASK_PERMISSION_REQUIRED'});
+  f=correctionFixture();f.actor={...f.actor,role:'viewer',canRunTasks:false,modules:[]};assert.equal(prepareResultCorrections(f).corrections.actorId,'person');
+  f=correctionFixture();f.actor.enabled=false;assert.throws(()=>prepareResultCorrections(f),{code:'IDENTITY_REQUIRED'});
+  f=correctionFixture();f.actor={};assert.throws(()=>prepareResultCorrections(f),{code:'IDENTITY_REQUIRED'});
   f=correctionFixture();f.payload.corrections.edits.push({...f.payload.corrections.edits[0]});assert.throws(()=>prepareResultCorrections(f),{code:'CORRECTIONS_DUPLICATE'});
 });

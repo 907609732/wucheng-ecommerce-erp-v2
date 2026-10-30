@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
+import {validCompanyLogin} from './company-access.mjs';
 
 export const digest=value=>createHash('sha256').update(value).digest('hex');
 export function createGatewayStore(storeDir) {
@@ -21,6 +22,7 @@ function openGatewayStore(storeDir,ownership) {
   const db=new DatabaseSync(path.join(storeDir,'gateway.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,session_id TEXT NOT NULL,login TEXT NOT NULL,channel TEXT NOT NULL,csrf TEXT NOT NULL,expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS company_members(login TEXT PRIMARY KEY,label TEXT NOT NULL,first_seen INTEGER NOT NULL,last_seen INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS session_modules(session_id TEXT NOT NULL,module TEXT NOT NULL,data_set_id TEXT NOT NULL,PRIMARY KEY(session_id,module));
     CREATE TABLE IF NOT EXISTS operations(operation_key TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,actor_id TEXT NOT NULL,session_id TEXT NOT NULL,state TEXT NOT NULL,request_id TEXT NOT NULL,status INTEGER,headers TEXT,body BLOB,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,at INTEGER NOT NULL,request_id TEXT NOT NULL,actor_id TEXT NOT NULL,module TEXT NOT NULL,operation TEXT NOT NULL,outcome TEXT NOT NULL,details TEXT NOT NULL);`);
@@ -29,6 +31,10 @@ function openGatewayStore(storeDir,ownership) {
   const api={...identity,db,
     session(token){return token?db.prepare('SELECT * FROM sessions WHERE token_hash=? AND expires_at>?').get(digest(token),Date.now()):null;},
     saveSession(token,s){db.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?)').run(digest(token),s.sessionId,s.login,s.channel,s.csrfToken,s.expiresAt);},
+    observeMember(login){
+      if(!validCompanyLogin(login))throw Object.assign(Error('公司登录身份无效'),{code:'IDENTITY_REQUIRED',statusCode:401});
+      const now=Date.now();db.prepare('INSERT INTO company_members VALUES(?,?,?,?) ON CONFLICT(login) DO UPDATE SET last_seen=excluded.last_seen').run(login,login,now,now);
+    },
     deleteSession(token){if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token));},
     bindModule(sessionId,module,dataSetId){
       if(typeof dataSetId!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(dataSetId))throw Object.assign(Error('模块尚未返回可验证的正式账本身份，请在主机检查数据和版本'),{statusCode:503,code:'MODULE_DATA_NOT_READY',workbenchPublic:true});

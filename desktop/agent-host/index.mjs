@@ -13,7 +13,7 @@ import {createLegacyScheduleTakeover} from './schedules.mjs';
 
 export async function createAgentHost({paths,services,safeStorage,principal,identity:providedIdentity,loadDependencies=composeAgentDependencies,runtimeFactory,adapters,engines,createBackups,engineResourceDir,connectionHandlers={},onError=()=>{},startBridge=true}={}){
   const hostDir=path.join(paths.profile,'agent-host'),storeDir=path.join(paths.profile,'agent-runtime');
-  const identity=providedIdentity||createHostIdentity({storeDir:hostDir,policyFile:path.join(paths.profile,'workbench-server','access-policy.json'),...(principal?{principal}:{})});
+  const identity=providedIdentity||createHostIdentity({storeDir:hostDir,...(principal?{principal}:{})});
   const getCompanyIdentity=createCompanyIdentity({profile:paths.profile,storeDir}),resolveActor=id=>{getCompanyIdentity();return identity.resolveActor(id);};
   const secretStore=createSafeSecretStore({storeDir:hostDir,safeStorage});let runtime;
   function approved(claims,id){
@@ -31,17 +31,16 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
   const signApproval=async(claims,id)=>{
     if(id!=='system')return transport.signApproval(claims,id);
     if(!approved(claims,id))throw hostError('AGENT_APPROVAL_REQUIRED','没有可核对的已审批系统任务',403);
-    const actor=resolveActor(claims.actorId);if(!actor||actor.role==='viewer'||!actor.canRunTasks)throw hostError('TASK_PERMISSION_REQUIRED','系统任务权限已撤销',403);
+    const actor=resolveActor(claims.actorId);if(!actor)throw hostError('IDENTITY_REQUIRED','系统任务缺少真实登录人员',401);
     const {signAgentApproval}=await import('../agent-runtime/approval.mjs');return signAgentApproval(claims,fs.readFileSync(systemKeyFile,'utf8'));
   };
   runtime=dependencies.runtimeFactory({storeDir,adapters:dependencies.adapters,engines:dependencies.engines,resolveActor,secretStore,signApproval,environment:{...paths.environment,tenantLabel:'测试租户'},extensions:{
-    'permissions.get':identity.permissionsGet,'permissions.inspect':identity.permissionsInspect,'permissions.receipt':identity.permissionsReceipt,'permissions.save':identity.permissionsSave,
     ...(typeof identity.listAssignableActors==='function'?{'people.assignable':identity.listAssignableActors}:{}),
     'artifacts.open':item=>artifactDownload(storeDir,item),'artifacts.preview':item=>artifactPreview(storeDir,item),...backupHooks,...connectionHandlers
   }});
   const takeover=createLegacyScheduleTakeover({warehouse:adapterMap.get('warehouse'),runtime,identity,getCompanyIdentity,onError});
   const dispatch=runtime.request;
-  runtime.request=async(operation,payload,meta)=>{getCompanyIdentity();if(['permissions.inspect','permissions.receipt','people.assignable'].includes(operation)||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);const result=await dispatch(operation,payload,meta);return operation==='status'?{...result,legacyScheduleMigration:takeover.status()}:result;};
+  runtime.request=async(operation,payload,meta)=>{getCompanyIdentity();if(operation.startsWith('permissions.'))throw hostError('FEATURE_REMOVED','权限管理已移除',410);if(operation==='people.assignable'||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于受控业务任务',403);const result=await dispatch(operation,payload,meta);return operation==='status'?{...result,legacyScheduleMigration:takeover.status()}:result;};
   let tickJob=null,closing=false;
   const timer=setInterval(()=>{if(tickJob||closing)return;tickJob=Promise.resolve().then(()=>takeover.run()).then(()=>runtime.tick()).catch(onError).finally(()=>{tickJob=null;});},15000);timer.unref();
   let bridge;try{bridge=startBridge?await startAgentBridge({storeDir:hostDir,request:runtime.request}):null;}catch(error){clearInterval(timer);await runtime.close();throw error;}

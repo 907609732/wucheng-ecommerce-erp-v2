@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld('launcher', {
   openLink: invoke('links:open'),
   readLogs:invoke('diagnostics:read'),copyLogs:invoke('diagnostics:copy'),exportLogs:invoke('diagnostics:export'),openLogsFolder:invoke('diagnostics:open-folder'),reportDiagnostic:invoke('diagnostics:event'),
   ready:invoke('launcher:ready'),
-  personnelState:invoke('personnel:state'),selectPersonnel:invoke('personnel:select'),
   preferences:invoke('launcher:preferences'),savePreferences:invoke('launcher:preferences-save'),integrationConfig:invoke('launcher:integration-config'),copyIntegration:invoke('launcher:copy-integration'),
   connection:invoke('connection:get'),connectionStatus:invoke('connection:status'),saveConnection:invoke('connection:save'),checkConnection:invoke('connection:check'),cached:invoke('connection:cached'),
   networkPlan:invoke('connection:network-plan'),

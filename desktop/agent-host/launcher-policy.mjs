@@ -3,7 +3,7 @@ const allowed=new Set([
   'agent:request','launcher:ready','launcher:preferences','launcher:integration-config','launcher:copy-integration','launcher:update-check',
   'diagnostics:read','diagnostics:copy','diagnostics:export','diagnostics:open-folder','diagnostics:event','links:open',
   'connection:get','connection:status','connection:check','connection:network-plan','connection:save','connection:cached',
-  'tailnet:status','tailnet:login','tailnet:connect','tailnet:logout','permissions:get','personnel:state','modules:list','desks:hide','desks:bounds'
+  'tailnet:status','tailnet:login','tailnet:connect','tailnet:logout','modules:list','desks:hide','desks:bounds'
 ]);
 /** Beta components and ledger copies are immutable outside the validated packaging/migration tools. */
 export function assertLauncherOperationAllowed(name){if(!allowed.has(name))throw hostError('BETA_MAINTENANCE_DISABLED','测试版组件和账本由独立验收工具维护，此旧操作已停用',403);}

@@ -10,6 +10,7 @@ import {createGatewayStore,digest} from './store.mjs';
 import {WORKBENCH_MODULES,signWorkbenchActor} from './actor.mjs';
 import {loadOperationManifest,matchOperation,publicManifest,safeRequestPath} from './manifest.mjs';
 import {validatePolicy} from './policy.mjs';
+import {withCompanyAccess} from './company-access.mjs';
 
 const COOKIE='__Host-workbench-session';
 const API='/api/workbench/v1';
@@ -48,12 +49,12 @@ async function spoolBody(request,dir,maxBytes){
 async function boundedResponse(response,limit){let size=0;const chunks=[];for await(const chunk of response.body||[]){size+=chunk.length;if(size>limit)throw fail(502,'MODULE_RESPONSE_TOO_LARGE','模块返回结果超过允许大小，请使用文件下载接口');chunks.push(Buffer.from(chunk));}return Buffer.concat(chunks);}
 
 export async function createWorkbenchGateway(options={}) {
-  const {services,storeDir,accessPolicy,getManifest,registerRoutes,logger=false,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
+  const {services,storeDir,getManifest,registerRoutes,logger=false,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
   if(!services||!storeDir)throw Error('缺少工作台服务注册表或存储目录');
   const publicOrigin=validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
   const host=options.host||'127.0.0.1',port=options.port??17330;
   if(host!=='127.0.0.1')throw Error('工作台只能绑定 127.0.0.1，由 Tailscale Serve 提供 HTTPS');
-  const store=createGatewayStore(storeDir),policyFile=path.join(storeDir,'access-policy.json');
+  const store=createGatewayStore(storeDir);
   const spoolDir=path.join(storeDir,'requests');fs.mkdirSync(spoolDir,{recursive:true,mode:0o700});
   // Request spools contain uploads; clean only our own private leftover request files.
   for(const name of fs.readdirSync(spoolDir))if(/^[a-f0-9-]{36}\.request$/.test(name))fs.rmSync(path.join(spoolDir,name),{force:true});
@@ -63,7 +64,6 @@ export async function createWorkbenchGateway(options={}) {
   // JSON keeps Fastify's strict parser for business and migration hooks; binary/multipart uploads stream to a bounded private spool.
   app.addContentTypeParser('*',(req,payload,done)=>done(null,payload));
   app.setErrorHandler((error,request,reply)=>{if(reply.sent)return;reply.code(error.statusCode||500).send({ok:false,code:error.code||'WORKBENCH_ERROR',error:error.workbenchPublic||error.statusCode&&error.statusCode<500?error.message:'工作台请求失败，请检查本机服务状态',requestId:request.id});});
-  function policy(){return validatePolicy(typeof accessPolicy==='function'?accessPolicy():accessPolicy||JSON.parse(fs.readFileSync(policyFile,'utf8')));}
   function loginOf(request){
     if(!loopback(request.ip))throw fail(403,'LOOPBACK_REQUIRED','只能由本机 Tailscale Serve 转发');
     if(request.headers.host!==publicHost)throw fail(421,'INVALID_HOST','入口地址与本机配置不一致');
@@ -74,16 +74,16 @@ export async function createWorkbenchGateway(options={}) {
     if(['cross-site','same-site'].includes(request.headers['sec-fetch-site']))throw fail(403,'ORIGIN_DENIED','请求来源不受信任');
     return login;
   }
-  function member(login){let p;try{p=policy().users[login];}catch(e){throw e.statusCode?e:fail(503,'ACCESS_POLICY_UNAVAILABLE','尚未配置工作台成员权限');}if(!p||p.enabled!==true)throw fail(403,'MEMBER_DENIED','此 Tailscale 用户尚未获得工作台权限');return p;}
   function resolveActor(request,{csrf=!readonly(request.method)}={}){
-    const login=loginOf(request),p=member(login),session=store.session(request.cookies[COOKIE]);
+    const login=loginOf(request),session=store.session(request.cookies[COOKIE]);
     if(!session||session.login!==login)throw fail(401,'SESSION_REQUIRED','请先连接工作台以建立会话');
     const channel=request.headers['x-workbench-channel'];if(channel&&channel!==session.channel)throw fail(403,'CHANNEL_DENIED','本次会话不能切换调用通道');
     if(csrf&&(!equal(request.headers['x-workbench-csrf'],session.csrf)||request.headers.origin!==publicOrigin))throw fail(403,'CSRF_DENIED','本次修改缺少有效的界面确认来源');
-    return {v:1,id:'tailscale:'+login,login,role:p.role,modules:[...p.modules],canRunTasks:p.canRunTasks,sessionId:session.session_id,channel:session.channel};
+    store.observeMember(login);
+    return withCompanyAccess({v:1,id:'tailscale:'+login,login,label:login,sessionId:session.session_id,channel:session.channel});
   }
   const requireSession=async(request,reply)=>{try{request.workbenchActor=resolveActor(request);}catch(e){reply.code(e.statusCode||500).send({ok:false,code:e.code,error:e.message});}};
-  const requireAdmin=async(request,reply)=>{await requireSession(request,reply);if(!reply.sent&&request.workbenchActor.role!=='admin')reply.code(403).send({ok:false,code:'ADMIN_REQUIRED',error:'需要管理员权限'});};
+  const requireAdmin=requireSession; // Legacy route name; all authenticated company members have equal access.
   const writeAudit=entry=>store.audit(entry);
   const bindModule=(actor,id,cap)=>store.bindModule(actor.sessionId,id,cap?.dataSetId||cap?.workbench?.dataSetId||cap?.state?.workbench?.dataSetId||cap?.capabilities?.workbench?.dataSetId);
   async function metadata(actor){return Promise.all(actor.modules.map(async id=>{try{const cap=await services.capabilities(id),c=services.config(id),workbench=cap?.workbench||cap?.state?.workbench||cap?.capabilities?.workbench;return {id,version:cap?.version||c.version||null,status:cap?.url?(workbench?.protocolVersion===1?'running':'incompatible'):cap?.installed===false?'missing':'stopped',dataSetId:cap?.dataSetId||workbench?.dataSetId||null,revision:cap?.revision??workbench?.revision??null};}catch{return {id,status:'unavailable',version:null,dataSetId:null,revision:null};}}));}
@@ -117,7 +117,7 @@ export async function createWorkbenchGateway(options={}) {
     const cookies=backendCookies(request,id);if(cookies)h.cookie=cookies;return h;
   }
   async function proxy(request,reply,ui=false){
-    const actor=resolveActor(request),id=request.params.id;if(!actor.modules.includes(id))throw fail(403,'MODULE_DENIED','未获得此模块权限');
+    const actor=resolveActor(request),id=request.params.id;
     if(!safeRequestPath(request.raw.url))throw fail(400,'UNSAFE_PATH','接口路径无效');
     const urlQuery=new URL(request.raw.url,publicOrigin).searchParams;
     if([...urlQuery.keys()].some(k=>/^(?:path|filePath|directory|root|database|db|sql|query_sql)$/i.test(k)))throw fail(400,'UNSAFE_FILE_QUERY','远程文件访问必须使用已登记文件标识');
@@ -130,23 +130,19 @@ export async function createWorkbenchGateway(options={}) {
     if(!operation.remote)throw fail(403,'HOST_ONLY','此操作只能在服务器本机执行');
     if(!ui&&operation.kind==='ui')throw fail(404,'OPERATION_UNLISTED','请通过模块页面入口打开');
     if((operation.uiOnly||operation.kind==='confirmation')&&actor.channel!=='ui')throw fail(403,'UI_CONFIRMATION_REQUIRED','此操作必须在界面完成两次确认');
-    if(operation.kind!=='read'&&operation.kind!=='download'&&operation.kind!=='ui'&&actor.role==='viewer')throw fail(403,'READ_ONLY','当前成员仅有只读权限');
-    if((operation.canRunTasks===true||id==='warehouse'&&/^\/api\/integration\/v1\/workbench\/jobs/.test(target)||id==='exporter'&&request.method==='POST'&&/\/tasks(?:$|\/[^/]+\/(?:resume|retry|enrichDetails|finish|pause))/.test(target.split('?')[0]))&&!actor.canRunTasks)throw fail(403,'TASK_PERMISSION_REQUIRED','当前成员没有采集任务执行权限');
     const requestId=randomUUID();
     if(readonly(request.method))return reply.from(upstream.url+target,{rewriteRequestHeaders:()=>outboundHeaders(request,id,upstream,actor,target,requestId),rewriteHeaders:h=>responseHeaders(h,id,upstream,ui),retriesCount:0,timeout:60000});
     const key=request.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9._:-]{8,160}$/.test(key))throw fail(400,'IDEMPOTENCY_KEY_REQUIRED','修改请求必须带有唯一操作标识');
     const body=await spoolBody(request,spoolDir,maxUploadBytes);
     try{
       const currentActor=resolveActor(request);
-      if(!currentActor.modules.includes(id))throw fail(403,'MODULE_DENIED','未获得此模块权限');
-      if(!['read','download','ui'].includes(operation.kind)&&currentActor.role==='viewer')throw fail(403,'READ_ONLY','当前成员仅有只读权限');
       const operationKey=digest(actor.id+'\0'+id+'\0'+key),fingerprint=digest(request.method+'\0'+target+'\0'+body.hash+'\0'+(operation.uiOnly?actor.sessionId:''));
       const existing=store.get(operationKey);
       if(existing){if(existing.fingerprint!==fingerprint)throw fail(409,'IDEMPOTENCY_CONFLICT','此操作标识对应的内容已变化');if(existing.state!=='completed')throw fail(409,'OPERATION_OUTCOME_UNKNOWN','上次操作结果仍需核对，已阻止重复写入');reply.code(existing.status);for(const [k,v] of Object.entries(existing.headers))reply.header(k,v);return reply.send(existing.body);}
       store.begin(operationKey,fingerprint,actor,requestId);writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:'started',details:{bodyDigest:body.hash,bytes:body.bytes}});
       try{
         // Upload spooling can outlive a short delegation signature. Revalidate
-        // membership and sign immediately before the local business request.
+        // login session and sign immediately before the local business request.
         const headers=outboundHeaders(request,id,upstream,currentActor,target,requestId);
         const response=await fetch(upstream.url+target,{method:request.method,headers,...(body.bytes?{body:fs.createReadStream(body.file),duplex:'half'}:{}),redirect:'manual',signal:AbortSignal.timeout(120000)});
         const result=await boundedResponse(response,maxResponseBytes),rawHeaders=Object.fromEntries(response.headers);if(response.headers.getSetCookie)rawHeaders['set-cookie']=response.headers.getSetCookie();
@@ -158,22 +154,22 @@ export async function createWorkbenchGateway(options={}) {
   }
   app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId}));
   app.get(API+'/session',async(request,reply)=>{
-    const login=loginOf(request),p=member(login),channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
+    const login=loginOf(request),channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
     let session=store.session(request.cookies[COOKIE]),token=request.cookies[COOKIE];
     if(!session||session.login!==login||session.channel!==channel){token=randomBytes(32).toString('base64url');const s={sessionId:randomUUID(),login,channel,csrfToken:randomBytes(32).toString('base64url'),expiresAt:Date.now()+sessionTtlMs};store.saveSession(token,s);session=store.session(token);}
     reply.setCookie(COOKIE,token,{secure:true,httpOnly:true,sameSite:'strict',path:'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
-    const actor={id:'tailscale:'+login,login,role:p.role,modules:[...p.modules],canRunTasks:p.canRunTasks,channel};
+    store.observeMember(login);
+    const actor=withCompanyAccess({id:'tailscale:'+login,login,label:login,channel});
     return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor)};
   });
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));
   app.get(API+'/modules/:id/connection',{preHandler:requireSession},async request=>{
-    const actor=request.workbenchActor,id=request.params.id;if(!actor.modules.includes(id))throw fail(403,'MODULE_DENIED','未获得此模块权限');
+    const actor=request.workbenchActor,id=request.params.id;
     const {cap}=await backend(id),workbench=cap.workbench||cap.state?.workbench||cap.capabilities?.workbench;bindModule(actor,id,cap);
     return {ok:true,id,status:'running',version:cap.version||null,dataSetId:cap.dataSetId||workbench?.dataSetId||null,revision:cap.revision??workbench?.revision??null,protocolVersion:1};
   });
   app.get(API+'/operations/:idempotencyKey',{preHandler:requireSession},async(request,reply)=>{
     const actor=request.workbenchActor,id=request.query.module,key=request.params.idempotencyKey;
-    if(!actor.modules.includes(id))throw fail(403,'MODULE_DENIED','未获得此模块权限');
     if(!/^[A-Za-z0-9._:-]{8,160}$/.test(key))throw fail(400,'IDEMPOTENCY_KEY_INVALID','操作标识无效');
     const operation=store.get(digest(actor.id+'\0'+id+'\0'+key));if(!operation)throw fail(404,'OPERATION_NOT_FOUND','未找到此成员的操作记录');
     reply.header('cache-control','no-store');
@@ -196,3 +192,4 @@ export async function createWorkbenchGateway(options={}) {
 }
 
 export {validatePolicy};
+

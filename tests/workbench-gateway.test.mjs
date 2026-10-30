@@ -40,36 +40,36 @@ async function fixture(t,{role='editor',channel='ui',canRunTasks=true,maxUploadB
   return {gateway,backend,inject,headers,data,accessPolicy,cap,dir,stats:()=>({writes,lastActor,lastHeaders})};
 }
 test('gateway establishes per-person session, immutable identity and safe module metadata',async t=>{
-  const f=await fixture(t);assert.equal(f.data.actor.id,'tailscale:'+login);assert.equal(f.data.protocolVersion,1);assert.equal(f.data.modules[0].id,'purchase');assert(!JSON.stringify(f.data).includes(f.dir));
+  const f=await fixture(t);assert.equal(f.data.actor.id,'tailscale:'+login);assert.equal(f.data.protocolVersion,1);assert.equal(f.data.modules.length,5);assert.equal(f.data.actor.accessMode,'company-shared');assert(!JSON.stringify(f.data).includes(f.dir));
   const r=await f.inject('/api/workbench/v1/modules');assert.equal(r.statusCode,200);assert.equal(r.json().dataSetId,f.data.dataSetId);
-  assert.equal(r.json().modules[0].dataSetId,'a0000000-0000-4000-8000-000000000001');assert.equal(r.json().modules[0].revision,'revision-1');
-  const cap=await f.inject('/api/workbench/v1/capabilities');assert.equal(cap.json().operationManifest[0].operations.length,9);
+  assert.equal(r.json().modules.find(row=>row.id==='purchase').dataSetId,'a0000000-0000-4000-8000-000000000001');assert.equal(r.json().modules.find(row=>row.id==='purchase').revision,'revision-1');
+  const cap=await f.inject('/api/workbench/v1/capabilities');assert.equal(cap.json().operationManifest.find(row=>row.module==='purchase').operations.length,9);
   const unauth=await f.gateway.app.inject({url:'/api/workbench/v1/session',headers:{host:new URL(origin).host}});assert.equal(unauth.statusCode,401);
-  const unknown=await f.gateway.app.inject({method:'HEAD',url:'/api/workbench/v1/session',headers:{host:new URL(origin).host,'tailscale-user-login':'unlisted@example.test'}});assert.equal(unknown.statusCode,403);
+  const unknown=await f.gateway.app.inject({method:'HEAD',url:'/api/workbench/v1/session',headers:{host:new URL(origin).host,'tailscale-user-login':'unlisted@example.test'}});assert.equal(unknown.statusCode,200); // Every real Tailscale login may establish its own session.
   const health=(await f.gateway.app.inject({url:'/api/workbench/v1/health'})).json();assert.equal(health.serverId,f.data.serverId);assert.equal(health.dataSetId,f.data.dataSetId);
 });
 test('discovery marks an old service incompatible before a module page is opened',async t=>{const f=await fixture(t);f.cap.workbench.protocolVersion=0;const rows=(await f.inject('/api/workbench/v1/modules')).json().modules;assert.equal(rows[0].status,'incompatible');assert.equal((await f.inject('/apps/purchase/')).statusCode,503);});
-test('authorized module connection starts and identifies its ledger without exposing host metadata',async t=>{const f=await fixture(t);const response=await f.inject('/api/workbench/v1/modules/purchase/connection');assert.equal(response.statusCode,200,response.body);assert.equal(response.json().dataSetId,'a0000000-0000-4000-8000-000000000001');assert.equal(response.json().protocolVersion,1);assert(!response.body.includes(f.dir));assert.equal((await f.inject('/api/workbench/v1/modules/sales/connection')).statusCode,403);f.cap.workbench.protocolVersion=0;assert.equal((await f.inject('/api/workbench/v1/modules/purchase/connection')).statusCode,503);});
+test('authorized module connection starts and identifies its ledger without exposing host metadata',async t=>{const f=await fixture(t);const response=await f.inject('/api/workbench/v1/modules/purchase/connection');assert.equal(response.statusCode,200,response.body);assert.equal(response.json().dataSetId,'a0000000-0000-4000-8000-000000000001');assert.equal(response.json().protocolVersion,1);assert(!response.body.includes(f.dir));assert.equal((await f.inject('/api/workbench/v1/modules/not-a-module/connection')).statusCode,404);f.cap.workbench.protocolVersion=0;assert.equal((await f.inject('/api/workbench/v1/modules/purchase/connection')).statusCode,503);});
 test('session module identity rejects replacement and missing ledgers before reads or writes',async t=>{const f=await fixture(t);assert.equal((await f.inject('/api/workbench/v1/modules/purchase/connection')).statusCode,200);f.cap.workbench.dataSetId='b0000000-0000-4000-8000-000000000002';for(const route of ['/api/workbench/v1/modules/purchase/connection','/apps/purchase/api/orders']){const r=await f.inject(route);assert.equal(r.statusCode,409,r.body);assert.equal(r.json().code,'DATASET_CHANGED');}const write=await f.inject('/apps/purchase/api/orders',{method:'POST',payload:{amount:1},headers:{'idempotency-key':'changed-dataset-0001'}});assert.equal(write.statusCode,409);assert.equal(f.stats().writes,0);f.cap.workbench.dataSetId=null;const missing=await f.inject('/apps/purchase/api/orders');assert.equal(missing.statusCode,503);assert.equal(missing.json().code,'MODULE_DATA_NOT_READY');});
 test('prefix proxy preserves business URL and signed actor, strips spoofable credentials',async t=>{
   const f=await fixture(t);const r=await f.inject('/apps/purchase/api/orders?month=2026-10',{headers:{authorization:'Bearer attacker','cf-access-authenticated-user-email':'attacker'}});assert.equal(r.statusCode,200,r.body);
   assert.equal(f.stats().lastActor.path,'/api/orders?month=2026-10');assert.equal(f.stats().lastActor.channel,'ui');assert.equal(f.stats().lastHeaders.origin,undefined);assert.equal(f.stats().lastHeaders['cf-access-authenticated-user-email'],undefined);
   const ui=await f.inject('/apps/purchase/');assert.equal(ui.statusCode,200,ui.body);const js=await f.inject('/apps/purchase/app.js');assert.match(js.body,/moduleLoaded/);
 });
-test('mutations enforce CSRF, origin, identity, channel, module and local-only boundaries',async t=>{
+test('mutations enforce CSRF, origin, session identity, channel and local-only boundaries',async t=>{
   const f=await fixture(t);const options={method:'POST',payload:{amount:123},headers:{'idempotency-key':'test-write-0001'}};
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{...options,headers:{...options.headers,'x-workbench-csrf':'wrong'}})).statusCode,403);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{...options,headers:{...options.headers,origin:'https://evil.test'}})).statusCode,403);
-  assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{...options,headers:{...options.headers,'tailscale-user-login':'other@example.test'}})).statusCode,403);
+  assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{...options,headers:{...options.headers,'tailscale-user-login':'other@example.test'}})).statusCode,401);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{...options,headers:{...options.headers,'x-workbench-channel':'mcp'}})).statusCode,403);
-  assert.equal((await f.inject('/api/workbench/v1/modules/sales/api/orders')).statusCode,403);
+  assert.equal((await f.inject('/api/workbench/v1/modules/not-a-module/api/orders')).statusCode,404);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/secret',options)).statusCode,403);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/not-listed')).statusCode,404);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders',{headers:{'x-workbench-actor':'spoof'}})).statusCode,400);
   assert.equal((await f.inject('/api/workbench/v1/modules/purchase/api/orders?path=C%3A%5Cledger.sqlite')).statusCode,400);assert.equal(f.stats().writes,0);
 });
-test('viewer cannot write and policy changes revoke sessions immediately',async t=>{
-  const f=await fixture(t,{role:'viewer'});const r=await f.inject('/apps/purchase/api/orders',{method:'POST',payload:{},headers:{'idempotency-key':'viewer-test-0001'}});assert.equal(r.statusCode,403);f.accessPolicy.users[login].enabled=false;assert.equal((await f.inject('/apps/purchase/api/orders')).statusCode,403);
+test('legacy role and disabled flags no longer restrict real authenticated employees',async t=>{
+  const f=await fixture(t,{role:'viewer',canRunTasks:false});const r=await f.inject('/apps/purchase/api/orders',{method:'POST',payload:{},headers:{'idempotency-key':'shared-access-0001'}});assert.equal(r.statusCode,200,r.body);assert.equal(f.stats().lastActor.role,'admin');assert.equal(f.stats().lastActor.modules.length,5);f.accessPolicy.users[login].enabled=false;assert.equal((await f.inject('/apps/purchase/api/orders')).statusCode,200);
 });
 test('MCP cannot bypass browser confirmation; namespaced review cookie stays scoped',async t=>{
   const f=await fixture(t,{channel:'mcp'});const denied=await f.inject('/api/workbench/v1/modules/purchase/api/confirm',{method:'POST',payload:{},headers:{'idempotency-key':'mcp-confirm-0001'}});assert.equal(denied.statusCode,403);assert.equal(denied.json().code,'UI_CONFIRMATION_REQUIRED');
@@ -107,3 +107,4 @@ test('chunked upload limit returns a clear 413 without destroying the response c
   const response=await new Promise((resolve,reject)=>{const q=http.request(url+'/api/workbench/v1/modules/purchase/api/upload',{method:'POST',headers:{...f.headers,'content-type':'application/octet-stream','idempotency-key':'chunked-cap-00001','transfer-encoding':'chunked'}},r=>{const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>resolve({status:r.statusCode,body:Buffer.concat(chunks).toString()}));});q.once('error',reject);q.setTimeout(5000,()=>q.destroy(Error('upload response timeout')));q.write(Buffer.alloc(512));q.end(Buffer.alloc(2048));});
   assert.equal(response.status,413,response.body);assert.equal(fs.readdirSync(path.join(f.dir,'gateway','requests')).length,0);
 });
+
