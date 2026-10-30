@@ -28,6 +28,7 @@ export function createDesktopUiSessions({services,resolveActor,assertRequestAllo
     const config=services.config(id),url=new URL(cap?.url);
     if(config.managed!==true||config.allowInitialize!==false||config.maintenance||url.protocol!=='http:'||url.hostname!=='127.0.0.1'||Number(url.port)!==config.port||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw hostError('DESKTOP_UI_ORIGIN_INVALID','业务页面未绑定当前测试模块',403);
     const origin=url.origin,contents=view.webContents,target=contents.session;
+    if(contents.isDestroyed())throw hostError('DESKTOP_UI_FRAME_DENIED','业务页面已关闭',403);
     let state=sessions.get(target);
     if(!state){
       state={views:new Map(),origins:new Set()};sessions.set(target,state);
@@ -51,8 +52,9 @@ export function createDesktopUiSessions({services,resolveActor,assertRequestAllo
         }catch(error){try{onError(error);}catch{}callback({cancel:true});}
       });
     }
+    const firstAttachment=!state.views.has(contents.id);
     state.origins.add(origin);state.views.set(contents.id,{id,origin,contents,fingerprint:fingerprint(config)});
-    contents.once('destroyed',()=>state.views.delete(contents.id));
+    if(firstAttachment)contents.once('destroyed',()=>state.views.delete(contents.id));
     return {module:id,origin};
   }
   return {attach};

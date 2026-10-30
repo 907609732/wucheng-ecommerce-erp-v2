@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {ServiceManager} from './shared/service-manager.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},prepareView=async()=>{},authorizeOperation=()=>{},decorateURL=(_id,url)=>url}={}){
-  const views=new Map();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
+  const views=new Map(),readyViews=new Set();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
   const rootSender=e=>e.sender===win.webContents&&e.senderFrame===win.webContents.mainFrame;
   const childSender=e=>[...views.values()].some(v=>e.sender===v.webContents&&e.senderFrame===v.webContents.mainFrame);
   const handlers=[];
@@ -53,7 +53,7 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     }
     await prepareView({id,view,cap});
     const currentURL=view.webContents.getURL?.();
-    if(!currentURL||currentURL.startsWith('chrome-error:')||route&&currentURL!==targetURL)await view.webContents.loadURL(targetURL);
+    if(!readyViews.has(view)||currentURL?.startsWith('chrome-error:')||route&&currentURL!==targetURL){readyViews.delete(view);await view.webContents.loadURL(targetURL);readyViews.add(view);}
     if(mine!==generation)return {cancelled:true};
     hide(false);active=id;if(layout())view.webContents.focus();
     return {id,url:cap.url};
@@ -62,7 +62,7 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   handle('desks:open',(e,{id,route}={})=>{if(!rootSender(e))throw Error('来源不符');return open(id,route);});
   handle('desks:hide',e=>{if(!rootSender(e))throw Error('来源不符');hide();});
   handle('desks:bounds',(e,b)=>{if(!rootSender(e))throw Error('来源不符');if(!['x','y','width','height'].every(k=>Number.isFinite(b?.[k]))||b.width<0||b.height<0)throw Error('业务视图边界无效');bounds=Object.fromEntries(['x','y','width','height'].map(k=>[k,b[k]]));layout();});
-  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);views.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
+  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
   handle('desks:logs',async(e,id)=>{if(!rootSender(e)||isRemote()||!['purchase','sales','overview'].includes(id))throw Error('仅主机可查看服务日志');const file=path.join(manager.config(id).dataDir,'integration-service.log');if(fs.existsSync(file))await shell.openPath(file);});
   handle('desks:child-open',(e,id)=>{if(!childSender(e)||!['overview','exporter'].includes(id))throw Error('来源不符');win.webContents.send('desks:navigate',{id});return {requested:true};});
   handle('desks:child-home',e=>{if(!childSender(e))throw Error('来源不符');win.webContents.send('desks:navigate',{id:'home'});});
@@ -78,6 +78,6 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   };
   tick();const timer=setInterval(tick,5000);timer.unref();
   win.on('closed',()=>{clearInterval(timer);for(const name of handlers)ipcMain.removeHandler(name);for(const v of views.values())if(!v.webContents.isDestroyed())v.webContents.close();try{if(JSON.parse(fs.readFileSync(hostFile,'utf8')).pid===process.pid)fs.unlinkSync(hostFile);}catch{}});
-  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);views.delete(id);};
+  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);};
   return {open,hide,manager,invalidate,reset:()=>{hide();for(const id of [...views.keys()])invalidate(id);}};
 }
