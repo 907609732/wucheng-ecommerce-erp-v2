@@ -33,21 +33,22 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
       views.set(id,view);win.contentView.addChildView(view);view.setVisible(false);
       const external=url=>{let target;try{target=new URL(url);}catch{return;}if(['127.0.0.1','localhost','[::1]'].includes(target.hostname)){notify('此本机链接不属于当前测试工作台，已阻止跳转');return;}if(/^https?:$/.test(target.protocol))void shell.openExternal(url).catch(e=>notify(e.message));};
       const crossModule=url=>{
-        const target=new URL(url),base=new URL(cap.url);let destination,route;
+        let target;try{target=new URL(url);}catch{return false;}const base=new URL(cap.url),pointer=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)?$/);let destination,route;
         if(isRemote()){
           if(target.origin!==base.origin)return false;
-          const match=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)$/);if(!match)return false;
-          destination=match[1];route=match[2]+target.search+target.hash;
+          if(!pointer)return false;destination=pointer[1];route=(pointer[2]||'/')+target.search+target.hash;
         }else{
           if(target.protocol!=='http:'||!['127.0.0.1','localhost'].includes(target.hostname))return false;
-          destination=['purchase','sales','overview'].find(candidate=>{try{return Number(target.port)===manager.config(candidate).port;}catch{return false;}});
-          route=target.pathname+target.search+target.hash;
+          const originDesk=['purchase','sales','overview'].find(candidate=>{try{return Number(target.port)===manager.config(candidate).port;}catch{return false;}});
+          if(target.origin!==base.origin&&!originDesk)return false;
+          destination=pointer?pointer[1]:originDesk;route=(pointer?(pointer[2]||'/'):target.pathname)+target.search+target.hash;
         }
-        if(!destination||destination===id)return false;
+        if(!destination||destination===id&&!pointer)return false;
         win.webContents.send('desks:navigate',{id:destination,...(route!=='/'?{route}:{})});return true;
       };
       view.webContents.setWindowOpenHandler(({url})=>{if(crossModule(url))return {action:'deny'};if(url.startsWith(cap.url+'/'))void view.webContents.loadURL(url).catch(e=>notify(e.message));else external(url);return {action:'deny'};});
-      view.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith(cap.url+'/')){event.preventDefault();if(!crossModule(url))external(url);}});
+      const navigate=(event,url)=>{if(crossModule(url)){event.preventDefault();return;}if(!url.startsWith(cap.url+'/')){event.preventDefault();external(url);}};
+      view.webContents.on('will-navigate',navigate);view.webContents.on('will-redirect',navigate);
       view.webContents.on('render-process-gone',()=>notify(`${id} 页面意外退出，请重新打开`));
       view.webContents.session.on('will-download',(_e,item)=>{item.setSaveDialogOptions({title:'保存扩展导出文件'});});
     }
