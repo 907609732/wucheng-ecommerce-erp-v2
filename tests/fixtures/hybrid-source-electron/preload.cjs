@@ -3,7 +3,7 @@ const invoke=name=>(...args)=>ipcRenderer.invoke(name,...args);
 const on=name=>callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on(name,listener);return()=>ipcRenderer.removeListener(name,listener);};
 contextBridge.exposeInMainWorld('launcher',{
   ready:invoke('launcher:ready'),agentRequest:invoke('agent:request'),
-  open:invoke('modules:open'),hide:invoke('desks:hide'),bounds:invoke('desks:bounds'),
+  open:invoke('modules:open'),hide:invoke('desks:hide'),bounds:invoke('desks:bounds'),businessSurface:invoke('desks:surface'),
   services:invoke('desks:status'),onNavigate:on('desks:navigate'),onMessage:on('modules:message')
 });
 window.addEventListener('DOMContentLoaded',()=>{

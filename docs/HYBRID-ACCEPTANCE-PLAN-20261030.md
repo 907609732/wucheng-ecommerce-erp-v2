@@ -40,7 +40,7 @@
 1. 首次经营台，切采购 → 销售 → 经营，核对真实页面和数据来源；切回采购不重复 loadURL，不丢原筛选、滚动或未提交表单。
 2. 在 TEMP 采购台手工填一笔唯一测试单，明确金额 **123.45 元 = 12345 分**、无退款/运费和合成来源。保存后从 API/数据库只读核对金额与真实操作者审计，再在经营台对应期间核对采购来源及汇总；不能只看成功 toast。
 3. 人工月结/解锁走实际登录与明确复核，不要求旧管理员密码；锁月后写入被拒绝，解锁也有真实身份/月份/修订审计。未满足业务闭月条件时应说明实际缺项，不能绕过。
-4. 经营来源 `/apps/purchase/`、`/apps/sales/` 和已登记 TEMP 端口回到同一壳；旧正式 178xx 端口被阻止，原件下载仍只指向本次合成资料。
+4. 经营来源 `/apps/purchase/`、`/apps/sales/` 和已登记 TEMP 端口回到同一壳；旧正式 178xx 端口被阻止，原件下载仍只指向本次合成资料。夹具 preload 的 `businessSurface` 直接调用真实 `desks:surface`，`child-navigate` 由真实 owned child IPC 校验并传目标 module，不生成假的 `located`。经营的 `getContext/getDraftState/navigate` 读取实际 `window.wuchengBusinessSurface`；其他模块若未提供桥，应保留 `unsupported/openedOnly` 边界，不称已定位记录。
 5. 宽窗打开 AI，原生业务区与 360px 栏不重叠；小窗在 AI 与业务之间切换。更多业务菜单、外层原件/复核弹窗、resize/缩放与快速切页均不被原生视图盖住。
 6. Skill 新建/保存/启用 v1，再保存 v2，启用版本仍为 v1；真实任务固定 v1。启用 v2 不改旧任务。导入先摘要预览、CAS 冲突留编辑内容、不显示假“已验证”。该 fixture 任务应明确未配置模型，不能把暂停当成功。
 

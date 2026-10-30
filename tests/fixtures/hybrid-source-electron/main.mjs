@@ -47,7 +47,7 @@ const signed=createDesktopUiSessions({services:manager,resolveActor:actors,asser
 const observedViews=new WeakSet();
 const desks=installDeskViews(win,{manager,partitionFor:id=>'persist:source-hybrid-'+manifest.nonce+'-'+id,
   beforeOpen:async id=>{assertModule(id);actors();},prepareView:({id,view,cap})=>{signed.attach({id,view,cap});if(!observedViews.has(view)){observedViews.add(view);view.webContents.on('did-finish-load',()=>report('business.loaded',{module:id,url:view.webContents.getURL()}));}},
-  authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},notify:message=>win.webContents.send('modules:message',message)
+  authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:child-navigate','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:['desks:surface','desks:child-navigate'].includes(name)?args[0]?.module:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},notify:message=>win.webContents.send('modules:message',message)
 });
 ipcMain.handle('launcher:ready',event=>{trusted(event);return{ready:true};});
 ipcMain.handle('modules:open',async(event,id,route)=>{trusted(event);assertModule(id);return desks.open(id,route);});
