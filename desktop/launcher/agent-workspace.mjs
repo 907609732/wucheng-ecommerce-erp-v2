@@ -1,6 +1,8 @@
 import {loadingMarkup} from '../shared/loading-screen.mjs';
 import {createAgentApi,taskStates,moduleLabels,scheduleCron,readableSchedule,reviewBinding,betaServerUrl} from './agent-api.mjs';
 import {createResultTools} from './agent-result-tools.mjs';
+import {createSkillsWorkspace} from './agent-skills-ui.mjs';
+import {createBusinessWorkspace} from './agent-business-ui.mjs';
 
 const api = createAgentApi();
 const $ = id => document.getElementById(id);
@@ -13,6 +15,11 @@ const when = value => {const date = new Date(value);return Number.isNaN(date.get
 const pending = new Set(['waiting_input','waiting_review','unknown']);
 const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,pollRequested:false,lastTaskPoll:0,eventsPending:false,connected:false};
 const resultTools=createResultTools({api,getDetail:()=>state.detail,getStatus:()=>state.status,isHistorical:()=>!!state.resultSelection,makeTable:tableBlock,onRefresh:()=>pollTask(true),onDraftChange:syncActions,notice,showError,loading});
+let businessWorkspace,navigationEpoch=0;
+const skillsWorkspace=createSkillsWorkspace({target:$('skills-workspace'),api,getCapabilities:()=>state.status?.capabilities,ready:readyForTasks,showError,notice,loading,openTask,beforeModal:async()=>businessWorkspace?.suspend()});
+const goalSkillSelection=skillsWorkspace.attachChooser($('goal-skill-choice'));
+const businessSkillSelection=skillsWorkspace.attachChooser($('business-skill-choice'));
+businessWorkspace=createBusinessWorkspace({api,ready:readyForTasks,loading,showError,notice,onNavigate:navigate,openTask,getSkillSelection:businessSkillSelection});
 
 function errorMessage(error) {
   return String(error?.message || error || '本次操作未完成').replace(/^Error invoking remote method '[^']+': (?:Error: )?/,'');
@@ -36,11 +43,17 @@ function syncActions() {
   $('approve-result').disabled=!readyForTasks() || !$('review-check').checked || state.detail?.review?.canApprove !== true || !state.displayedBinding || state.busy.has('review') || resultTools.hasChanges();
   $('reject-result').disabled=!readyForTasks() || state.busy.has('review') || state.detail?.review?.canApprove !== true;
   $('submit-input').disabled=!canSupplement() || state.busy.has('input') || state.busy.has('upload');
+  $('business-start-task').disabled=!readyForTasks();
 }
-function navigate(view, {focus=true}={}) {
-  if(!['home','task','history','settings'].includes(view))return;
+async function navigate(view, {focus=true,desk}={}) {
+  if(!['business','skills','home','task','history','settings'].includes(view))return;
   if(state.view!==view&&!resultTools.leave())return;
+  if(state.view==='skills'&&state.view!==view&&!skillsWorkspace.leave())return;
+  const epoch=++navigationEpoch;
+  if(view!=='business')await businessWorkspace.leave();
+  if(epoch!==navigationEpoch)return;
   state.view=view;
+  document.body.classList.toggle('business-mode',view==='business');
   for(const section of document.querySelectorAll('main>.view'))section.hidden=section.id!=='view-'+view;
   for(const button of document.querySelectorAll('.main-nav [data-view]')){if(button.dataset.view===view)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
   if(focus)$('main').focus({preventScroll:true});
@@ -48,6 +61,8 @@ function navigate(view, {focus=true}={}) {
   if(view==='home')void refreshTasks().catch(showError);
   if(view==='history')void refreshTasks().catch(showError);
   if(view==='settings')void loadSettings().catch(showError);
+  if(view==='skills')void skillsWorkspace.show();
+  if(view==='business')await businessWorkspace.show(desk?{id:desk.id,route:desk.route}:{});
 }
 function showStatus(value) {
   state.status=value;state.connected=true;
@@ -114,7 +129,7 @@ async function uploadFiles(files,followup=false) {
 async function createTask(event) {
   event.preventDefault();const goal=$('goal').value.trim();if(!goal || !readyForTasks())return;
   await run('create',async()=>{
-    const response=await api.request('tasks.create',{goal,attachmentIds:state.attachments.map(file=>file.id)});
+    const response=await api.request('tasks.create',{goal,attachmentIds:state.attachments.map(file=>file.id),...goalSkillSelection()});
     if(!response?.task?.id)throw new Error('主机未返回任务编号，请先检查任务历史，避免重复创建');
     $('goal').value='';state.attachments=[];renderAttachments();await openTask(response.task.id);void refreshTasks().catch(showError);
   },[$('submit-goal')]);
@@ -123,7 +138,7 @@ async function openTask(id) {
   if(!resultTools.leave())return;
   const epoch=++state.taskEpoch;state.taskId=id;state.detail=null;state.resultSelection=null;state.events=[];state.reviewKey=null;state.displayedBinding=null;state.resultRenderKey=null;state.eventRenderKey=null;state.eventsPending=false;state.inputAttachments=[];renderAttachments(true);$('result-history-label').hidden=true;$('historical-result-note').hidden=true;
   $('task-title').textContent='正在读取任务';$('task-scope').replaceChildren();$('task-events').replaceChildren();$('task-actions').replaceChildren();$('review-panel').hidden=true;$('task-input').value='';
-  loading($('result-content'),'正在读取结果','content');loading($('task-loading'),'正在读取执行动态');navigate('task');
+  loading($('result-content'),'正在读取结果','content');loading($('task-loading'),'正在读取执行动态');await navigate('task');
   try{await readTaskPages(id,epoch,{replaceEvents:true});if(epoch!==state.taskEpoch)return;$('task-title').focus({preventScroll:true});}
   catch(error){if(epoch===state.taskEpoch){$('task-loading').replaceChildren();$('result-content').replaceChildren(make('p','暂时无法读取此任务。请刷新结果重试。','empty'));showError(error);}}
 }
@@ -157,6 +172,7 @@ function renderDetail(detail,{replaceEvents=false}={}) {
   for(const event of incoming)seen.set(event.sequence ?? event.id ?? JSON.stringify(event),event);
   state.events=[...seen.values()].sort((a,b)=>(a.sequence ?? 0)-(b.sequence ?? 0));
   const task=detail.task;$('task-title').textContent=task.goal || task.title || '任务';
+  businessWorkspace.acceptTask(detail);
   $('task-state').textContent=taskStates[task.status] || task.status;$('task-state').dataset.state=task.status;
   $('task-scope').replaceChildren(make('span',$('environment').textContent),make('span',task.engine==='hermes'?'Hermes':'Codex'));
   const scope=detail.result?.scope || task.scope;
@@ -165,6 +181,7 @@ function renderDetail(detail,{replaceEvents=false}={}) {
   else if(scope?.modules)$('task-scope').append(make('span',array(scope.modules).map(id=>id==='system'?'公共事务':moduleLabels[id] || id).join(' · ')));
   if(scope?.period)$('task-scope').append(make('span',display(scope.period)));
   if(task.assigneeId)$('task-scope').append(make('span','当前负责人：'+(task.assigneeLabel || task.assigneeId)));
+  if(task.skill)$('task-scope').append(make('span',`${task.skill.name||'Skill'} · v${task.skill.revision}`));
   $('task-reference').textContent='任务编号：'+task.id;
   const eventKey=JSON.stringify(state.events);
   if(eventKey!==state.eventRenderKey){
@@ -347,6 +364,15 @@ function validateEngineModel(engine,model) {
   const models=engineCatalog()[engine]?.supportedModels;
   if((engine==='codex' || Array.isArray(models)) && !array(models).includes(model))throw new Error('请选择该引擎兼容清单中的公司模型；如清单尚未载入，请刷新设置。');
 }
+function installProviderPresets(){
+  const row=make('div','','company-provider-row'),label=make('label','服务预设'),select=make('select');select.id='company-provider-preset';
+  for(const [value,text]of [['custom','自定义服务'],['deepseek','DeepSeek（Hermes）'],['openai','OpenAI 官方 / 兼容接口']])select.append(Object.assign(make('option',text),{value}));
+  label.append(select);const apply=actionButton('填入服务参数',()=>{
+    if(select.value==='custom'){notice('可直接填写公司 API 地址与模型名称。已有密钥留空即可保留。');return;}
+    if(select.value==='deepseek'){$('default-engine').value='hermes';renderModelChoice('deepseek-flash');$('company-base-url').value='https://api.deepseek.com';notice('已填入 DeepSeek 参数。密钥留空保留原值，点击保存公司配置后生效。');}
+    else{$('company-base-url').value='https://api.openai.com/v1';if($('company-model').value.startsWith('deepseek'))renderModelChoice('');notice('已填入 OpenAI 默认地址。请选择实际开通的模型；第三方兼容服务请改为它的接口地址。已有密钥不会更换。');}
+  });row.append(label,apply);$('model-form').before(row);
+}
 function renderSettings(settings) {
   state.settings=settings;$('default-engine').value=settings.defaultEngine || 'codex';
   const company=settings.company || {};renderModelChoice(company.model || '');$('company-base-url').value=company.baseUrl || '';$('company-budget').value=company.budgetLimit ?? '';$('company-api-key').value='';$('company-budget-notice').textContent=settings.budgetNotice || '';
@@ -453,8 +479,9 @@ async function deleteSchedule(schedule) {
   await run('schedule:'+schedule.id,async()=>{await api.request('schedules.delete',{id:schedule.id,version:schedule.version});state.schedules=array((await api.request('schedules.list')).schedules);renderSchedules();});
 }
 
-for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>navigate(button.dataset.view));
-document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();navigate('home');});
+installProviderPresets();
+for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>void navigate(button.dataset.view).catch(showError));
+document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();void navigate('business');});
 for(const button of document.querySelectorAll('[data-example]'))button.addEventListener('click',()=>{$('goal').value=button.dataset.example;$('goal').focus();});
 $('dismiss-error').addEventListener('click',()=>{$('error-banner').hidden=true;});
 $('goal-form').addEventListener('submit',createTask);$('goal-files').addEventListener('change',()=>void uploadFiles([...$('goal-files').files]));
@@ -482,7 +509,8 @@ startPolling();
 document.addEventListener('visibilitychange',syncVisibleTask);
 window.addEventListener('focus',syncVisibleTask);
 window.addEventListener('pageshow',()=>{startPolling();syncVisibleTask();});
-window.addEventListener('beforeunload',event=>{if(resultTools.hasChanges()){event.preventDefault();event.returnValue='';}});
-window.addEventListener('pagehide',()=>{clearInterval(taskPoll);clearInterval(listPoll);resultTools.dispose();});
-await run('initialize',async()=>{await refreshStatus();await refreshTasks();});
+window.addEventListener('beforeunload',event=>{if(resultTools.hasChanges()||skillsWorkspace.hasChanges()){event.preventDefault();event.returnValue='';}});
+window.addEventListener('pagehide',()=>{clearInterval(taskPoll);clearInterval(listPoll);resultTools.dispose();businessWorkspace.dispose();});
+await run('initialize',async()=>{await refreshStatus();await refreshTasks();void skillsWorkspace.refresh().catch(showError);});
 await window.launcher?.ready?.().catch(showError);
+await navigate('business',{focus:false});

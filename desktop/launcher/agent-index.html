@@ -12,25 +12,40 @@
   <aside class="development-preview" role="note">开发预览 · 功能未完成 · 未迁移正式账本</aside>
   <a class="skip-link" href="#main">跳到工作区</a>
   <header class="app-header">
-    <a class="brand" href="#home" aria-label="五成 ERP 首页"><img src="../assets/lingtu-icon.png" alt=""><span><strong>五成 ERP</strong><small>把目标交给 AI，把结果留给你</small></span></a>
+    <a class="brand" href="#business" aria-label="五成 ERP 首页"><img src="../assets/lingtu-icon.png" alt=""><span><strong>五成 ERP</strong><small>业务与 AI，在同一个工作台</small></span></a>
     <div class="identity"><span id="environment" class="environment">正在确认账本</span><span id="actor">正在确认身份</span><span id="connection" class="connection" role="status">连接中</span></div>
   </header>
   <div class="app-shell">
     <nav class="main-nav" aria-label="工作台导航">
-      <button type="button" data-view="home" aria-current="page"><span aria-hidden="true">＋</span> 新任务</button>
+      <button type="button" data-view="business" aria-current="page"><span aria-hidden="true">▦</span> 业务工作台</button>
+      <button type="button" data-view="home"><span aria-hidden="true">＋</span> AI 任务</button>
       <button type="button" data-view="history"><span aria-hidden="true">≡</span> 任务历史</button>
+      <button type="button" data-view="skills"><span aria-hidden="true">◇</span> 技能与提示词</button>
       <button type="button" data-view="settings"><span aria-hidden="true">⚙</span> 设置</button>
       <p class="nav-note">执行过程可追溯<br>重要变更由你复核</p>
     </nav>
     <main id="main" tabindex="-1">
       <div id="error-banner" class="error-banner" role="alert" hidden><span id="error-message"></span><button id="dismiss-error" type="button" aria-label="关闭错误提示">×</button></div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-      <section id="view-home" class="view home-view" aria-labelledby="home-title">
+      <section id="view-business" class="view business-view" aria-label="业务工作台">
+        <div class="business-toolbar">
+          <div class="business-tabs" role="tablist" aria-label="业务工作台"><button id="desk-tab-overview" type="button" role="tab" data-desk="overview" aria-selected="true" aria-controls="business-surface">经营</button><button id="desk-tab-purchase" type="button" role="tab" data-desk="purchase" aria-selected="false" aria-controls="business-surface" tabindex="-1">采购</button><button id="desk-tab-sales" type="button" role="tab" data-desk="sales" aria-selected="false" aria-controls="business-surface" tabindex="-1">销售</button></div>
+          <div class="business-toolbar-actions"><details id="business-more" class="business-more"><summary>更多业务</summary><div><button type="button" data-desk="warehouse">云仓</button><button type="button" data-desk="exporter">订单导出</button></div></details><button id="business-ai-toggle" type="button" aria-expanded="false" aria-controls="business-assistant">交给 AI</button></div>
+        </div>
+        <div id="business-source-note" class="business-source-note" hidden><span id="business-source-label"></span><button id="business-source-back" type="button" class="text-button">返回 AI 结果</button></div>
+        <div id="business-layout" class="business-layout">
+          <div id="business-surface" class="business-surface" role="tabpanel" aria-labelledby="desk-tab-overview" tabindex="0"><div id="business-loading"></div><div id="business-failure" class="business-failure" hidden><h2>业务工作台暂未打开</h2><p id="business-failure-message"></p><button id="business-retry" type="button">重试</button></div></div>
+          <aside id="business-assistant" class="business-assistant" aria-labelledby="business-assistant-title" hidden><div class="section-heading"><h2 id="business-assistant-title">当前业务交给 AI</h2><button id="business-ai-close" type="button" class="text-button">返回业务</button></div><p id="business-context" class="attention">范围待确认</p><form id="business-ai-form"><label>要完成的工作<textarea id="business-goal" rows="4" maxlength="12000" placeholder="例如：核对本月采购，整理需要补充的资料。" required></textarea></label><label>本次处理范围<textarea id="business-range" rows="2" maxlength="2000" placeholder="请说明期间、筛选条件或记录编号；不会自动读取未保存的表单。" required></textarea></label><div id="business-skill-choice"></div><button id="business-start-task" type="submit" class="primary">开始任务</button></form><section id="business-task-summary" class="business-task-summary" hidden><h3>最近的业务任务</h3><p id="business-task-state" role="status"></p><p id="business-task-result"></p><button id="business-open-task" type="button">展开任务空间</button></section><p class="fine-print">人工录单继续在业务页面操作。AI 生成的正式变更在结果页复核后提交。</p></aside>
+        </div>
+      </section>
+      <section id="view-skills" class="view skills-view" aria-label="技能与提示词" hidden><div id="skills-workspace"></div></section>
+      <section id="view-home" class="view home-view" aria-labelledby="home-title" hidden>
         <div class="welcome"><span class="eyebrow">今天，想完成什么？</span><h1 id="home-title">说出目标，接下来交给工作台。</h1><p>整理账单、核对采购、分析经营数据。附上资料，或告诉 AI 去哪里找。</p></div>
         <form id="goal-form" class="composer">
           <label class="sr-only" for="goal">描述你要完成的工作</label>
           <textarea id="goal" rows="4" maxlength="12000" placeholder="例如：整理上个月的菜鸟云仓运费，核对赔付抵扣，生成待确认的入账结果。" required></textarea>
           <ul id="goal-attachments" class="attachment-list" aria-label="本次任务附件"></ul>
+          <div id="goal-skill-choice" class="goal-skill-choice"></div>
           <div class="composer-footer"><div class="composer-tools"><label class="file-button" for="goal-files">＋ 添加资料</label><input id="goal-files" class="sr-only" type="file" multiple><span class="keyboard-hint">Ctrl / ⌘ + Enter 发送</span></div><button id="submit-goal" class="primary" type="submit" disabled>开始处理 <span aria-hidden="true">↗</span></button></div>
           <div id="goal-upload-status"></div>
         </form>
@@ -39,7 +54,7 @@
         <section class="home-section"><div class="section-heading"><h2>最近的任务</h2><button type="button" class="text-button" data-view="history">查看全部 →</button></div><div id="recent-tasks" class="task-list"></div></section>
       </section>
       <section id="view-task" class="view" aria-labelledby="task-title" hidden>
-        <div class="task-heading"><div><button id="task-back" type="button" class="text-button">← 返回任务</button><h1 id="task-title" tabindex="-1"></h1><div id="task-scope" class="scope"></div><p id="task-reference" class="fine-print"></p></div><div id="task-actions" class="task-actions"></div></div>
+        <div class="task-heading"><div><div class="task-return-actions"><button id="task-back" type="button" class="text-button">← 返回任务</button><button id="task-business-back" type="button" class="text-button" hidden>返回业务工作台</button></div><h1 id="task-title" tabindex="-1"></h1><div id="task-scope" class="scope"></div><p id="task-reference" class="fine-print"></p></div><div id="task-actions" class="task-actions"></div></div>
         <div class="task-layout">
           <section class="conversation" aria-label="执行动态与补充要求"><div class="section-heading"><h2>执行动态</h2><span id="task-state" class="state"></span></div><div id="task-loading"></div><ol id="task-events" class="event-list" aria-live="polite" aria-relevant="additions"></ol><p id="task-attention" class="attention" hidden></p><form id="input-form" class="followup"><label for="task-input">补充要求或修正结果</label><textarea id="task-input" rows="3" maxlength="12000" placeholder="补充缺失信息，或说明需要调整的地方。"></textarea><ul id="input-attachments" class="attachment-list" aria-label="补充任务附件"></ul><div class="followup-tools"><label class="file-button" for="input-files">＋ 补充资料</label><input id="input-files" class="sr-only" type="file" multiple><button id="submit-input" type="submit">发送补充</button></div><div id="input-upload-status"></div></form></section>
           <section id="result-pane" class="result-pane" aria-labelledby="result-title"><div class="section-heading"><h2 id="result-title">结果工作面</h2><span id="result-version"></span></div><label id="result-history-label" class="result-history-label" hidden>查看结果版本<select id="result-history"><option value="">当前结果</option></select></label><p id="historical-result-note" class="attention" hidden>正在查看历史结果，仅供核对。切回当前结果后才能确认变更。</p><div id="result-content"><p class="empty">任务开始后，结果、原件和差异会出现在这里。</p></div><section id="review-panel" class="review-panel" aria-labelledby="review-title" hidden><h3 id="review-title">确认这次变更</h3><p id="review-description"></p><label class="check"><input id="review-check" type="checkbox">我已核对当前结果、变更范围和异常</label><div class="actions"><button id="approve-result" type="button" class="primary" disabled>确认并提交</button><button id="reject-result" type="button">退回调整</button></div><p class="fine-print">确认绑定此结果版本。数据变化后，需要重新核对。</p></section></section>
