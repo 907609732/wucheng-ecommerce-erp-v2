@@ -391,7 +391,7 @@ if (acquired) app.whenReady().then(async () => {
   const legacyHandlers=new Map();
   const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
     trusted(event);assertLauncherOperationAllowed(name);const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
-    if(name!=='agent:request'&&/^(?:permissions:|personnel:select|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireAdmin(hostIdentity.localActor(),true);
+    if(name!=='agent:request'&&/^(?:personnel:select|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireAdmin(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
     catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='agent:request')return {ok:false,code:error.code||'AGENT_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
   });};
