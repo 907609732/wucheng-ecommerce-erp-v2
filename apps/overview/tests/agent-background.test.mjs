@@ -13,7 +13,7 @@ test('processing, paused, unknown and cancelled jobs remain blocking with their 
 
 test('wait queries the same ID until verified originals exist and supports cancellation',async()=>{
  const ids=[];let count=0;
- const result=await settleBackgroundJob({module:'overview',jobId:'persisted',queryCapability:'overview.cainiao-job',query:async id=>{ids.push(id);return ++count===1?{id,status:'processing'}:{id,status:'completed',items:[{status:'completed',fileIds:['original'],verification:{verified:true}}],files:[{id:'original'}]};},waitMs:1000,pollMs:1});
+ const result=await settleBackgroundJob({module:'overview',jobId:'persisted',queryCapability:'overview.cainiao-job',query:async id=>{ids.push(id);return ++count===1?{id,status:'processing'}:{id,status:'completed',items:[{status:'completed',fileIds:['original'],verification:{verified:true}}],files:[{id:'original',sha256:'a'.repeat(64),filename:'official.csv'}]};},waitMs:1000,pollMs:1});
  assert.deepEqual(ids,['persisted','persisted']);assert.deepEqual(result.issues,[]);
  const controller=new AbortController();controller.abort();await assert.rejects(settleBackgroundJob({module:'overview',jobId:'persisted',query:async()=>({}),ctx:{signal:controller.signal}}),{name:'AbortError'});
 });
