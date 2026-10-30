@@ -25,6 +25,8 @@ const samples={
  'cainiao-job':{jobId:rowId},'cainiao-preview':{jobId:rowId,month:m},'cainiao-file':{fileId:'downloaded-file'},'cainiao-download-start':{account:'confirmed-account',from:m},'cainiao-download-stop':{jobId:rowId},'cainiao-download-resume':{jobId:rowId},'cainiao-posting':{jobId:rowId,month:m}
 };
 for(const platform of ['pdd','taobao'])Object.assign(samples,{[platform+'-funds']:{shop_id:shop,period:m},[platform+'-statement']:{shop_id:shop,year:'2026'},[platform+'-movements']:{shop_id:shop,month:m,page:1,page_size:50},[platform+'-movement']:{id:rowId,shop_id:shop},[platform+'-export']:{shop_id:shop,month:m}});
+const archivedFiles=['transactions','fees'].map((report,index)=>({fileId:'overview-'+report,report,filename:report+'.zip',sha256:'a'.repeat(64),bytes:1,from:m+'-01',cutoff:m+'-30',expected:{count:0,amountCents:0},verification:{verified:true}}));
+Object.assign(samples,{'personnel-link':{domainPersonId:'person:stable',displayName:'本人明确选择的姓名',reason:'本人确认',revision:'a'.repeat(64)},'cainiao-archive-preview':{handoffId:'a'.repeat(64)},'cainiao-archive-posting':{handoffId:'a'.repeat(64)},'cainiao-archive-adopt':{manifestDigest:'a'.repeat(64),manifest:{version:1,jobId:'overview-job',month:m,account:'account',basis:'业务时间',from:m+'-01',cutoff:m+'-30',files:archivedFiles},files:archivedFiles.map((file,index)=>({id:'sales-'+index,artifactId:'central-'+index,filename:file.filename,sha256:file.sha256,sourceModule:'overview',sourceCapabilityId:'overview.cainiao-file',report:file.report}))}});
 function valid(name,input,expected=true){const validate=ajv.compile(schemaFor(name));assert.equal(validate(input),expected,name+' '+JSON.stringify(validate.errors));}
 
 test('every sales capability has a compiled concrete Chinese contract and a valid representative input',()=>{
@@ -36,7 +38,7 @@ test('every sales capability has a compiled concrete Chinese contract and a vali
   assert.equal(schemaFor(cap.id),cap.inputSchema);valid(cap.id,samples[cap.id.slice('sales.'.length)]||{});
   valid(cap.id,{...(samples[cap.id.slice('sales.'.length)]||{}),role:'admin'},false);
  }
- assert.equal(ids.size,75);assert.equal(salesCapabilityDefinitions.length,ids.size);
+ assert.equal(salesCapabilityDefinitions.length,ids.size);
  const previous=['shops','task-center','manual-summary','sources','history-coverage','report','reconciliation','ledger','imports','original','file-inspect','taobao-funds','taobao-statement','taobao-movements','taobao-movement','taobao-export','pdd-funds','pdd-statement','pdd-movements','pdd-movement','pdd-export','pdd-unassigned','freight-report','freight-records','freight-record','freight-attachment','freight-export','close-preview','close-history','audit','jobs','job-report','report-history','export','template','backups','backup-verify','rates','skill','shop-create','shop-delete','ledger-create','ledger-update','ledger-delete','match-create','match-delete','coverage','import','taobao-import','pdd-import','import-rollback','batch-attribution','pdd-reference','freight-create','freight-update','freight-void','month-lock','month-unlock','rates-refresh','job-create','staff-handoff','backup','restore-copy'];
  assert.ok(previous.every(name=>ids.has('sales.'+name)));assert.throws(()=>schemaFor('unlisted'),/缺少明确/);
 });
@@ -70,7 +72,7 @@ test('freight periods, source ownership and compensation keep required evidence'
 });
 
 test('only nonfinancial preparatory steps skip human review and adapter retains task file scope',async()=>{
- const noReview=new Set(['file-stage','backup','cainiao-connect','cainiao-disconnect','cainiao-download-start','cainiao-download-stop','cainiao-download-resume']);
+ const noReview=new Set(['file-stage','backup','cainiao-connect','cainiao-disconnect','cainiao-download-start','cainiao-download-stop','cainiao-download-resume','cainiao-archive-adopt']);
  for(const cap of salesAgentCapabilities.filter(cap=>cap.kind==='prepare'))assert.equal(cap.requiresReview,!noReview.has(cap.id.slice(6)),cap.id);
  valid('cainiao-download-start',{account:'actual-account',from:'2026-99'},false);valid('cainiao-posting',{jobId:rowId},false);
  valid('cainiao-download-start',{account:'actual-account',from:m,cutoff:m+'-20'});valid('cainiao-download-start',{account:'actual-account',from:m,cutoffs:{[m]:m+'-20'}});

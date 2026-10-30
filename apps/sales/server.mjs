@@ -8,6 +8,8 @@ import {installAgentService} from './lib/agent-service.mjs';
 import {createSalesAgentActions,authorizeSalesAgent} from './lib/agent-actions.mjs';
 import {salesModuleCapabilities} from './lib/agent-adapter.mjs';
 import {createSalesCainiao} from './lib/agent-cainiao.mjs';
+import {createSalesDomainPeople} from './lib/agent-people.mjs';
+import {createArchiveHandoffs} from './lib/agent-archive-bridge.mjs';
 import {ServiceManager} from './lib/service-manager.mjs';
 import {createPersonnel} from './lib/personnel.mjs';
 import {deleteEmptyShop} from './lib/shops.mjs';
@@ -34,6 +36,8 @@ import {stagePdd,pddPreview,commitPdd,pddFundsReport,pddStatementYear,setAttribu
 const root=path.dirname(fileURLToPath(import.meta.url));
 export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,cainiaoBrowser,cainiaoOptions={}}={}) {
   const s=openStore(dataDir),app=express(),token=randomBytes(32).toString('hex'),personnel=createPersonnel(s);
+  const domainPeople=createSalesDomainPeople(s);
+  const archiveHandoffs=createArchiveHandoffs(s);
   const cainiao=createSalesCainiao({store:s,browser:cainiaoBrowser,...cainiaoOptions});
   s.agentTransactionGuard=()=>{if(cainiao.manager.active)throw fail('云仓下载仍在归档，请完成或暂停后提交业务',409,'BACKGROUND_TASK_BUSY');};
   const integration=installLocalIntegration(app,{id:'wucheng-sales-desk',version:JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version,root,dataDir,authorize:personnel.authorize,busy:()=>edits.busy()||!!s.get("SELECT 1 FROM jobs WHERE state IN ('running','pending') LIMIT 1"),capabilities:['report.read','ledger.read','overview.open','edits.prepare','edits.review-ui']});
@@ -44,7 +48,7 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
   integration.router.post('/overview/open',async(q,r)=>r.json(q.workbenchActor?{route:'/apps/overview/'}:await new ServiceManager().ensure('overview')));
   installWorkbenchMigration(integration,s,createWorkbenchMigration);installWorkbenchAudit(integration,s);
   integration.finish();
-  const agent=installAgentService({app,integration,store:s,module:'sales',capabilities:salesModuleCapabilities,actions:createSalesAgentActions({store:s,personnel,cainiao}),authorize:authorizeSalesAgent,backup:()=>makeBackup(s,'before-agent-commit')});
+  const agent=installAgentService({app,integration,store:s,module:'sales',capabilities:salesModuleCapabilities,actions:createSalesAgentActions({store:s,personnel,cainiao,domainPeople,archiveHandoffs}),authorize:authorizeSalesAgent,backup:()=>makeBackup(s,'before-agent-commit')});
   app.disable('x-powered-by');
   app.use((req,res,next)=>{
     const allowed=[`127.0.0.1:${port}`,`localhost:${port}`];

@@ -84,6 +84,7 @@ test('rates refresh parses mocked official CBR XML and commits fixed-point rates
 
 test('ready employee handoff persists actual employee identity and reviewed receipt without approving funds',async t=>{
  const f=await setup(t),month='2026-03',employee={actor:'actual-employee',role:'editor'};
+ const person=await f.query('personnel-state',{},employee);await f.book('personnel-link',{domainPersonId:person.newPersonId,displayName:'明确确认的员工',reason:'本人选择新建领域身份',revision:person.revision},employee);
  for(const shop of f.store.shops())for(const dataset of ['operations','expense'])setCoverage(f.store,{shop_id:shop.id,month,dataset,status:'full',evidence:'合成完整月资料，核对真实零业务'});
  const before=await f.query('task-center',{month},employee);assert.equal(before.employeeReady,true);assert.equal(before.submission.state,'draft');
  const submitted=await f.book('staff-handoff',{month,revision:before.staffRevision},employee);assert.equal(submitted.submission.state,'submitted');assert.equal(submitted.submission.submittedBy,employee.actor);
@@ -91,7 +92,7 @@ test('ready employee handoff persists actual employee identity and reviewed rece
  const after=await f.query('task-center',{month},employee);assert.equal(after.submission.state,'submitted');assert.equal(after.staffRevision,before.staffRevision);
  assert.equal(f.store.get("SELECT COUNT(*) n FROM coverage WHERE dataset IN ('settlement','receipt') AND status='full'").n,0);
  assert.equal(f.store.get('SELECT COUNT(*) n FROM month_locks').n,0);
- assert.equal(f.store.get('SELECT COUNT(*) n FROM agent_receipts WHERE actor_id=? AND preparation_id IS NOT NULL',employee.actor).n,1);
+ assert.equal(f.store.get('SELECT COUNT(*) n FROM agent_receipts WHERE actor_id=? AND preparation_id IS NOT NULL',employee.actor).n,2);
 });
 
 test('current-month cutoff reaches the real Cainiao domain through signed HTTP and cannot include today',async t=>{
