@@ -96,23 +96,23 @@ try{
   assert.equal(await section('来源未登记的图表').locator('.result-chart').count(),0);assert.match(await section('来源未登记的图表').innerText(),/来源尚未登记/);
   assert.equal(await section('缺少全部数据的图表').locator('.result-chart').count(),0);assert.match(await section('缺少全部数据的图表').innerText(),/数据尚未齐全/);
 
-  const previewButton=page.locator('.file-list').first().getByRole('button',{name:'预览',exact:true});
-  await previewButton.click();await page.locator('dialog[open] img').waitFor();
-  await page.waitForFunction(()=>document.querySelector('dialog img')?.naturalWidth>0);
-  assert.match(await page.locator('.preview-metadata').innerText(),new RegExp(image.sha256));
-  assert.match(await page.locator('dialog img').getAttribute('src'),/^blob:/);
-  await page.getByRole('button',{name:'放大',exact:true}).click();assert.equal(await page.locator('dialog img').evaluate(element=>element.style.width),'125%');
-  await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('dialog').open);
+  const previewButton=page.locator('.file-list').first().getByRole('button',{name:'预览',exact:true}),artifactDialog=page.locator('.artifact-dialog'),previewImage=artifactDialog.locator('.preview-image-viewport img');
+  await previewButton.click();await previewImage.waitFor();
+  await page.waitForFunction(()=>document.querySelector('.artifact-dialog .preview-image-viewport img')?.naturalWidth>0);
+  assert.match(await artifactDialog.locator('.preview-metadata').innerText(),new RegExp(image.sha256));
+  const openedPreviewUrl=await previewImage.getAttribute('src');assert.match(openedPreviewUrl,/^blob:/);
+  await artifactDialog.getByRole('button',{name:'放大',exact:true}).click();assert.equal(await previewImage.evaluate(element=>element.style.width),'125%');
+  await page.keyboard.press('Escape');await page.waitForFunction(url=>{const dialog=document.querySelector('.artifact-dialog');return dialog&&!dialog.open&&window.resultFixture.revokedUrls.includes(url);},openedPreviewUrl);
   assert.equal(await previewButton.evaluate(element=>document.activeElement===element),true);
-  assert.equal(await page.evaluate(()=>window.resultFixture.revokedUrls.includes(window.resultFixture.createdUrls.at(-1))),true);
+  assert.equal(await page.evaluate(url=>window.resultFixture.revokedUrls.includes(url),openedPreviewUrl),true,'Closing the artifact revokes the exact Blob URL that was displayed');
 
-  await page.evaluate(()=>window.resultFixture.previewMode='hash');await previewButton.click();await page.getByText('原件完整性校验失败，请重新取得原件。',{exact:true}).waitFor();assert.equal(await page.locator('dialog img').count(),0);await page.getByRole('button',{name:'关闭',exact:true}).click();
-  await page.evaluate(()=>window.resultFixture.previewMode='unsupported');await previewButton.click();await page.getByText('原件预览信息无效，请刷新任务后重试。',{exact:true}).waitFor();assert.equal(await page.locator('dialog iframe').count(),0);await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.evaluate(()=>window.resultFixture.previewMode='hash');await previewButton.click();await artifactDialog.getByText('原件完整性校验失败，请重新取得原件。',{exact:true}).waitFor();assert.equal(await previewImage.count(),0);await artifactDialog.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.evaluate(()=>window.resultFixture.previewMode='unsupported');await previewButton.click();await artifactDialog.getByText('原件预览信息无效，请刷新任务后重试。',{exact:true}).waitFor();assert.equal(await artifactDialog.locator('iframe').count(),0);await artifactDialog.getByRole('button',{name:'关闭',exact:true}).click();
   const urlsBeforeLate=await page.evaluate(()=>window.resultFixture.createdUrls.length);
-  await page.evaluate(()=>{window.resultFixture.previewMode='valid';window.resultFixture.delayedPreview=true;});await previewButton.click();await page.getByRole('button',{name:'关闭',exact:true}).click();await page.evaluate(()=>window.resultFixture.resolvePreview());
-  await page.waitForFunction(()=>!document.querySelector('.artifact-dialog').open&&!document.querySelector('.preview-body').childElementCount);
-  assert.equal(await page.locator('dialog[open]').count(),0);assert.equal(await page.locator('.preview-image-viewport img').count(),0,'Late response cannot reopen a closed original');assert.equal(await page.evaluate(()=>window.resultFixture.createdUrls.length),urlsBeforeLate,'Closed delayed response must not create a new preview URL');
-  await page.evaluate(()=>window.resultFixture.delayedPreview=false);await previewButton.click();await page.locator('dialog img').waitFor();await page.getByRole('button',{name:'下载',exact:true}).last().click();assert.equal((await page.evaluate(()=>window.resultFixture.calls.filter(item=>item.operation==='artifacts.open').at(-1))).payload.id,'artifact-image-1');await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.evaluate(()=>{window.resultFixture.previewMode='valid';window.resultFixture.delayedPreview=true;});await previewButton.click();await artifactDialog.getByRole('button',{name:'关闭',exact:true}).click();await page.evaluate(()=>window.resultFixture.resolvePreview());
+  await page.waitForFunction(()=>!document.querySelector('.artifact-dialog').open&&!document.querySelector('.artifact-dialog .preview-body').childElementCount);
+  assert.equal(await page.locator('dialog[open]').count(),0);assert.equal(await previewImage.count(),0,'Late response cannot reopen a closed original');assert.equal(await page.evaluate(()=>window.resultFixture.createdUrls.length),urlsBeforeLate,'Closed delayed response must not create a new preview URL');
+  await page.evaluate(()=>window.resultFixture.delayedPreview=false);await previewButton.click();await previewImage.waitFor();await artifactDialog.getByRole('button',{name:'下载',exact:true}).click();assert.equal((await page.evaluate(()=>window.resultFixture.calls.filter(item=>item.operation==='artifacts.open').at(-1))).payload.id,'artifact-image-1');await artifactDialog.getByRole('button',{name:'关闭',exact:true}).click();
   await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(output,'result-tools-390px.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.evaluate(()=>sessionStorage.setItem('result-fixture-role','viewer'));await page.reload();await page.locator('#view-business').waitFor({state:'visible'});await page.locator('.main-nav [data-view=home]').click();await page.locator('#recent-tasks [data-task-id="result-task-1"]').click();assert.equal(await page.getByRole('button',{name:'更正草稿',exact:true}).count(),1,'Every authenticated employee may correct declared draft fields despite deprecated role flags');
   assert.deepEqual(errors,[]);
