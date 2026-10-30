@@ -2,12 +2,31 @@
   "format": "agent-beta-migration-rules/v1",
   "pathColumns": {
     "warehouse": {"inventory_data_validations": ["source_file"], "warehouse_monthly_sales": ["source_file"], "warehouse_monthly_sales_validations": ["source_file"], "workbench_files": ["path"]},
-    "purchase": {"imports": ["file_path"], "order_attachments": ["file_path", "thumb_path"], "workbench_files": ["path"]},
+    "purchase": {"imports": ["file_path"], "order_attachments": ["file_path", "thumb_path"], "image_assets": ["file_path", "thumb_path"], "workbench_files": ["path"]},
     "sales": {"imports": ["original_path"], "freight_attachments": ["original_path"], "workbench_files": ["path"]},
     "overview": {"imports": ["path"], "workbench_files": ["path"]},
     "exporter": {"workbench_files": ["path"]}
   },
-  "jsonFields": {"exporter": {"tasks": {"payload": {"strip": ["accountCookie", "cursor", "detailExport"], "stripRecursive": ["accountCookie", "cursor", "detailExport"], "paths": ["exportedPath"], "set": {"cursor": "", "historicalOnly": true}, "pauseIncomplete": true}}}},
-  "secretColumns": {},
-  "secretSettings": {"exporter": ["proxyPassword", "accessToken", "refreshToken", "apiKey"]}
+  "relativePathBases": {
+    "warehouse.inventory_data_validations.source_file": ["workspace/downloads"],
+    "warehouse.warehouse_monthly_sales.source_file": ["workspace/downloads"],
+    "warehouse.warehouse_monthly_sales_validations.source_file": ["workspace/downloads"]
+  },
+  "jsonFields": {
+    "exporter": {"tasks": {"payload": {"strip": ["accountCookie", "cursor", "detailExport"], "stripRecursive": ["accountCookie", "cursor", "detailExport"], "paths": ["exportedPath"], "set": {"cursor": "", "historicalOnly": true}, "pauseIncomplete": true}}},
+    "purchase": {"orders": {"original": {"relativeUris": [
+      {"path": "dingtalkSource.rawCells.ADC8KM1.*.resourceUrl", "kind": "dingtalk-image"},
+      {"path": "dingtalkSource.mergedRecords.*.rawCells.ADC8KM1.*.resourceUrl", "kind": "dingtalk-image"}
+    ]}}},
+    "sales": {
+      "audit": {"details": {"relativeUris": [{"path": "after.attachments.*.url", "kind": "freight-attachment"}, {"path": "before.attachments.*.url", "kind": "freight-attachment"}]}},
+      "freight_requests": {"response": {"relativeUris": [{"path": "attachments.*.url", "kind": "freight-attachment"}]}}
+    },
+    "overview": {"cainiao_jobs": {"payload": {"ephemeralPaths": [{"path": "items.*.target", "kind": "cainiao-staging-part"}], "stripPaths": ["items.*.downloadReady"], "set": {"historicalOnly": true}, "pauseIncomplete": true}}}
+  },
+  "secretColumns": {"purchase": {"mobile_sessions": ["secret_hash", "csrf"]}},
+  "referenceColumns": {"purchase": {"mobile_attachment_owners": ["session_id"], "mobile_upload_history": ["session_id"]}},
+  "resetColumns": {"purchase": {"mobile_sessions": {"expires_at": 0}}},
+  "secretSettings": {"purchase": ["month-admin-password"], "exporter": ["proxyPassword", "accessToken", "refreshToken", "apiKey"]},
+  "resetSettings": {"purchase": {"month-admin-attempts": "{\"failures\":0,\"until\":0}"}}
 }
