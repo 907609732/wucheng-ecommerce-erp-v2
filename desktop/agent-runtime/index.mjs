@@ -201,6 +201,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!trustedUi||actor.channel&&actor.channel!=='ui')throw agentError('HUMAN_REVIEW_REQUIRED','请在结果页由有权限的人员确认',403);
     const task=taskFor(input.taskId,actor),result=resultState(task.id),review=task.review;
     if(task.status!=='waiting_review'||!review||review.id!==input.reviewId||review.resultVersion!==input.resultVersion||review.revision!==input.revision||result.version!==input.resultVersion)throw agentError('REVIEW_STALE','结果已变化，请重新查看后确认',409);
+    if(result.prepared.some(step=>step.module==='system'&&(step.capabilityId?.startsWith('permissions.')||step.commitData?.operation?.startsWith('permissions.'))))throw agentError('FEATURE_REMOVED','权限管理已移除，旧修改草稿不可再提交',410);
     if(!review.canApprove)throw agentError('BLOCKING_ISSUES','结果仍有待处理异常，不能正式提交',409);
     if(!canReview(task,actor))throw agentError('TASK_PERMISSION_REQUIRED','当前人员没有批准这些业务操作的权限',403);
     if(typeof signApproval!=='function')throw agentError('APPROVAL_UNAVAILABLE','主机尚未配置受控提交签名',503);
@@ -288,6 +289,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   }
   async function request(operation,payload={},meta={}){
     const actor=await identity(meta.actor);if(!plain(payload))throw agentError('INPUT_INVALID','请求参数无效');
+    if(operation.startsWith('permissions.'))throw agentError('FEATURE_REMOVED','权限管理已移除',410);
     if(operation==='status')return {actor:{...actor,label:actor.label||actor.login||actor.id,canCreateTasks:true,canManageSettings:actor.role==='admin'},environment,engines:await Promise.all(['codex','hermes'].map(async id=>({id,...await engines[id]?.check?.(),configured:settings.get().company.hasKey}))),capabilities:await capabilities(actor)};
     if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');return createTask(payload,actor);}
     if(operation==='tasks.list')return {tasks:store.list('task').filter(task=>!accessFailure(task,actor)).map(publicTask)};
@@ -318,7 +320,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       if(!meta.trustedUi)throw agentError('UPLOAD_DENIED','附件需要通过工作台上传',403);const name=String(payload.name||''),bytes=Buffer.from(String(payload.bytes||''),'base64');if(!name||name.length>200||/[\\/:*?"<>|\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name)||bytes.length===0||bytes.length>50*1024*1024)throw agentError('UPLOAD_INVALID','附件名无效、内容为空或超过 50 MiB');const id=randomUUID(),directory=path.join(storeDir,'attachments',id);fs.mkdirSync(directory,{recursive:true,mode:0o700});const file=path.join(directory,name);fs.writeFileSync(file,bytes,{flag:'wx',mode:0o600});store.insert('attachment',{id,ownerId:actor.id,name,size:bytes.length,mimeType:String(payload.type||'application/octet-stream'),path:file,sha256:createHash('sha256').update(bytes).digest('hex')});return {id,name,size:bytes.length,mimeType:payload.type||'application/octet-stream'};
     }
     if(['artifacts.open','artifacts.preview'].includes(operation)){const item=store.get('artifact',payload.id);if(!item)throw agentError('ARTIFACT_NOT_FOUND','产物不存在',404);if((operation==='artifacts.preview'||payload.taskId!==undefined)&&payload.taskId!==item.taskId)throw agentError('ARTIFACT_TASK_MISMATCH','原件与当前任务不匹配，请刷新后重新选择',403);taskFor(item.taskId,actor);if(!meta.trustedUi||!extensions[operation])throw agentError('ARTIFACT_OPEN_UNAVAILABLE',operation==='artifacts.preview'?'此终端暂不支持预览产物':'此终端暂不支持打开产物',409);return extensions[operation]({...item},{...meta,actor});}
-    if(['permissions.inspect','permissions.receipt','people.assignable'].includes(operation)||operation.startsWith('backups.'))throw agentError('INTERNAL_OPERATION','此操作仅供受控业务工具调用',403);
+    if(operation==='people.assignable'||operation.startsWith('backups.'))throw agentError('INTERNAL_OPERATION','此操作仅供受控业务工具调用',403);
     if(extensions[operation]){if(operation.endsWith('.save')&&(!meta.trustedUi||actor.role!=='admin'))throw agentError('ADMIN_REQUIRED','仅管理员能修改公司配置',403);return extensions[operation](payload,{...meta,actor});}
     throw agentError('OPERATION_UNAVAILABLE','此操作尚未接入当前工作台',404);
   }

@@ -2,6 +2,14 @@
 
 ## Resumed implementation on 2026-10-29
 
+Latest user direction: remove permission management. The system Agent no longer
+advertises, queries, prepares or commits permission-policy changes. All public
+`permissions.*` requests fail with FEATURE_REMOVED, even if an old host extension
+is present. Frozen legacy permission-change drafts cannot be approved or committed.
+Existing identity/module guards, task ownership, result review and repeat-write
+protection remain until the access-scope decision is clarified. Regression cases
+were updated for removal; no tests have been run in this implementation phase.
+
 The user explicitly resumed the rebuild. The following changes are implemented,
 but remain untested until the single consolidated acceptance after code freeze:
 

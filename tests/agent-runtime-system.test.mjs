@@ -40,11 +40,12 @@ test('assignment shares only bound attachments and executes under the assignee c
   f.people.set(worker.id,{...worker,modules:[]});await assert.rejects(f.request('tasks.get',{taskId:target.id},worker),{code:'MODULE_DENIED'});
 });
 
-test('permission preparation uses an admin-only internal read and rejects public access',async t=>{
-  let saved=false;
-  const extensions={'permissions.inspect':async(_,ctx)=>{assert.equal(ctx.actor.id,'admin');assert.notEqual(ctx.trustedUi,true);return {revision:'old',policy:{schemaVersion:1,users:{}}};},'permissions.save':async(input,ctx)=>{assert.ok(ctx.approval);assert.equal(ctx.trustedUi,true);assert.equal(input.idempotencyKey,ctx.idempotencyKey);saved=true;return {revision:'new',policy:input.policy};}};
-  const f=await setup(t,{extensions}),task=await f.create();await f.prepare(task,'permissions.update',{policy:{schemaVersion:1,users:{worker:{role:'viewer',modules:['sales'],canRunTasks:false,enabled:true}}}});assert.equal(saved,false);await f.approve(task);assert.equal(saved,true);
-  await assert.rejects(f.request('permissions.inspect'),{code:'INTERNAL_OPERATION'});await assert.rejects(f.request('permissions.receipt'),{code:'INTERNAL_OPERATION'});
+test('permission management is absent from the Agent catalog and all public management routes are unavailable',async t=>{
+  let calls=0;const f=await setup(t,{extensions:{'permissions.inspect':async()=>{calls++;},'permissions.get':async()=>{calls++;},'permissions.save':async()=>{calls++;}}}),task=await f.create();
+  assert.equal((await f.request('status')).capabilities.some(cap=>cap.id.startsWith('permissions.')),false);
+  for(const operation of ['permissions.get','permissions.save','permissions.inspect','permissions.receipt'])await assert.rejects(f.request(operation),{code:'FEATURE_REMOVED'});
+  await assert.rejects(f.prepare(task,'permissions.update',{policy:{schemaVersion:1,users:{}}}),{code:'CAPABILITY_DENIED'});
+  f.runtime.store.update('task',task.id,{status:'running'});await assert.rejects(f.runtime.invokeTool(task.id,'erp_query',{module:'system',capabilityId:'permissions.list',input:{}}),{code:'CAPABILITY_DENIED'});assert.equal(calls,0);
 });
 
 test('automatic backup prepares verified results without inventing a formal commit',async t=>{
@@ -88,10 +89,12 @@ test('paused engine finishes shutdown before resume and permits an explicit engi
   await f.request('tasks.control',{taskId:task.id,action:'pause'});await running;const resumed=await f.request('tasks.control',{taskId:task.id,action:'resume',engine:'hermes'});assert.equal(resumed.task.status,'queued');assert.equal(resumed.task.engine,'hermes');assert.equal(f.runtime.store.get('task',task.id).engineSession,null);assert.equal(executions,1);
 });
 
-test('lost permission save response reconciles from host receipt without writing twice',async t=>{
-  let writes=0,receipt;
-  const extensions={'permissions.inspect':async()=>({revision:'old',policy:{schemaVersion:1,users:{}}}),'permissions.save':async(input,ctx)=>{writes++;receipt={idempotencyKey:ctx.idempotencyKey,revision:'new'};throw Error('response lost after atomic policy write');},'permissions.receipt':async({idempotencyKey})=>({state:'completed',idempotencyKey,receipt})};
-  const f=await setup(t,{extensions}),task=await f.create();await f.prepare(task,'permissions.update',{policy:{schemaVersion:1,users:{}}});const pending=await f.approve(task);assert.equal(pending.task.status,'unknown');await assert.rejects(f.request('tasks.input',{taskId:task.id,text:'重新执行'}),{code:'OUTCOME_UNKNOWN'});const result=await f.request('tasks.control',{taskId:task.id,action:'resume'});assert.equal(result.task.status,'completed');assert.equal(writes,1);
+test('a frozen legacy permission-change draft cannot commit after the feature is removed',async t=>{
+  let writes=0;const f=await setup(t,{extensions:{'permissions.save':async()=>{writes++;}}}),task=await f.create();
+  const result=f.runtime.store.insert('result',{id:'legacy-permission-result',ownerId:admin.id,taskId:task.id,summary:'旧权限草稿',blocks:[],evidence:[],issues:[],changes:[],prepared:[{id:'legacy-step',module:'system',capabilityId:'permissions.update',input:{policy:{schemaVersion:1,users:{}}},commitData:{operation:'permissions.update',input:{policy:{schemaVersion:1,users:{}}}},binding:{dataSetId:'old-system',revision:1}}]});
+  const review={id:'legacy-review',resultVersion:result.version,revision:'legacy-review-revision',canApprove:true};
+  f.runtime.store.update('task',task.id,{status:'waiting_review',resultId:result.id,review,dataAccessRequirements:[{module:'system',capabilityId:'permissions.update',roles:['admin'],requiresTaskPermission:false,modules:[]}]});
+  await assert.rejects(f.request('reviews.approve',{taskId:task.id,reviewId:review.id,resultVersion:review.resultVersion,revision:review.revision}),{code:'FEATURE_REMOVED'});assert.equal(writes,0);assert.equal(f.runtime.store.list('system_effect').length,0);
 });
 
 test('system schedule write rolls back when its receipt cannot be saved',async t=>{

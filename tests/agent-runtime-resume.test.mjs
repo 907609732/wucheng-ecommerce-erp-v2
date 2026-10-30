@@ -244,8 +244,8 @@ test('ordinary draft history stays readable to a viewer without turning implicit
 });
 
 test('unattributed legacy system results fail closed instead of exposing their history after downgrade',async t=>{
-  const f=fixture(t,{extensions:{'permissions.inspect':async()=>({revision:'policy-r1',policy:{schemaVersion:1,users:{}}})}}),task=await f.create(['system']);f.running(task);
-  await f.invoke(task,'system','permissions.list');
+  const f=fixture(t,{extensions:{'backups.verify':async()=>({summary:'旧版公共备份结果',blocks:[{type:'text',text:'合成备份记录'}],evidence:[]})}}),task=await f.create(['system']);f.running(task);
+  await f.invoke(task,'system','backups.verify',{backupId:'backup-source'});
   f.runtime.store.update('task',task.id,{dataAccessRequirements:undefined});
   for(const kind of ['result','result_version'])for(const value of f.runtime.store.list(kind).filter(value=>value.taskId===task.id))f.runtime.store.update(kind,value.id,{blocks:value.blocks.map(({sourceModule,sourceCapabilityId,...block})=>block)});
   f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
