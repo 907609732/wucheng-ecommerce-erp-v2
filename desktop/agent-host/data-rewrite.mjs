@@ -3,6 +3,7 @@ const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const quote=value=>'"'+value.replaceAll('"','""')+'"';
 const absolute=value=>/^[a-z]:[\\/]|^\\\\|^\//i.test(value);
 const secretName=/^(?:password|passwd|cookie|cookies|cursor|session|session[_-]?id|token|authorization|credential|access[_-]?token|refresh[_-]?token|session[_-]?token|api[_-]?key|api[_-]?secret|private[_-]?key|secret)$/i;
+export function loadDataRewriteRules(){return JSON.parse(fs.readFileSync(new URL('./data-rewrite-rules.json',import.meta.url),'utf8'));}
 function inside(root,file){const rel=path.relative(root,file);return rel!==''&&rel!=='..'&&!rel.startsWith('..'+path.sep)&&!path.isAbsolute(rel);}
 function digestFile(file){const h=crypto.createHash('sha256'),fd=fs.openSync(file,'r'),buf=Buffer.alloc(1024*1024);try{let n;while((n=fs.readSync(fd,buf,0,buf.length,null))>0)h.update(buf.subarray(0,n));return h.digest('hex');}finally{fs.closeSync(fd);}}
 /** Transform one already-copied candidate DB. No source database is opened. */
