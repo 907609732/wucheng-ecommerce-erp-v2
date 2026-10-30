@@ -18,6 +18,16 @@ but remain untested until the single consolidated acceptance after code freeze:
   Resolved entries retain their original history, evidence digest and timestamp.
 - `artifacts.preview` uses the same artifact existence/task access/trusted-UI
   checks as `artifacts.open`, delegating byte/type validation to the private host.
+- Task artifacts now store their real invoking adapter/capability provenance.
+  `context.resolveTaskArtifact(id)` is private, same-task only, rechecks the fresh
+  actor's source-module scope plus real path/size/hash, and rejects legacy artifacts
+  without trusted provenance for handoff (preview remains allowed separately).
+- Result blocks carry trusted source module/capability and unique block IDs.
+  Human `tasks.input` corrections validate the exact result/row/before-value
+  through the shared correction helper, preserve a task audit record, invalidate
+  the old review, and regenerate rather than mutating saved rows or commit data.
+  A still-running engine turn is stopped before checkpoint reset to avoid queued
+  tasks losing their executor. All of this remains pending consolidated testing.
 
 The older checklist below describes the pause baseline, not current acceptance.
 

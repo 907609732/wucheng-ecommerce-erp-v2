@@ -8,6 +8,7 @@ import {createAgentScheduler} from './scheduler.mjs';
 import {fromJsonSchema} from '@modelcontextprotocol/server';
 import {createSystemAgentAdapter} from './system-adapter.mjs';
 import {reconcileJobIssues} from './job-issues.mjs';
+import {prepareResultCorrections} from './result-corrections.mjs';
 
 const live=new Set(['queued','running','committing']);
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -37,19 +38,32 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   function attachmentMetadata(ids){return ids.map(id=>{const item=store.get('attachment',id);return item?{id:item.id,name:item.name,size:item.size,mimeType:item.mimeType,sha256:item.sha256}:null;}).filter(Boolean);}
   async function capabilities(actor){return [...adapterMap.values()].filter(a=>allowedModule(actor,a.id)).flatMap(a=>(a.capabilities||[]).filter(c=>canUse(actor,a.id,c)).map(c=>({...c,module:a.id})));}
   async function binding(adapter,ctx){const b=await adapter.binding(ctx);if(!b?.dataSetId||b.revision===undefined)throw agentError('DATASET_UNAVAILABLE','模块未返回可核验的账本版本',503);return {dataSetId:b.dataSetId,revision:b.revision};}
-  function context(task,actor,signal){return {actor,taskId:task.id,signal,emit:(type,data)=>emit(task.id,type,data),resolveAttachment:id=>{if(!task.attachmentIds.includes(id))throw agentError('ATTACHMENT_DENIED','附件未绑定本次任务',403);const item=store.get('attachment',id);if(!item)throw agentError('ATTACHMENT_DENIED','任务附件不存在',404);const real=fs.realpathSync(item.path),relative=path.relative(fs.realpathSync(path.join(storeDir,'attachments',id)),real);if(relative.startsWith('..')||path.isAbsolute(relative)||createHash('sha256').update(fs.readFileSync(real)).digest('hex')!==item.sha256)throw agentError('ATTACHMENT_CHANGED','任务附件已经变化，请重新上传',409);return item;},registerArtifact:input=>registerArtifact(task,actor,input)};}
-  function registerArtifact(task,actor,{path:inputPath,name,mimeType}){
+  function context(task,actor,signal){return {actor,taskId:task.id,signal,emit:(type,data)=>emit(task.id,type,data),resolveTaskArtifact:async id=>{
+    const fresh=await identity(actor),current=taskFor(task.id,fresh),item=store.get('artifact',id);
+    if(!item||item.taskId!==task.id)throw agentError('ARTIFACT_DENIED','原件不属于当前任务',403);
+    if(!item.sourceModule||!item.sourceCapabilityId)throw agentError('ARTIFACT_SOURCE_UNKNOWN','旧产物缺少可信来源，请重新生成后交接',409);
+    if(!current.scope.modules.includes(item.sourceModule)||!allowedModule(fresh,item.sourceModule))throw agentError('MODULE_DENIED','无权交接此来源模块原件',403);
+    const root=fs.realpathSync(path.join(storeDir,'tasks',task.id)),real=fs.realpathSync(item.path),relative=path.relative(root,real),stat=fs.lstatSync(item.path);
+    if(!relative||relative.startsWith('..')||path.isAbsolute(relative)||stat.isSymbolicLink()||!stat.isFile()||stat.size!==item.size||createHash('sha256').update(fs.readFileSync(real)).digest('hex')!==item.sha256)throw agentError('ARTIFACT_CHANGED','原件路径、大小或摘要已变化，请重新生成',409);
+    return {id:item.id,taskId:item.taskId,name:item.name,path:real,size:item.size,mimeType:item.mimeType,sha256:item.sha256,sourceModule:item.sourceModule,sourceCapabilityId:item.sourceCapabilityId};
+  },resolveAttachment:id=>{if(!task.attachmentIds.includes(id))throw agentError('ATTACHMENT_DENIED','附件未绑定本次任务',403);const item=store.get('attachment',id);if(!item)throw agentError('ATTACHMENT_DENIED','任务附件不存在',404);const real=fs.realpathSync(item.path),relative=path.relative(fs.realpathSync(path.join(storeDir,'attachments',id)),real);if(relative.startsWith('..')||path.isAbsolute(relative)||createHash('sha256').update(fs.readFileSync(real)).digest('hex')!==item.sha256)throw agentError('ATTACHMENT_CHANGED','任务附件已经变化，请重新上传',409);return item;},registerArtifact:input=>registerArtifact(task,actor,input)};}
+  function registerArtifact(task,actor,{path:inputPath,name,mimeType},source={}){
     const allowed=path.resolve(storeDir,'tasks',task.id),file=path.resolve(inputPath||'');const relative=path.relative(allowed,file);
     if(!relative||relative.startsWith('..')||path.isAbsolute(relative)||fs.lstatSync(file).isSymbolicLink())throw agentError('ARTIFACT_PATH_DENIED','产物必须位于本次任务的专属目录',403);
     const real=fs.realpathSync(file),root=fs.realpathSync(allowed),realRelative=path.relative(root,real);if(realRelative.startsWith('..')||path.isAbsolute(realRelative))throw agentError('ARTIFACT_PATH_DENIED','产物路径越界',403);
-    const bytes=fs.readFileSync(file),saved=store.insert('artifact',{id:randomUUID(),ownerId:task.ownerId,taskId:task.id,path:file,name:name||path.basename(file),mimeType:mimeType||'application/octet-stream',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});const {path:privatePath,ownerId,...publicArtifact}=saved;return publicArtifact;
+    const bytes=fs.readFileSync(file),saved=store.insert('artifact',{id:randomUUID(),ownerId:task.ownerId,taskId:task.id,path:file,name:name||path.basename(file),mimeType:mimeType||'application/octet-stream',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),...(source.module&&source.capabilityId?{sourceModule:source.module,sourceCapabilityId:source.capabilityId}:{})});const {path:privatePath,ownerId,...publicArtifact}=saved;return publicArtifact;
   }
   function resultState(taskId){const task=store.get('task',taskId);return store.get('result',task.resultId);}
   function snapshotResult(saved){store.insert('result_version',{...publicResult(saved),id:saved.id+':'+saved.version,resultId:saved.id,resultVersion:saved.version,createdAt:now()});return saved;}
   function updateResult(id,value){return store.transaction(()=>snapshotResult(store.update('result',id,value)));}
   function appendResult(task,output,step,source){
     const previous=task.resultId?store.get('result',task.resultId):null;
-    const result={id:previous?.id||randomUUID(),ownerId:task.ownerId,taskId:task.id,summary:output.summary||previous?.summary||'处理结果',scope:output.scope||task.scope,blocks:[...(previous?.blocks||[]),...(output.blocks||[])],evidence:[...(previous?.evidence||[]),...(output.evidence||[])],changes:[...(previous?.changes||[]),...(output.changes||[])],issues:reconcileJobIssues(previous?.issues,output,{...source,now:now()}),environment,prepared:[...(previous?.prepared||[]),...(step?[step]:[])]};
+    const ids=new Set((previous?.blocks||[]).map(block=>block.id)),blocks=(output.blocks||[]).map(block=>{
+      if(!plain(block))throw agentError('RESULT_CONTRACT_INVALID','结果内容块必须是结构化对象',502);
+      let id=typeof block.id==='string'&&block.id.length>0&&block.id.length<=160&&!ids.has(block.id)?block.id:'block-'+randomUUID();ids.add(id);
+      return {...block,id,sourceModule:source.module,sourceCapabilityId:source.capabilityId};
+    });
+    const result={id:previous?.id||randomUUID(),ownerId:task.ownerId,taskId:task.id,summary:output.summary||previous?.summary||'处理结果',scope:output.scope||task.scope,blocks:[...(previous?.blocks||[]),...blocks],evidence:[...(previous?.evidence||[]),...(output.evidence||[])],changes:[...(previous?.changes||[]),...(output.changes||[])],issues:reconcileJobIssues(previous?.issues,output,{...source,now:now()}),environment,prepared:[...(previous?.prepared||[]),...(step?[step]:[])]};
     const saved=previous?store.update('result',result.id,result):store.insert('result',result);
     snapshotResult(saved);
     const review=saved.prepared.length?{id:randomUUID(),resultVersion:saved.version,revision:agentDigest(saved.prepared.map(s=>({module:s.module,binding:s.binding,digest:s.changeDigest}))),canApprove:!saved.issues.some(i=>i.blocking===true)}:null;
@@ -70,7 +84,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!cap.inputSchema)throw agentError('CAPABILITY_SCHEMA_MISSING','业务能力缺少输入校验契约',503);
     const validated=await fromJsonSchema(cap.inputSchema)['~standard'].validate(params);
     if(validated.issues)throw agentError('CAPABILITY_INPUT_INVALID','业务参数不符合能力输入约定',400);
-    const ctx={...context(task,actor,jobs.get(taskId)?.controller.signal),capabilityId:cap.id,capabilityInput:params},before=await binding(adapter,ctx);
+    const ctx={...context(task,actor,jobs.get(taskId)?.controller.signal),registerArtifact:input=>registerArtifact(task,actor,input,{module:adapter.id,capabilityId:cap.id}),capabilityId:cap.id,capabilityInput:params},before=await binding(adapter,ctx);
     emit(taskId,'step.started',{module:adapter.id,capabilityId:cap.id,title:cap.title});
     const output=await adapter[kind](cap.id,params,ctx);
     const latest=store.get('task',taskId);if(!['running','waiting_review'].includes(latest.status))throw agentError('TASK_INTERRUPTED','任务已暂停或取消，结果未自动提交',409);
@@ -237,9 +251,18 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:{...publicTask(task),review},events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
     if(operation==='tasks.control')return control(payload.taskId,payload.action,actor,payload);
     if(operation==='tasks.input'){
-      const task=taskFor(payload.taskId,actor);if(task.status==='unknown')throw agentError('OUTCOME_UNKNOWN','请先核对提交回执，再补充新的要求',409);if(live.has(task.status))throw agentError('TASK_BUSY','请先暂停任务再补充要求',409);
-      const text=String(payload.text||payload.goal||'').trim();if(!text||text.length>20000)throw agentError('INPUT_INVALID','请补充有效要求');
-      const ids=checkAttachments(payload.attachmentIds||[],actor),receipts=resultState(task.id)?.receipt?.receipts||[];store.update('task',task.id,{goal:task.goal+'\n用户补充：'+text,attachmentIds:[...new Set([...task.attachmentIds,...ids])],completedStages:[...(task.completedStages||[]),...receipts],status:'paused',review:null,resultId:null});emit(task.id,'user.input',{text,attachmentIds:ids});return control(task.id,'resume',actor);
+      let task=taskFor(payload.taskId,actor);if(task.status==='unknown')throw agentError('OUTCOME_UNKNOWN','请先核对提交回执，再补充新的要求',409);if(live.has(task.status))throw agentError('TASK_BUSY','请先暂停任务再补充要求',409);
+      if(payload.corrections!==undefined&&!meta.trustedUi)throw agentError('HUMAN_REVIEW_REQUIRED','草稿更正须由实际人员在结果页提出',403);
+      let correction=payload.corrections!==undefined?prepareResultCorrections({payload,task,result:resultState(task.id),adapterMap,actor,now}):null;
+      let text=correction?.text||String(payload.text||payload.goal||'').trim();if(!text||text.length>20000)throw agentError('INPUT_INVALID','请补充有效要求');
+      // A prepared result can be visible before the engine turn exits. Finish
+      // that turn before resetting its checkpoint, or run() would see jobs.has
+      // and leave the newly queued work without an executor.
+      if(jobs.has(task.id))await control(task.id,'pause',actor);
+      const fresh=await identity(actor);task=taskFor(task.id,fresh);
+      if(live.has(task.status)||task.status==='unknown')throw agentError('TASK_BUSY','任务状态已变化，请刷新后再补充要求',409);
+      if(correction){correction=prepareResultCorrections({payload,task,result:resultState(task.id),adapterMap,actor:fresh,now});text=correction.text;}
+      const ids=checkAttachments(payload.attachmentIds||[],fresh),receipts=resultState(task.id)?.receipt?.receipts||[];store.update('task',task.id,{goal:task.goal+'\n用户补充：'+text,attachmentIds:[...new Set([...task.attachmentIds,...ids])],completedStages:[...(task.completedStages||[]),...receipts],...(correction?{corrections:[...(task.corrections||[]),correction.corrections]}:{}),status:'paused',review:null,resultId:null});emit(task.id,'user.input',{text,attachmentIds:ids,...(correction?{corrections:correction.corrections}:{})});return control(task.id,'resume',fresh);
     }
     if(operation==='reviews.approve')return approve(payload,actor,meta.trustedUi===true);
     if(operation==='reviews.reject'){if(!meta.trustedUi)throw agentError('HUMAN_REVIEW_REQUIRED','请在结果页处理复核',403);const task=taskFor(payload.taskId,actor);if(task.status!=='waiting_review'||task.review?.id!==payload.reviewId)throw agentError('REVIEW_STALE','复核结果已变化',409);store.update('task',task.id,{status:'waiting_input',review:null,question:payload.reason||'请补充修改要求'});emit(task.id,'review.rejected',{reason:payload.reason||''});return {task:publicTask(store.get('task',task.id))};}
