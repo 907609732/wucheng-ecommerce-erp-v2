@@ -26,13 +26,15 @@ try{
   for(const url of ['https://company.example.ts.net:8443','http://company.example.ts.net:9443','https://company.example.ts.net','https://user@company.example.ts.net:9443','https://company.example.ts.net:9443/path'])assert.throws(()=>betaServerUrl(url));
   assert.equal(reviewBinding({task:{id:'t'},result:{version:2},review:{id:'r',resultVersion:1,revision:3}}),null);
   await assert.rejects(createAgentApi(null).request('status'),/尚未连接/);
+  await assert.rejects(createAgentApi(async()=>({})).request('permissions.get'),/未支持/);
+  await assert.rejects(createAgentApi(async()=>({})).request('permissions.save',{policy:{}}),/未支持/);
   const context=await browser.newContext({viewport:{width:1440,height:1000}});
   await context.addInitScript(()=>{
-    window.fixture={role:'admin',calls:[],offline:false,version:1,status:'waiting_review',canApprove:true,approved:0,attachments:[],schedules:[],connection:{mode:'client',networkProvider:'system',serverUrl:'https://company.example.ts.net:9443',canConfigure:true},connectionPlans:0,connectionSaves:0,connectionPlanExpired:false,connectionFailure:false,connectionAdds:['HTTPS 9443 → http://127.0.0.1:27330'],permissions:{schemaVersion:1,users:{'reviewer@example.test':{role:'admin',enabled:true,modules:['sales','purchase','warehouse','overview','exporter'],canRunTasks:true}}}};
+    window.fixture={role:'admin',calls:[],offline:false,version:1,status:'waiting_review',canApprove:true,approved:0,attachments:[],schedules:[],connection:{mode:'client',networkProvider:'system',serverUrl:'https://company.example.ts.net:9443',canConfigure:true},connectionPlans:0,connectionSaves:0,connectionPlanExpired:false,connectionFailure:false,connectionAdds:['HTTPS 9443 → http://127.0.0.1:27330']};
     const f=window.fixture;
     if(sessionStorage.getItem('fixture-role')==='viewer'){f.role='viewer';f.canApprove=false;}
     const task=()=>({id:'task-1',goal:'整理云仓运费并核对赔付',status:f.status,engine:'codex',createdAt:'2026-10-28T10:00:00Z',updatedAt:'2026-10-28T10:10:00Z',scope:{label:'2026 年 9 月 · 测试账本'}});
-    const detail=()=>({task:task(),events:[{sequence:1,type:'created',message:'已接收目标',createdAt:'2026-10-28T10:00:00Z'},{sequence:2,type:'progress',message:'已核对 3 份合成账单',createdAt:'2026-10-28T10:05:00Z'}],result:{id:'result-1',version:f.version,summary:'已准备 3 条运费记录。<img src=x onerror=alert(1)>',scope:{label:'2026 年 9 月 · 测试账本'},blocks:[{type:'table',title:'费用明细',columns:[{key:'month',label:'月份'},{key:'gross',label:'运费（元）',type:'money'},{key:'compensation',label:'赔付抵扣（元）',type:'money'},{key:'net',label:'应记费用（元）',type:'money'}],rows:[{month:'2026-09',gross:'1,500.00',compensation:'100.00',net:'1,400.00'}]},{type:'files',files:[{id:'artifact-1',name:'运费核对结果.xlsx'}]}],changes:[{label:'9 月运费',before:'未导入',after:'1,400.00 元'}],evidence:[{title:'合成官方账单',artifactId:'source-1'}],issues:[{message:'合成测试样本，不是真实账本'}],...(f.status==='completed'?{receipt:{id:'receipt-1',message:'模拟服务回执已核对',state:'verified',receipts:[{id:'synthetic-receipt',state:'completed',idempotencyKey:'synthetic-business-key'}]}}:{})},review:{id:'review-'+f.version,resultVersion:f.version,revision:f.version,canApprove:f.canApprove}});
+    const detail=()=>({task:task(),events:[{sequence:1,type:'created',message:'已接收目标',createdAt:'2026-10-28T10:00:00Z'},{sequence:2,type:'progress',message:'已核对 3 份合成账单',createdAt:'2026-10-28T10:05:00Z'}],result:{id:'result-1',version:f.version,summary:'已准备 3 条运费记录。<img src=x onerror=alert(1)>',scope:{label:'2026 年 9 月 · 测试账本'},blocks:[{type:'table',title:'费用明细',columns:[{key:'month',label:'月份'},{key:'gross',label:'运费（元）',type:'money'},{key:'compensation',label:'赔付抵扣（元）',type:'money'},{key:'net',label:'应记费用（元）',type:'money'}],rows:[{month:'2026-09',gross:'1,500.00',compensation:'100.00',net:'1,400.00'}]},{type:'files',files:[{artifactId:'artifact-1',name:'运费核对结果.xlsx'}]}],changes:[{label:'9 月运费',before:'未导入',after:'1,400.00 元'}],evidence:[{title:'合成官方账单',artifactId:'source-1'}],issues:[{message:'合成测试样本，不是真实账本'}],...(f.status==='completed'?{receipt:{id:'receipt-1',message:'模拟服务回执已核对',state:'verified',receipts:[{id:'synthetic-receipt',state:'completed',idempotencyKey:'synthetic-business-key'}]}}:{})},review:{id:'review-'+f.version,resultVersion:f.version,revision:f.version,canApprove:f.canApprove}});
     window.launcher={ready:async()=>({ready:true}),agentRequest:async({operation,payload})=>{
       f.calls.push({operation,payload});if(f.offline)throw new Error('公司主机暂不可用，已有任务仍保留');
       if(operation==='status')return{actor:{id:'person-1',label:'测试审核员',role:f.role,canCreateTasks:true,canRunTasks:f.role!=='viewer'},environment:{mode:'test',label:'测试账本'},engines:[{id:'codex',available:true,configured:true,supportedModels:['company-model','company-model-alternative']},{id:'hermes',available:true,configured:true}]};
@@ -46,8 +48,6 @@ try{
       if(operation==='attachments.upload'){const a={id:'attachment-'+(f.attachments.length+1),name:payload.name,size:payload.bytes.length};f.attachments.push(a);return a;}
       if(operation==='artifacts.open')return{opened:true,message:'已打开登记的结果文件'};
       if(operation==='settings.get'||operation==='settings.save')return{settings:{defaultEngine:'codex',company:{baseUrl:'https://api.example.test/v1',model:'company-model',budgetLimit:100,hasKey:true},engines:{codex:{available:true,configured:true,version:'test'},hermes:{available:true,configured:true,version:'test'}}}};
-      if(operation==='permissions.get')return{policy:f.permissions,revision:1};
-      if(operation==='permissions.save'){f.permissions=payload.policy;return{policy:f.permissions,revision:2};}
       if(operation==='connection.get')return{connection:f.connection};
       if(operation==='connection.plan'){f.connectionPlans++;return{token:'plan-'+f.connectionPlans,difference:{add:f.connectionAdds,preserve:['company.example.ts.net:443','company.example.ts.net:8443'],funnel:false},backup:'C:/server-only/connection-backup.json'};}
       if(operation==='connection.save'){
@@ -95,7 +95,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='已完成');
   assert.equal(await page.evaluate(()=>window.fixture.approved),1,'Double action cannot submit twice');
   assert.match(await page.locator('.receipt').textContent(),/提交结果已核对/);
-  await page.getByRole('button',{name:'查看 / 下载',exact:true}).click();assert.equal((await page.evaluate(()=>window.fixture.calls.filter(call=>call.operation==='artifacts.open').at(-1))).payload.id,'artifact-1');
+  await page.locator('.file-list').first().getByRole('button',{name:'下载',exact:true}).click();assert.equal((await page.evaluate(()=>window.fixture.calls.filter(call=>call.operation==='artifacts.open').at(-1))).payload.id,'artifact-1');
   await page.locator('#input-files').setInputFiles({name:'supplement.csv',mimeType:'text/csv',buffer:Buffer.from('note\nsynthetic supplement')});await page.locator('#input-attachments li').waitFor();
   await page.locator('#task-input').fill('补充附件，请重新核对');await page.locator('#submit-input').click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='执行中');
   assert.deepEqual((await page.evaluate(()=>window.fixture.calls.filter(call=>call.operation==='tasks.input').at(-1))).payload.attachmentIds,['attachment-2']);
@@ -108,10 +108,8 @@ try{
   assert.equal(await page.locator('#company-api-key').inputValue(),'');
   await page.locator('#company-api-key').fill('synthetic-never-real-key');await page.locator('#save-model').click();await page.waitForFunction(()=>document.querySelector('#company-api-key').value==='');
   assert.ok(!(await page.locator('body').innerText()).includes('synthetic-never-real-key'),'Secret never rendered back');
-  await page.locator('#add-member').click();const member=page.locator('.member-card').last();await member.locator('[data-member-field=login]').fill('employee@example.test');await member.locator('[data-member-field=role]').selectOption('editor');await member.locator('[data-member-field=module][value=purchase]').check();await page.locator('#save-members').click();
-  await page.waitForFunction(()=>window.fixture.permissions.users['employee@example.test']);
-  assert.deepEqual(await page.evaluate(()=>window.fixture.permissions.users['employee@example.test'].modules),['purchase']);
-  await page.locator('#member-rows').screenshot({path:path.join(evidence,'settings-permissions-desktop.png')});
+  assert.equal(await page.locator('#permissions-form,#member-rows,#add-member').count(),0,'Removed permission management has no placeholder UI');
+  assert.equal(await page.evaluate(()=>window.fixture.calls.some(call=>call.operation.startsWith('permissions.'))),false,'Settings never reads or saves removed permission management');
   await page.locator('#connection-url').fill('https://company.example.ts.net:8443');await page.locator('#save-connection').click();
   assert.match(await page.locator('#error-message').textContent(),/9443/);assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.operation==='connection.save').length),0,'Production port is rejected before the host API');
   assert.equal(await page.locator('#connection-url').inputValue(),'https://company.example.ts.net:8443');
@@ -149,8 +147,8 @@ try{
   await page.reload();await page.waitForFunction(()=>document.querySelector('#actor').textContent==='测试审核员');
   assert.equal(await page.locator('#submit-goal').isEnabled(),true,'Read-only actor may describe a query; runtime authorizes individual capabilities');
   await page.locator('#pending-tasks .task-row').first().click();await page.locator('#review-panel').waitFor({state:'visible'});assert.equal(await page.locator('#review-check').isDisabled(),true);assert.equal(await page.locator('#approve-result').isDisabled(),true);
-  await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='company-model');assert.equal(await page.locator('#save-model').isDisabled(),true);assert.equal(await page.locator('#add-member').isDisabled(),true);
+  await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='company-model');assert.equal(await page.locator('#save-model').isDisabled(),true);assert.equal(await page.locator('#add-member').count(),0);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({ok:true,scope:'Browser interaction against synthetic API contract; not live engine/business acceptance',reviewVersionBinding:true,noDuplicateApproval:true,attachments:true,schedules:true,permissionsDisplay:true,networkFailure:true,connectionDifferenceReview:true,connectionExpiryReplan:true,productionPortRejected:true,connectionInputPreserved:true,unknownNoBlindRetry:true,narrowViewport:true,sharedProgress:true,evidence}));
+  console.log(JSON.stringify({ok:true,scope:'Browser interaction against synthetic API contract; not live engine/business acceptance',reviewVersionBinding:true,noDuplicateApproval:true,attachments:true,schedules:true,permissionManagementRemoved:true,networkFailure:true,connectionDifferenceReview:true,connectionExpiryReplan:true,productionPortRejected:true,connectionInputPreserved:true,unknownNoBlindRetry:true,narrowViewport:true,sharedProgress:true,evidence}));
   await context.close();
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

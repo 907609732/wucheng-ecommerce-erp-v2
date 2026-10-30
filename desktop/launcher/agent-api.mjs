@@ -1,4 +1,4 @@
-const operations = new Set(['status','tasks.list','tasks.create','tasks.get','tasks.input','tasks.control','reviews.approve','reviews.reject','schedules.list','schedules.create','schedules.update','schedules.delete','settings.get','settings.save','permissions.get','permissions.save','connection.get','connection.check','connection.plan','connection.save','attachments.upload','artifacts.open','artifacts.preview']);
+const operations = new Set(['status','tasks.list','tasks.create','tasks.get','tasks.input','tasks.control','reviews.approve','reviews.reject','schedules.list','schedules.create','schedules.update','schedules.delete','settings.get','settings.save','connection.get','connection.check','connection.plan','connection.save','attachments.upload','artifacts.open','artifacts.preview']);
 
 /** The host supplies authenticated identity; the renderer never supplies an actor. */
 export function createAgentApi(invoke = globalThis.window?.launcher?.agentRequest) {

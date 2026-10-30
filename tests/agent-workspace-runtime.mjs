@@ -29,7 +29,7 @@ const secretStore={has:name=>secrets.has(name),get:async name=>secrets.get(name)
 const adapter={id:'sales',capabilities:[{id:'synthetic-import',kind:'prepare',title:'合成账单导入',inputSchema:{type:'object',properties:{amount:{type:'integer'},attachmentId:{type:'string'}},required:['amount'],additionalProperties:false}},{id:'synthetic-query',kind:'query',title:'合成只读查询',inputSchema:{type:'object',properties:{},additionalProperties:false}}],binding:async()=>({dataSetId:'synthetic-ledger',revision}),query:async()=>({summary:'已读取合成账本',blocks:[{type:'text',text:'只读查询结果：140000 分'}]}),prepare:async(_id,input,ctx)=>{
   if(input.attachmentId){const source=ctx.resolveAttachment(input.attachmentId);attachmentReads.push({taskId:ctx.taskId,actorId:ctx.actor.id,content:fs.readFileSync(source.path,'utf8')});}
   const file=path.join(storeDir,'tasks',ctx.taskId,'synthetic-result.csv');fs.writeFileSync(file,'amount\n'+input.amount);const artifact=ctx.registerArtifact({path:file,name:'synthetic-result.csv',mimeType:'text/csv'});
-  return {summary:'合成账本已准备，等待人员确认',blocks:[{type:'table',title:'待提交金额',columns:[{key:'amount',label:'金额（分）',type:'money'}],rows:[{amount:input.amount}]},{type:'files',files:[{id:artifact.id,name:artifact.name}]}],changes:[{label:'合成费用',before:'未入账',after:input.amount+' 分'}],evidence:[{title:'合成账单来源',artifactId:artifact.id}],commitData:{amount:input.amount}};
+  return {summary:'合成账本已准备，等待人员确认',blocks:[{type:'table',title:'待提交金额',columns:[{key:'amount',label:'金额（分）',type:'money'}],rows:[{amount:input.amount}]},{type:'files',files:[{artifactId:artifact.id,name:artifact.name}]}],changes:[{label:'合成费用',before:'未入账',after:input.amount+' 分'}],evidence:[{title:'合成账单来源',artifactId:artifact.id}],commitData:{amount:input.amount}};
 },commit:async(step,ctx)=>{
   const claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString());
   verifyAgentApproval(ctx.approval,key,{actorId:ctx.actor.id,module:'sales',capabilityId:step.capabilityId,taskId:ctx.taskId,resultId:claims.resultId,resultVersion:claims.resultVersion,dataSetId:'synthetic-ledger',revision,changeDigest:step.changeDigest,idempotencyKey:ctx.idempotencyKey});
@@ -45,7 +45,7 @@ const engine={supportedModels:['synthetic-model','synthetic-alternative'],check:
   return{text:'合成工具调用完成',usage:{input_tokens:10,output_tokens:5,total_tokens:15}};
 }};
 let openedArtifact=null;
-const config={storeDir,resolveActor:async id=>people.get(id),adapters:[adapter],engines:{codex:engine,hermes:engine},secretStore,signApproval:async claims=>signAgentApproval(claims,key),environment:{mode:'test',label:'测试账本'},extensions:{'artifacts.open':async artifact=>{openedArtifact=artifact;return{saved:true,message:'测试产物已验证：'+artifact.name};},'permissions.get':async()=>({policy:{schemaVersion:1,users:{}},revision:1}),'connection.get':async()=>({connection:{mode:'standalone',canConfigure:false,detail:'合成主机连接'}})}};
+const config={storeDir,resolveActor:async id=>people.get(id),adapters:[adapter],engines:{codex:engine,hermes:engine},secretStore,signApproval:async claims=>signAgentApproval(claims,key),environment:{mode:'test',label:'测试账本'},extensions:{'artifacts.open':async artifact=>{openedArtifact=artifact;return{saved:true,message:'测试产物已验证：'+artifact.name};},'connection.get':async()=>({connection:{mode:'standalone',canConfigure:false,detail:'合成主机连接'}})}};
 let runtime=createAgentRuntime(config);
 await runtime.request('settings.save',{company:{model:'synthetic-model'}},meta);
 const mime={'.html':'text/html','.mjs':'text/javascript','.css':'text/css','.png':'image/png'};
@@ -71,7 +71,7 @@ try{
   await page.locator('#result-history').selectOption('');await page.locator('#review-panel').waitFor({state:'visible'});
   await page.locator('#review-check').check();await page.locator('#approve-result').click();await page.waitForFunction(()=>document.querySelector('#task-state').textContent==='已完成');
   assert.equal(commits,1);assert.equal(runtime.store.get('task',taskId).status,'completed');assert.match(await page.locator('.receipt').textContent(),/提交结果已核对/);
-  await page.getByRole('button',{name:'查看 / 下载',exact:true}).click();assert.equal(openedArtifact.taskId,taskId);assert.equal(fs.readFileSync(openedArtifact.path,'utf8'),'amount\n140000');
+  await page.locator('.file-list').first().getByRole('button',{name:'下载',exact:true}).click();assert.equal(openedArtifact.taskId,taskId);assert.equal(fs.readFileSync(openedArtifact.path,'utf8'),'amount\n140000');
   await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='synthetic-model');
   assert.deepEqual(await page.locator('#company-model option').evaluateAll(options=>options.map(option=>option.value)),['','synthetic-model','synthetic-alternative']);
   await page.locator('#new-schedule').click();await page.locator('#schedule-goal').fill('每个工作日准备合成账单');await page.locator('#schedule-frequency').selectOption('weekdays');await page.locator('#schedule-time').fill('09:30');await page.locator('#save-schedule').click();await page.locator('.schedule-row').waitFor();

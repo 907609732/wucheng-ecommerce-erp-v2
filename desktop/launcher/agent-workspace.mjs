@@ -11,7 +11,7 @@ const fieldLabels={id:'编号',name:'名称',filename:'文件名',fileId:'文件
 const fieldLabel = key => fieldLabels[key] || key;
 const when = value => {const date = new Date(value);return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN',{hour12:false});};
 const pending = new Set(['waiting_input','waiting_review','unknown']);
-const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,policy:null,policyRevision:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,connected:false};
+const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,connected:false};
 const resultTools=createResultTools({api,getDetail:()=>state.detail,getStatus:()=>state.status,isHistorical:()=>!!state.resultSelection,makeTable:tableBlock,onRefresh:()=>pollTask(true),onDraftChange:syncActions,notice,showError,loading});
 
 function errorMessage(error) {
@@ -244,7 +244,7 @@ function renderResult(detail) {
     target.append(section);
   }
   if(array(result.changes).length){const section=make('section','','result-block');section.append(make('h3','本次变更'));const compared=result.changes.filter(change=>change&&typeof change==='object'&&(Object.hasOwn(change,'before')||Object.hasOwn(change,'after'))),other=result.changes.filter(change=>!compared.includes(change));
-    if(compared.length)section.append(tableBlock({title:'变更前后',columns:[{key:'label',label:'项目',wrap:true},{key:'before',label:'变更前',wrap:true},{key:'after',label:'变更后',wrap:true}],rows:compared.map(change=>({label:change.label || change.title || change.field || ({assignment:'任务负责人'+(change.taskId?' · '+change.taskId:''),schedule:'定时任务',permissions:'人员权限'}[change.kind]) || change.operation || '变更',before:change.before,after:change.after}))}));
+    if(compared.length)section.append(tableBlock({title:'变更前后',columns:[{key:'label',label:'项目',wrap:true},{key:'before',label:'变更前',wrap:true},{key:'after',label:'变更后',wrap:true}],rows:compared.map(change=>({label:change.label || change.title || change.field || ({assignment:'任务负责人'+(change.taskId?' · '+change.taskId:''),schedule:'定时任务'}[change.kind]) || change.operation || '变更',before:change.before,after:change.after}))}));
     for(const change of other)section.append(structuredValue(change));target.append(section);}
   if(array(result.issues).length){const issues=make('section','','result-issues');issues.append(make('h3','异常与需要关注的事项'));const list=make('ul');for(const issue of result.issues){const resolved=issue?.resolved===true,item=make('li',(resolved?'已解决 · ':'')+(typeof issue==='string'?issue:issue.message || issue.summary || issue.code),resolved?'issue-resolved':'');list.append(item);}issues.append(list);target.append(issues);}
   if(array(result.evidence).length){const section=make('section','','result-block');section.append(make('h3','来源与原件'));const list=make('ul','','evidence-list');for(const source of result.evidence){const li=make('li'),copy=make('div');copy.append(make('span',source.label || source.title || source.name || source.filename || '业务来源'));if(source.note || source.period)copy.append(make('small',source.note || source.period));const details=make('details','','record-details');details.append(make('summary','查看来源、单位与范围'),structuredValue(source));copy.append(details);li.append(copy);if(source.artifactId)li.append(resultTools.fileActions(source.artifactId,source));list.append(li);}section.append(list);target.append(section);}
@@ -281,13 +281,12 @@ async function supplement(event) {
 function setFormEnabled(form, enabled) {for(const input of form.querySelectorAll('input,select,textarea,button'))input.disabled=!enabled;}
 async function loadSettings() {
   const epoch=++state.settingsEpoch;
-  const results=await Promise.allSettled([api.request('settings.get'),api.request('schedules.list'),api.request('permissions.get'),api.request('connection.get'),refreshStatus()]);
+  const results=await Promise.allSettled([api.request('settings.get'),api.request('schedules.list'),api.request('connection.get'),refreshStatus()]);
   if(epoch!==state.settingsEpoch)return;
-  const [models,schedules,permissions,connection]=results;
-  if(results[4].status==='rejected')showError(results[4].reason);
+  const [models,schedules,connection]=results;
+  if(results[3].status==='rejected')showError(results[3].reason);
   if(models.status==='fulfilled')renderSettings(models.value.settings || models.value);else {$('settings-access').textContent=errorMessage(models.reason);setFormEnabled($('model-form'),false);}
   if(schedules.status==='fulfilled'){state.schedules=array(schedules.value.schedules);renderSchedules();}else $('schedule-list').replaceChildren(make('p',errorMessage(schedules.reason),'empty'));
-  if(permissions.status==='fulfilled')renderPermissions(permissions.value);else {$('member-rows').replaceChildren(make('p',errorMessage(permissions.reason),'empty'));setFormEnabled($('permissions-form'),false);$('add-member').disabled=true;}
   if(connection.status==='fulfilled')renderConnection(connection.value);else {$('connection-detail').textContent=errorMessage(connection.reason);setFormEnabled($('connection-form'),false);}
 }
 function engineCatalog() {
@@ -325,31 +324,9 @@ async function saveModel(event) {
   try{await run('settings',async()=>{validateEngineModel($('default-engine').value,company.model);const response=await api.request('settings.save',{defaultEngine:$('default-engine').value,company,...(state.settings?.version!=null?{version:state.settings.version}:{})});renderSettings(response.settings || response);notice('公司 AI 配置已保存。');},[$('save-model')]);}
   finally{$('company-api-key').value='';}
 }
-function memberRow(login='',member={role:'viewer',modules:[],enabled:true,canRunTasks:false}) {
-  const row=make('article','','member-card'),main=make('div','','member-main');
-  const loginLabel=make('label','员工登录身份'),input=make('input');input.value=login;input.placeholder='员工的 Tailscale 登录账号';input.autocomplete='off';input.maxLength=254;input.dataset.memberField='login';input.required=true;loginLabel.append(input);
-  const roleLabel=make('label','职责'),role=make('select');role.dataset.memberField='role';for(const [value,label]of [['viewer','只读成员'],['editor','业务员工'],['admin','管理员']]){const option=make('option',label);option.value=value;role.append(option);}role.value=member.role;roleLabel.append(role);
-  const enabledLabel=make('label','','check'),enabled=make('input');enabled.type='checkbox';enabled.checked=member.enabled===true;enabled.dataset.memberField='enabled';enabledLabel.append(enabled,make('span','启用成员'));main.append(loginLabel,roleLabel,enabledLabel);row.append(main);
-  const modules=make('div','','member-modules');for(const [id,label]of Object.entries(moduleLabels)){const field=make('label','','check'),checkbox=make('input');checkbox.type='checkbox';checkbox.value=id;checkbox.checked=array(member.modules).includes(id);checkbox.dataset.memberField='module';field.append(checkbox,make('span',label));modules.append(field);}row.append(modules);
-  const actions=make('div','','member-task actions'),taskLabel=make('label','','check'),tasks=make('input');tasks.type='checkbox';tasks.checked=member.canRunTasks===true;tasks.dataset.memberField='canRunTasks';taskLabel.append(tasks,make('span','允许执行业务操作（查询无需开启）'));actions.append(taskLabel);actions.append(actionButton('移除此成员',()=>row.remove()));actions.lastChild.className='member-remove';row.append(actions);return row;
-}
-function renderPermissions(response) {
-  const policy=response.policy || response;state.policy=policy;state.policyRevision=response.revision ?? null;
-  $('member-rows').replaceChildren(...Object.entries(policy.users || {}).map(([login,member])=>memberRow(login,member)));
-  if(!Object.keys(policy.users || {}).length)$('member-rows').append(make('p','尚未配置员工。添加成员后设置可访问的业务范围。','empty'));
-  setFormEnabled($('permissions-form'),canManage());$('add-member').disabled=!canManage();
-}
-async function savePermissions(event) {
-  event.preventDefault();if(!canManage())return;
-  await run('permissions',async()=>{
-    const users=Object.create(null);
-    for(const row of $('member-rows').querySelectorAll('.member-card')){const field=key=>row.querySelector(`[data-member-field="${key}"]`),login=field('login').value.trim().toLowerCase();if(!login || /\s|,/.test(login))throw new Error('请填写有效的员工登录身份');if(Object.hasOwn(users,login))throw new Error('员工登录身份重复：'+login);users[login]={role:field('role').value,enabled:field('enabled').checked,canRunTasks:field('canRunTasks').checked,modules:[...row.querySelectorAll('[data-member-field="module"]:checked')].map(input=>input.value)};}
-    const response=await api.request('permissions.save',{policy:{schemaVersion:1,users},revision:state.policyRevision});renderPermissions(response.policy?response:{policy:{schemaVersion:1,users},revision:response.revision});notice('人员权限已保存。');
-  },[$('save-members')]);
-}
 function renderConnection(response) {
   const connection=response.connection || response;$('connection-mode').value=connection.mode || 'standalone';$('connection-provider').value=connection.networkProvider || 'embedded';$('connection-url').value=connection.serverUrl || '';
-  $('connection-detail').textContent=connection.detail || connection.label || '员工连接公司主机后，使用同一任务与权限服务。';
+  $('connection-detail').textContent=connection.detail || connection.label || '员工连接公司主机后，使用同一任务服务。';
   state.connectionCanConfigure=canManage() || connection.canConfigure===true;clearConnectionPlan();connectionVisibility();syncConnectionControls();
 }
 function clearConnectionPlan() {state.connectionPlan=null;$('connection-review').hidden=true;}
@@ -451,7 +428,6 @@ $('review-check').addEventListener('change',syncActions);$('approve-result').add
 $('history-query').addEventListener('input',renderTasks);$('history-state').addEventListener('change',renderTasks);$('refresh-history').addEventListener('click',()=>void run('history',()=>refreshTasks(),[$('refresh-history')]));$('history-more').addEventListener('click',()=>void run('history',()=>refreshTasks({more:true}),[$('history-more')]));
 $('refresh-settings').addEventListener('click',()=>void run('refresh-settings',()=>loadSettings(),[$('refresh-settings')]));$('model-form').addEventListener('submit',saveModel);
 $('default-engine').addEventListener('change',()=>renderModelChoice());
-$('permissions-form').addEventListener('submit',savePermissions);$('add-member').addEventListener('click',()=>{$('member-rows').querySelector('.empty')?.remove();const row=memberRow();$('member-rows').append(row);row.querySelector('input').focus();});
 for(const id of ['connection-mode','connection-provider','connection-url'])$(id).addEventListener('input',()=>{clearConnectionPlan();connectionVisibility();});
 $('connection-mode').addEventListener('change',()=>{clearConnectionPlan();connectionVisibility();});$('connection-form').addEventListener('submit',saveConnection);$('confirm-connection').addEventListener('click',()=>void confirmConnection());$('cancel-connection').addEventListener('click',()=>{clearConnectionPlan();$('save-connection').focus();});$('check-connection').addEventListener('click',()=>void run('connection-check',async()=>{const result=await api.request('connection.check');$('connection-detail').textContent=result.detail || result.message || result.label || '连接检查已完成';await refreshStatus();},[$('check-connection')]));
 for(const action of ['login','connect','status','logout'])$('network-'+action).addEventListener('click',()=>void networkAction(action));
