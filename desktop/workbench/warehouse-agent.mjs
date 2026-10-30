@@ -19,7 +19,7 @@ const error=(code,message,statusCode=409)=>Object.assign(Error(message),{code,st
 const schema=properties=>({type:'object',properties,additionalProperties:false});
 const str={type:'string',minLength:1,maxLength:160};
 const employeeEditFields=['name','email','mobile','dingtalkUserId','task','deadline','workdays','channels','enabled'];
-const cap=(id,title,kind,properties={},requiresReview=kind==='prepare')=>({id,title,kind,description:title,inputSchema:warehouseCapabilitySchema(id),requiresReview,...(id==='employees.configure'?{resultEditFields:employeeEditFields}:{}),...(['employees.configure','remind','backup','schedules.legacy','debug.bundle','configuration'].includes(id)?{roles:['admin']}:{})});
+const cap=(id,title,kind,properties={},requiresReview=kind==='prepare')=>({id,title,kind,description:title,inputSchema:warehouseCapabilitySchema(id),requiresReview,...(id==='employees.configure'?{resultEditFields:employeeEditFields}:{})});
 const taskCapabilities=new Set(['inventory.collect','inventory.import','inventory.send','inventory.send-latest-valid','sales.collect','sales.backfill','sales.import','sales.send','login.refresh','collection.retry','collection.cancel']);
 const adminCapabilities=new Set(['employees.configure','remind','backup','debug.bundle']);
 export const WAREHOUSE_AGENT_CAPABILITIES=[
@@ -29,7 +29,7 @@ export const WAREHOUSE_AGENT_CAPABILITIES=[
   cap('schedules.legacy','读取旧日/月/催办计划及统一调度迁移建议（不更改配置）','query'),
   cap('diagnostics','只读检查云仓配置、浏览器、锁和登录态结构；不联网、不回显秘密','query'),
   cap('logs','搜索固定云仓运行日志；脱敏且不接受任意路径','query'),
-  cap('configuration','管理员读取业务设置与凭据就绪标记；密码和密钥仅在主机录入','query'),
+  cap('configuration','读取业务设置与凭据就绪标记；密码和密钥仅在主机录入','query'),
   cap('debug.bundle','生成脱敏诊断包并登记可下载原件','prepare',{},false),
   cap('collection.jobs','按持久编号回查采集终态，不重启未知任务','query'),
   cap('collection.retry','仅重试本人明确失败、已取消或等待登录的采集；未知先查回','prepare',{},false),
@@ -49,8 +49,7 @@ export const WAREHOUSE_AGENT_CAPABILITIES=[
 
 function actor(ctx,write=false,admin=false){
   const a=ctx?.actor;
-  if(!a?.id||!['admin','editor','viewer'].includes(a.role)||!a.modules?.includes('warehouse'))throw error('WAREHOUSE_FORBIDDEN','当前身份无云仓访问权限',403);
-  if(write&&a.role==='viewer'||admin&&a.role!=='admin')throw error('WAREHOUSE_FORBIDDEN','当前身份无此云仓操作权限',403);
+  if(!a?.id)throw error('WAREHOUSE_FORBIDDEN','当前身份无云仓访问权限',403);
   if(!ctx.taskId)throw error('WAREHOUSE_CONTEXT_REQUIRED','缺少可信任务上下文',400);
   ctx.signal?.throwIfAborted();return a;
 }
@@ -155,7 +154,7 @@ export function createWarehouseAgentAdapter(deps={}){
     activeCollections.set(job.id,work);try{return await work;}finally{activeCollections.delete(job.id);}
   }
   function cancelCollection(jobId,ctx){
-    let job=collections.get(jobId,ctx.actor,{writeAccess:ctx.actor.role!=='admin'});if(['completed','invalid','failed','cancelled','waiting-host-action'].includes(job.status))return {job};
+    let job=collections.get(jobId,ctx.actor,{writeAccess:false});if(['completed','invalid','failed','cancelled','waiting-host-action'].includes(job.status))return {job};
     const controlPath=job.controlPath||path.join(dir,'collection-'+job.id+'.control.json'),controlNonce=job.controlNonce||randomUUID();
     job=collections.update(jobId,{status:'cancelling',controlPath,controlNonce,cancelRequestedAt:now().toISOString(),cancelRequestedBy:ctx.actor.id});
     fs.writeFileSync(controlPath,JSON.stringify({nonce:controlNonce,action:'cancel'}),{mode:0o600});
@@ -186,7 +185,6 @@ export function createWarehouseAgentAdapter(deps={}){
     if(id==='collection.jobs'){for(const job of data.jobs)blocks.push({type:'job',title:'采集任务',...job});return {summary:'已按持久采集编号回查；没有启动新的导出',scope:{module:'warehouse',...binding(ctx)},blocks,evidence:data.artifacts.map(a=>({...a,module:'warehouse',complete:data.jobs.find(j=>j.jobId===a.jobId)?.complete===true,status:data.jobs.find(j=>j.jobId===a.jobId)?.status})),issues:data.jobs.filter(j=>!j.complete).map(j=>({blocking:true,module:'warehouse',jobId:j.jobId,code:'WAREHOUSE_COLLECTION_'+j.status.toUpperCase().replaceAll('-','_'),message:'采集尚未取得可入库终态：'+j.status})),data};}
     return {summary:WAREHOUSE_AGENT_CAPABILITIES.find(c=>c.id===id).title,scope:{module:'warehouse',...binding(ctx),businessDate:businessDate(now()),timeZone:'Asia/Shanghai'},blocks,evidence:id==='sources'&&data.sha256?[{artifactId:data.artifactId,sha256:data.sha256,filename:data.filename}]:[],data};}
   async function prepare(id,input={},ctx){const c=await inputFor(id,input,now());actor(ctx,true,adminCapabilities.has(id));if(c.kind!=='prepare')throw error('WAREHOUSE_NOT_PREPARE','该能力只可查询',400);
-    if(taskCapabilities.has(id)&&!ctx.actor.canRunTasks)throw error('WAREHOUSE_TASK_FORBIDDEN','当前身份无采集任务执行权',403);
     const before=binding(ctx);let commitData={id,input:structuredClone(input)},blocks=[],evidence=[],changes=[],issues=[];
     if(id.endsWith('.collect')||id==='collection.retry'||id==='collection.cancel'){const original=id.startsWith('collection.')?collections.get(input.jobId,ctx.actor,{writeAccess:id!=='collection.cancel'}):null;const outcome=id==='collection.cancel'?cancelCollection(input.jobId,ctx):await collectArtifact(original?.kind||(id.startsWith('inventory')?'inventory':'sales'),original?{jobId:original.id,month:original.month}:input,ctx,{retry:id==='collection.retry'}),j=collections.publicJob(outcome.job),a=outcome.artifact;blocks=[{type:'job',title:'菜鸟采集',...j}];if(a){commitData.artifactIds=[a.id];blocks.push({type:'table',title:'采集校验结果',rows:[{artifactId:a.id,kind:a.kind,sha256:a.hash,...warehouseValidationSummary(a.validation)}]});evidence=[{module:'warehouse',jobId:j.jobId,complete:j.complete,status:j.status,artifactId:a.id,sha256:a.hash,filename:path.basename(a.file)}];}if(!j.complete)issues.push({blocking:true,module:'warehouse',jobId:j.jobId,code:'WAREHOUSE_COLLECTION_'+j.status.toUpperCase().replaceAll('-','_'),message:j.status==='waiting-host-action'?'采集需要在主机完成登录或验证码；完成后按原编号显式重试':'采集未取得可入库终态，请按原编号查回；禁止盲目重启',errors:a?.validation?.errors});}
     else if(id==='inventory.import'||id==='sales.import'){const a=artifact(input.artifactId,ctx);if(a.kind!==(id.startsWith('inventory')?'inventory':'sales'))throw error('WAREHOUSE_SOURCE_KIND','原件业务类型不符');if(a.kind==='inventory'&&businessDate(new Date(a.createdAt))!==businessDate(now()))throw error('WAREHOUSE_COLLECTION_STALE','库存原件不是今天新采集，请重新采集');const v=await worker('validate',{kind:a.kind,file:a.file,month:a.month},ctx);if(!(v.ok??v.valid))throw error('WAREHOUSE_VALIDATION_FAILED','原件未通过校验');commitData.artifactIds=[a.id];evidence=[{artifactId:a.id,sha256:a.hash,filename:path.basename(a.file)}];changes=[{operation:id,...warehouseValidationSummary(v)}];}
@@ -208,7 +206,6 @@ export function createWarehouseAgentAdapter(deps={}){
     const prior=receipt(ctx.idempotencyKey,ctx);if(prior){const row=db.prepare('SELECT digest FROM warehouse_agent_receipts WHERE key=?').get(ctx.idempotencyKey);if(row.digest!==p.changeDigest)throw error('WAREHOUSE_IDEMPOTENCY_CONFLICT','幂等标识已用于其他准备结果');return receiptResult(ctx.idempotencyKey,ctx);}
     const c=WAREHOUSE_AGENT_CAPABILITIES.find(c=>c.id===p.capabilityId);actor(ctx,true,adminCapabilities.has(c.id));
     if(c.requiresReview===false)throw error('WAREHOUSE_AUTOMATIC_NO_COMMIT','自动产物无需正式提交，请读取已经生成的原件',400);
-    if(taskCapabilities.has(c.id)&&!ctx.actor.canRunTasks)throw error('WAREHOUSE_TASK_FORBIDDEN','当前身份的任务执行权已撤销',403);
     sameBinding({dataSetId:p.scope.dataSetId,revision:p.scope.revision},ctx);
     if(c.requiresReview){if(typeof verifyApproval!=='function')throw error('WAREHOUSE_APPROVAL_UNAVAILABLE','主机尚未接入中央审批验证器',503);
       // Central results aggregate module steps under their own result id/version.
@@ -235,5 +232,5 @@ export function createWarehouseAgentAdapter(deps={}){
   // partial domain outcomes readable over transport, but never runtime-completed.
   const receiptResult=(key,ctx)=>{const r=receipt(key,ctx);return r?{state:['completed','accepted'].includes(r.status)?'completed':'unknown',idempotencyKey:key,receipt:{...r,idempotencyKey:key,state:['completed','accepted'].includes(r.status)?'completed':'unknown'}}:null;};
   function download(id,ctx){actor(ctx);const a=artifact(id,ctx);if(['backup','debug'].includes(a.kind))actor(ctx,false,true);const file=fs.realpathSync(a.file),base=fs.realpathSync(workspace)+path.sep;if(!file.startsWith(base)||fs.lstatSync(a.file).isSymbolicLink())throw error('WAREHOUSE_SOURCE_OUTSIDE','原件路径越界',403);return {stream:fs.createReadStream(file),size:fs.statSync(file).size,sha256:a.hash,name:a.id+path.extname(file)};}
-  return {id:'warehouse',capabilities:structuredClone(WAREHOUSE_AGENT_CAPABILITIES),binding,query,prepare,commit,download,receipt:receiptResult,cancel:async ctx=>{actor(ctx,true);if(!ctx.actor.canRunTasks)throw error('WAREHOUSE_TASK_FORBIDDEN','当前身份无停止采集执行权',403);return {jobs:collections.list(ctx.actor).filter(j=>j.taskId===ctx.taskId&&['collecting','collected','validating','cancelling','unknown'].includes(j.status)).map(j=>collections.publicJob(cancelCollection(j.id,ctx).job))};},close(){daily.close();db.close();}};
+  return {id:'warehouse',capabilities:structuredClone(WAREHOUSE_AGENT_CAPABILITIES),binding,query,prepare,commit,download,receipt:receiptResult,cancel:async ctx=>{actor(ctx,true);return {jobs:collections.list(ctx.actor).filter(j=>j.taskId===ctx.taskId&&['collecting','collected','validating','cancelling','unknown'].includes(j.status)).map(j=>collections.publicJob(cancelCollection(j.id,ctx).job))};},close(){daily.close();db.close();}};
 }

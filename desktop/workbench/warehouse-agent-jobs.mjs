@@ -13,7 +13,7 @@ export function createWarehouseCollectionJournal({database,now=()=>new Date(),di
     const row=database.prepare('SELECT payload FROM warehouse_agent_collection_jobs WHERE id=?').get(id);
     if(!row)throw fail('WAREHOUSE_JOB_MISSING','采集编号不存在',404);
     const job=JSON.parse(row.payload);
-    if(job.actorId!==actor.id&&(writeAccess||actor.role!=='admin'))throw fail('WAREHOUSE_JOB_FORBIDDEN','不能操作其他人员的采集任务',403);
+    if(job.actorId!==actor.id&&writeAccess)throw fail('WAREHOUSE_JOB_FORBIDDEN','不能操作其他人员的采集任务',403);
     return job;
   }
   function update(id,patch){const row=database.prepare('SELECT payload FROM warehouse_agent_collection_jobs WHERE id=?').get(id);if(!row)throw fail('WAREHOUSE_JOB_MISSING','采集编号不存在',404);const old=JSON.parse(row.payload),job={...old,...patch,id:old.id,actorId:old.actorId,taskId:old.taskId,kind:old.kind,month:old.month,createdAt:old.createdAt,updatedAt:now().toISOString()};write(job);return job;}
@@ -35,7 +35,7 @@ export function createWarehouseCollectionJournal({database,now=()=>new Date(),di
     if(job.workerPid)try{process.kill(job.workerPid,0);throw fail('WAREHOUSE_JOB_STILL_RUNNING','采集进程仍在运行，不能重启');}catch(e){if(e.code==='WAREHOUSE_JOB_STILL_RUNNING')throw e;if(e.code!=='ESRCH')throw fail('WAREHOUSE_JOB_PROCESS_UNKNOWN','无法确认旧采集进程已结束');}
     return update(id,{status:job.sourceFile?'collected':'collecting',attempt:job.attempt+1,controllerPid:process.pid,workerPid:null,controlNonce:randomUUID(),cancelRequestedAt:null,errorCode:null,finishedAt:null,history:[...(job.history||[]),{attempt:job.attempt,status:job.status,errorCode:job.errorCode,finishedAt:job.finishedAt||job.updatedAt}]});
   }
-  function list(actor){const rows=actor.role==='admin'?database.prepare('SELECT payload FROM warehouse_agent_collection_jobs ORDER BY rowid DESC LIMIT 100').all():database.prepare('SELECT payload FROM warehouse_agent_collection_jobs WHERE actor_id=? ORDER BY rowid DESC LIMIT 100').all(actor.id);return rows.map(r=>JSON.parse(r.payload));}
+  function list(actor){if(!actor?.id)throw fail('WAREHOUSE_JOB_FORBIDDEN','缺少已验证身份',401);return database.prepare('SELECT payload FROM warehouse_agent_collection_jobs ORDER BY rowid DESC LIMIT 100').all().map(r=>JSON.parse(r.payload));}
   function publicJob(job){return {module:'warehouse',jobId:job.id,taskId:job.taskId,kind:job.kind,month:job.month,status:job.status,complete:job.status==='completed',attempt:job.attempt,artifactId:job.artifactId||null,createdAt:job.createdAt,updatedAt:job.updatedAt,errorCode:job.errorCode||null,validation:warehouseValidationSummary(job.validation),...(job.cancelRequestedAt?{cancelRequestedAt:job.cancelRequestedAt}:{}),...(job.sha256?{sha256:job.sha256}:{})};}
   return {claim,get,update,retry,list,publicJob};
 }

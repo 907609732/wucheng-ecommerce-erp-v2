@@ -12,7 +12,7 @@ export function expectedInventoryDate(now=new Date()) {
   const day=new Date(businessDate(now)+'T00:00:00Z');day.setUTCDate(day.getUTCDate()-1);return day.toISOString().slice(0,10);
 }
 const problem = (message, status=400) => Object.assign(Error(message), {status});
-const admin = actor => {if(actor?.role!=='admin')throw problem('需要管理员权限',403);};
+const admin = actor => {if(!actor?.id)throw problem('缺少已验证的工作台身份',401);};
 const safeError = () => '服务请求失败，请检查渠道配置或服务商记录';
 const weekday = day => new Date(day+'T00:00:00Z').getUTCDay() || 7;
 const normalizeLogin = value => String(value||'').trim().toLowerCase();
@@ -62,11 +62,11 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
       const deadlineAt=`${day}T${e.deadline}:00+08:00`,overdue=now().getTime()>new Date(deadlineAt).getTime();
       return {...e,checkInAt:record?.check_in_at||'',completedAt:record?.completed_at||'',completedRunId:record?.run_id||'',status:!due?'off':record?.completed_at?'completed':overdue?'overdue':'pending',late:Boolean(record?.completed_at&&new Date(record.completed_at)>new Date(deadlineAt))};
     });
-    return actor.role==='admin'?rows:rows.filter(e=>e.login===normalizeLogin(actor.login));
+    return rows;
   }
   async function status(actor) {
     if(!actor?.id)throw problem('缺少已验证的工作台身份',401);
-    const employees=employeesFor(actor),all=actor.role==='admin',due=employees.filter(e=>e.status!=='off');
+    const employees=employeesFor(actor),all=true,due=employees.filter(e=>e.status!=='off');
     const reminders=db.prepare('SELECT * FROM warehouse_reminders WHERE business_date=? ORDER BY created_at DESC').all(businessDate(now())).filter(r=>all||r.login===normalizeLogin(actor.login)).map(r=>({...JSON.parse(r.payload),login:r.login,channel:r.channel,status:r.status,createdAt:r.created_at}));
     return {businessDate:businessDate(now()),timeZone:'Asia/Shanghai',expectedSourceDate:expectedInventoryDate(now()),sync:syncStatus(),actor:{id:actor.id,login:actor.login,role:actor.role,local:Boolean(actor.local)},me:actor.local?null:employees.find(e=>e.login===normalizeLogin(actor.login))||null,employees,team:{expected:due.length,checkedIn:due.filter(e=>e.checkInAt).length,completed:due.filter(e=>e.completedAt).length,pending:due.filter(e=>!e.completedAt).length},config:all?config():{employees:[],autoRemind:false},channels:await getChannels(),reminders};
   }
@@ -91,7 +91,6 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
   }
   function action(actor,input,{approvalVerified=false}={}) {
     if(!actor?.id||actor.local||!actor.id.startsWith('tailscale:')||(actor.channel!=='ui'&&!approvalVerified))throw problem('请员工使用自己的 Tailscale 工作台账号在界面签到',403);
-    if(actor.role==='viewer')throw problem('只读成员不能签到，请管理员授予编辑权限',403);
     const login=normalizeLogin(actor.login),employee=config().employees.find(e=>e.login===login&&e.enabled);
     if(!employee)throw problem('当前账号未加入云仓员工名单',403);
     if(input.login&&normalizeLogin(input.login)!==login)throw problem('不能替其他员工签到',403);

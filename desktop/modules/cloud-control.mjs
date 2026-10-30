@@ -113,7 +113,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
         if(req.method==='GET'){
           if(route.startsWith('/requests/')){const id=decodeURIComponent(route.slice('/requests/'.length)),record=workbenchDb.prepare('SELECT result FROM requests WHERE actor_id=? AND request_id=?').get(actor.id,id);return send(record?200:404,record?{requestId:id,result:JSON.parse(record.result)}:{error:'请求结果不存在'});}
           if(['/ui','/ui/app.js','/ui/app.css'].includes(route)){res.writeHead(200,{'Content-Type':route==='/ui'?'text/html; charset=utf-8':route.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(route==='/ui'?warehouseHtml:route.endsWith('.js')?warehouseScript:warehouseStyles);}
-          if(route==='/state')return send(200,{version,busy:isBusy(),maintenance:maintenance(),executionLocation:'server',permissions:{read:true,runTasks:actor.role!=='viewer'&&(actor.role==='admin'||actor.canRunTasks)},...(business.getState?sanitize(await business.getState(actor)): {}),...getDataSetIdentity()});
+          if(route==='/state')return send(200,{version,busy:isBusy(),maintenance:maintenance(),executionLocation:'server',permissions:{read:true,runTasks:true},...(business.getState?sanitize(await business.getState(actor)): {}),...getDataSetIdentity()});
           if(route==='/inventory')return send(200,sanitize(await business.getInventory(actor)));
           if(route==='/daily'){
             if(!business.getDailyStatus)return send(503,{error:'签到服务尚未就绪'});
@@ -127,9 +127,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
         const dailyRoute=['/daily/action','/daily/config','/daily/remind'].includes(route);
         if(req.method!=='POST'||!['/jobs','/jobs/stop','/host-action','/send-latest-valid','/daily/action','/daily/config','/daily/remind'].includes(route))return send(404,{error:'未知云仓业务接口'});
         if(maintenance())return send(409,{error:'模块正在安装或迁移检查',code:'MODULE_MAINTENANCE'});
-        if(actor.role==='viewer'||(!dailyRoute&&!(actor.role==='admin'||actor.canRunTasks)))return send(403,{error:'未获授权执行此操作',code:'TASK_PERMISSION_REQUIRED'});
         if(dailyRoute&&actor.channel!=='ui')return send(403,{error:'签到及催办必须在工作台界面操作'});
-        if(['/daily/config','/daily/remind'].includes(route)&&actor.role!=='admin')return send(403,{error:'需要管理员权限'});
         let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>(dailyRoute?524288:65536))return send(413,{error:'请求过大'});}
         const body=JSON.parse(raw||'{}'),hash=createHash('sha256').update(JSON.stringify(body)).digest('hex');
         const old=workbenchDb.prepare('SELECT * FROM requests WHERE actor_id=? AND request_id=?').get(actor.id,actor.requestId);
