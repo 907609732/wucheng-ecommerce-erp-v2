@@ -7,6 +7,7 @@ import {createAgentSettings} from './settings.mjs';
 import {createAgentScheduler} from './scheduler.mjs';
 import {fromJsonSchema} from '@modelcontextprotocol/server';
 import {createSystemAgentAdapter} from './system-adapter.mjs';
+import {reconcileJobIssues} from './job-issues.mjs';
 
 const live=new Set(['queued','running','committing']);
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -46,9 +47,9 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   function resultState(taskId){const task=store.get('task',taskId);return store.get('result',task.resultId);}
   function snapshotResult(saved){store.insert('result_version',{...publicResult(saved),id:saved.id+':'+saved.version,resultId:saved.id,resultVersion:saved.version,createdAt:now()});return saved;}
   function updateResult(id,value){return store.transaction(()=>snapshotResult(store.update('result',id,value)));}
-  function appendResult(task,output,step){
+  function appendResult(task,output,step,source){
     const previous=task.resultId?store.get('result',task.resultId):null;
-    const result={id:previous?.id||randomUUID(),ownerId:task.ownerId,taskId:task.id,summary:output.summary||previous?.summary||'处理结果',scope:output.scope||task.scope,blocks:[...(previous?.blocks||[]),...(output.blocks||[])],evidence:[...(previous?.evidence||[]),...(output.evidence||[])],changes:[...(previous?.changes||[]),...(output.changes||[])],issues:[...(previous?.issues||[]),...(output.issues||[])],environment,prepared:[...(previous?.prepared||[]),...(step?[step]:[])]};
+    const result={id:previous?.id||randomUUID(),ownerId:task.ownerId,taskId:task.id,summary:output.summary||previous?.summary||'处理结果',scope:output.scope||task.scope,blocks:[...(previous?.blocks||[]),...(output.blocks||[])],evidence:[...(previous?.evidence||[]),...(output.evidence||[])],changes:[...(previous?.changes||[]),...(output.changes||[])],issues:reconcileJobIssues(previous?.issues,output,{...source,now:now()}),environment,prepared:[...(previous?.prepared||[]),...(step?[step]:[])]};
     const saved=previous?store.update('result',result.id,result):store.insert('result',result);
     snapshotResult(saved);
     const review=saved.prepared.length?{id:randomUUID(),resultVersion:saved.version,revision:agentDigest(saved.prepared.map(s=>({module:s.module,binding:s.binding,digest:s.changeDigest}))),canApprove:!saved.issues.some(i=>i.blocking===true)}:null;
@@ -79,14 +80,14 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(kind==='prepare'){
       if(output.requiresReview===false){
         if(cap.requiresReview!==false||(output.changes||[]).length||output.commitData!==undefined)throw agentError('AUTOMATIC_SIDE_EFFECT_DENIED','自动准备不能携带正式变更或提交载荷',403);
-        const saved=appendResult(latest,output);emit(taskId,'step.completed',{module:adapter.id,capabilityId:cap.id,automatic:true});return {result:publicResult(saved),requiresReview:false};
+        const saved=appendResult(latest,output,null,{module:adapter.id,capabilityId:cap.id});emit(taskId,'step.completed',{module:adapter.id,capabilityId:cap.id,automatic:true});return {result:publicResult(saved),requiresReview:false};
       }
       if(output.commitData===undefined)throw agentError('PREPARATION_INVALID','业务模块未返回可核验的提交草稿',502);
       const after=await binding(adapter,ctx);if(canonicalJson(before)!==canonicalJson(after))throw agentError('DATASET_CHANGED','准备期间业务数据变化，请重新生成结果',409);
       const step={id:randomUUID(),module:adapter.id,capabilityId:cap.id,input:params,commitData:output.commitData,changes:output.changes||[],binding:before};step.changeDigest=agentDigest({capabilityId:step.capabilityId,input:params,commitData:step.commitData,changes:step.changes});
-      const saved=appendResult(latest,output,step);emit(taskId,'review.required',{resultId:saved.id,resultVersion:saved.version});return {result:publicResult(saved),requiresReview:true};
+      const saved=appendResult(latest,output,step,{module:adapter.id,capabilityId:cap.id});emit(taskId,'review.required',{resultId:saved.id,resultVersion:saved.version});return {result:publicResult(saved),requiresReview:true};
     }
-    const saved=appendResult(latest,output);emit(taskId,'step.completed',{module:adapter.id,capabilityId:cap.id});return {result:publicResult(saved)};
+    const saved=appendResult(latest,output,null,{module:adapter.id,capabilityId:cap.id});emit(taskId,'step.completed',{module:adapter.id,capabilityId:cap.id});return {result:publicResult(saved)};
   }
   function createTask(input,actor,{internalId}={}){
     const goal=String(input.goal||'').trim();if(!goal||goal.length>20000)throw agentError('GOAL_INVALID','请输入 1 至 20000 字的工作目标');
@@ -198,19 +199,33 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       const actor=await identity({id:input.ownerId,channel:'migration'});canRun(actor);if(!actor.modules.includes('warehouse'))throw agentError('MODULE_DENIED','旧云仓调度创建者没有云仓权限',403);
       const warehouse=adapterMap.get('warehouse');if(!warehouse)throw agentError('SCHEDULE_MIGRATION_UNAVAILABLE','云仓业务模块尚未准备好',503);
       const migrationTaskId='schedule-migration-'+agentDigest(input.sourceId),source=await binding(warehouse,{actor,taskId:migrationTaskId,capabilityId:'legacy-schedule-migration'});if(input.sourceId!=='warehouse:'+source.dataSetId)throw agentError('SCHEDULE_MIGRATION_SOURCE_CHANGED','旧调度来源与当前云仓账本不一致',409);
-      const prepared=[],seen=new Set();let existing=0;
+      const prepared=[],metadataUpdates=[],seen=new Set();let existing=0;
       for(const entry of input.entries){
         if(!plain(entry)||typeof entry.legacyKey!=='string'||!entry.legacyKey||entry.legacyKey.length>200||seen.has(entry.legacyKey)||typeof entry.enabled!=='boolean'||typeof entry.timezone!=='string'||!entry.timezone||typeof entry.goal!=='string'||!entry.goal.trim()||typeof entry.cron!=='string')throw agentError('SCHEDULE_MIGRATION_INVALID','旧调度必须逐项提供唯一来源、目标、规则、时区和原启用状态',400);
         seen.add(entry.legacyKey);const markerId=agentDigest({sourceId:input.sourceId,legacyKey:entry.legacyKey});
-        if(store.get('schedule_migration',markerId)){existing++;continue;}
-        const value=await scheduler.prepare({goal:entry.goal,cron:entry.cron,timezone:entry.timezone,engine:entry.engine||settings.get().defaultEngine,misfirePolicy:entry.misfirePolicy||'once',enabled:entry.enabled,scope:{modules:['warehouse']}},actor,{allowLegacyThirtySeconds:entry.cron==='*/30 * * * * *',origin:{type:'legacy-migration',sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.enabled,creator:'unknown',migrationOwnerId:actor.id}});
+        const marker=store.get('schedule_migration',markerId);
+        if(marker){
+          existing++;
+          // A retained marker is also the tombstone for a deleted schedule. Add
+          // provenance without recreating it or changing its original adopter.
+          const migrated=store.get('schedule',marker.scheduleId),adoptedBy=marker.adoptedBy||marker.ownerId;
+          if(adoptedBy&&marker.sourceId===input.sourceId&&marker.legacyKey===entry.legacyKey){
+            const provenance={sourceOwnerId:null,adoptedBy,ownerMapping:'legacy-global-host-owner',engineMapping:'company-default'};
+            const patchMarker=Object.entries(provenance).some(([key,value])=>marker[key]!==value);
+            const patchSchedule=migrated?.origin?.type==='legacy-migration'&&migrated.origin.sourceId===input.sourceId&&migrated.origin.legacyKey===entry.legacyKey&&migrated.ownerId===adoptedBy&&Object.entries(provenance).some(([key,value])=>migrated.origin[key]!==value);
+            if(patchMarker||patchSchedule)metadataUpdates.push({marker,migrated,provenance,patchMarker,patchSchedule});
+          }
+          continue;
+        }
+        const provenance={sourceOwnerId:null,adoptedBy:actor.id,ownerMapping:'legacy-global-host-owner',engineMapping:'company-default'};
+        const value=await scheduler.prepare({goal:entry.goal,cron:entry.cron,timezone:entry.timezone,engine:settings.get().defaultEngine,misfirePolicy:entry.misfirePolicy||'once',enabled:entry.enabled,scope:{modules:['warehouse']}},actor,{allowLegacyThirtySeconds:entry.cron==='*/30 * * * * *',origin:{type:'legacy-migration',sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.enabled,creator:'unknown',migrationOwnerId:actor.id,...provenance}});
         prepared.push({markerId,legacyKey:entry.legacyKey,sourceEnabled:entry.enabled,value});
       }
       // Refresh after asynchronous schedule validation, then persist every
       // schedule and its non-resurrecting migration marker in one transaction.
       const fresh=await identity({id:actor.id,channel:'migration'});canRun(fresh);if(!fresh.modules.includes('warehouse'))throw agentError('MODULE_DENIED','旧调度创建者权限已经撤销',403);
       const currentSource=await binding(warehouse,{actor:fresh,taskId:migrationTaskId,capabilityId:'legacy-schedule-migration'});if(currentSource.dataSetId!==source.dataSetId)throw agentError('SCHEDULE_MIGRATION_SOURCE_CHANGED','云仓账本在迁入期间发生切换',409);
-      store.transaction(()=>{for(const entry of prepared){const schedule=scheduler.commit(entry.value);store.insert('schedule_migration',{id:entry.markerId,ownerId:actor.id,sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.sourceEnabled,scheduleId:schedule.id,importedAt:now()});}if(prepared.length)systemAdapter.changed();});
+      store.transaction(()=>{for(const entry of prepared){const schedule=scheduler.commit(entry.value);store.insert('schedule_migration',{id:entry.markerId,ownerId:actor.id,sourceId:input.sourceId,sourceRevision:input.sourceRevision,legacyKey:entry.legacyKey,sourceEnabled:entry.sourceEnabled,scheduleId:schedule.id,sourceOwnerId:null,adoptedBy:actor.id,ownerMapping:'legacy-global-host-owner',engineMapping:'company-default',importedAt:now()});}for(const update of metadataUpdates){if(update.patchMarker)store.update('schedule_migration',update.marker.id,update.provenance,{expectedVersion:update.marker.version});if(update.patchSchedule)store.update('schedule',update.migrated.id,{origin:{...update.migrated.origin,...update.provenance}},{expectedVersion:update.migrated.version});}if(prepared.length||metadataUpdates.length)systemAdapter.changed();});
       return {imported:prepared.length,existing,disabled:prepared.filter(entry=>!entry.sourceEnabled).length,sourceId:input.sourceId,sourceRevision:input.sourceRevision};
     });importingSchedules=operation.catch(()=>{});return operation;
   }
@@ -236,7 +251,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(operation==='attachments.upload'){
       if(!meta.trustedUi)throw agentError('UPLOAD_DENIED','附件需要通过工作台上传',403);const name=String(payload.name||''),bytes=Buffer.from(String(payload.bytes||''),'base64');if(!name||name.length>200||/[\\/:*?"<>|\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name)||bytes.length===0||bytes.length>50*1024*1024)throw agentError('UPLOAD_INVALID','附件名无效、内容为空或超过 50 MiB');const id=randomUUID(),directory=path.join(storeDir,'attachments',id);fs.mkdirSync(directory,{recursive:true,mode:0o700});const file=path.join(directory,name);fs.writeFileSync(file,bytes,{flag:'wx',mode:0o600});store.insert('attachment',{id,ownerId:actor.id,name,size:bytes.length,mimeType:String(payload.type||'application/octet-stream'),path:file,sha256:createHash('sha256').update(bytes).digest('hex')});return {id,name,size:bytes.length,mimeType:payload.type||'application/octet-stream'};
     }
-    if(operation==='artifacts.open'){const item=store.get('artifact',payload.id);if(!item)throw agentError('ARTIFACT_NOT_FOUND','产物不存在',404);taskFor(item.taskId,actor);if(!meta.trustedUi||!extensions[operation])throw agentError('ARTIFACT_OPEN_UNAVAILABLE','此终端暂不支持打开产物',409);return extensions[operation]({...item},{...meta,actor});}
+    if(['artifacts.open','artifacts.preview'].includes(operation)){const item=store.get('artifact',payload.id);if(!item)throw agentError('ARTIFACT_NOT_FOUND','产物不存在',404);taskFor(item.taskId,actor);if(!meta.trustedUi||!extensions[operation])throw agentError('ARTIFACT_OPEN_UNAVAILABLE',operation==='artifacts.preview'?'此终端暂不支持预览产物':'此终端暂不支持打开产物',409);return extensions[operation]({...item},{...meta,actor});}
     if(['permissions.inspect','permissions.receipt','people.assignable'].includes(operation)||operation.startsWith('backups.'))throw agentError('INTERNAL_OPERATION','此操作仅供受控业务工具调用',403);
     if(extensions[operation]){if(operation.endsWith('.save')&&(!meta.trustedUi||actor.role!=='admin'))throw agentError('ADMIN_REQUIRED','仅管理员能修改公司配置',403);return extensions[operation](payload,{...meta,actor});}
     throw agentError('OPERATION_UNAVAILABLE','此操作尚未接入当前工作台',404);

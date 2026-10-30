@@ -1,5 +1,26 @@
 # Runtime pause checkpoint
 
+## Resumed implementation on 2026-10-29
+
+The user explicitly resumed the rebuild. The following changes are implemented,
+but remain untested until the single consolidated acceptance after code freeze:
+
+- Legacy schedule marker and origin now persist `sourceOwnerId:null`, the real
+  `adoptedBy`, `ownerMapping:'legacy-global-host-owner'`, and
+  `engineMapping:'company-default'`. Repeat import fills missing provenance on
+  retained markers without recreating deleted schedules or replacing adopters.
+- Natural-language schedule preparation uses the same scheduler validation as
+  commit. Only a persisted migration marker permits a retained 30-second rule;
+  ordinary newly-created schedules still require five-field cron.
+- Appended results tag issue source modules and resolve registered temporary job
+  blockers only for the same module and job ID with explicit successful evidence.
+  Unknown jobs, absent IDs, partial completion and unrelated blockers stay open.
+  Resolved entries retain their original history, evidence digest and timestamp.
+- `artifacts.preview` uses the same artifact existence/task access/trusted-UI
+  checks as `artifacts.open`, delegating byte/type validation to the private host.
+
+The older checklist below describes the pause baseline, not current acceptance.
+
 The user paused reconstruction to inspect an unfinished package. Do not interpret
 this checkpoint as release acceptance. No tests or protocol probes were run after
 the user's instruction to stop intermediate testing.

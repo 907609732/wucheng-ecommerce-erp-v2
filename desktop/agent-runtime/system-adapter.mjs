@@ -1,6 +1,5 @@
 import {randomUUID} from 'node:crypto';
 import {agentDigest,agentError} from './approval.mjs';
-import {nextOccurrence} from './scheduler.mjs';
 
 const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const text={type:'string',minLength:1,maxLength:20000};
@@ -43,7 +42,7 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
       if(capabilityId.startsWith('schedules.')){
         const old=input.id?store.get('schedule',input.id):null;if(input.id&&(!old||old.ownerId!==ctx.actor.id&&ctx.actor.role!=='admin'))throw agentError('SCHEDULE_DENIED','无权调整该定时任务',403);
         const value={...old,...input};if((value.scope?.modules||ctx.actor.modules).some(m=>m!=='system'&&!ctx.actor.modules.includes(m)))throw agentError('MODULE_DENIED','定时任务包含未授权模块',403);
-        const nextRunAt=capabilityId==='schedules.delete'?null:await nextOccurrence(value.cron,value.timezone,now());commitData={...commitData,expectedVersion:old?.version};changes=[{kind:'schedule',before:old?{goal:old.goal,cron:old.cron,timezone:old.timezone,enabled:old.enabled}:null,after:capabilityId==='schedules.delete'?null:{goal:value.goal,cron:value.cron,timezone:value.timezone,enabled:value.enabled!==false,nextRunAt}}];summary='请复核定时规则、时区和业务范围';
+        const prepared=capabilityId==='schedules.delete'?null:await getScheduler().prepare({...input,...(old?{version:old.version}:{})},ctx.actor),nextRunAt=prepared?.value.nextRunAt??null;commitData={...commitData,expectedVersion:old?.version};changes=[{kind:'schedule',before:old?{goal:old.goal,cron:old.cron,timezone:old.timezone,enabled:old.enabled}:null,after:capabilityId==='schedules.delete'?null:{goal:value.goal,cron:value.cron,timezone:value.timezone,enabled:value.enabled!==false,nextRunAt}}];summary='请复核定时规则、时区和业务范围';
       }else if(capabilityId==='tasks.assign'){
         const target=taskFor(input.taskId,ctx.actor),assignee=await resolveActor(input.assigneeId);
         if(!assignee||assignee.enabled===false||!assignee.canRunTasks||assignee.role==='viewer'||target.scope.modules.some(m=>m!=='system'&&!assignee.modules.includes(m)))throw agentError('ASSIGNEE_DENIED','接收人员未启用或没有所需模块权限',403);
