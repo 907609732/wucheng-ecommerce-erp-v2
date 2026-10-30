@@ -2,6 +2,7 @@ import {createServer} from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {ERP_TOOLS} from './engine-common.mjs';
 import {agentError} from './approval.mjs';
+import {createDeepSeekResponsesAdapter} from './deepseek-responses.mjs';
 
 const names=new Set(ERP_TOOLS.flatMap(name=>['mcp__wucheng_erp__'+name,'mcp__wucheng_erp.'+name]));
 const permitted=name=>typeof name==='string'&&names.has(name);
@@ -57,11 +58,13 @@ export async function openCompanyModelProxy({baseUrl,apiKey,fetchImpl=fetch,sign
     const supplied=String(req.headers.authorization||'').replace(/^Bearer /,'');
     if(req.method!=='POST'||req.url!=='/v1/responses'||req.headers.origin||supplied.length!==token.length||!timingSafeEqual(Buffer.from(supplied),Buffer.from(token))){res.writeHead(403);res.end('{}');return;}
     let sent=false,accounted=false;try{
-      const input=JSON.parse(await boundedBody(req,8*1024*1024));input.tools=filterCompanyTools(input.tools);if(input.tool_choice&&typeof input.tool_choice==='object'&&!permitted(input.tool_choice.name))throw agentError('MODEL_TOOL_DENIED','模型指定了未授权工具',403);
-      sent=true;const upstream=await fetchImpl(baseUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+apiKey},body:JSON.stringify(input),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(180000)]):AbortSignal.timeout(180000)});
+      const input=JSON.parse(await boundedBody(req,8*1024*1024));input.tools=filterCompanyTools(input.tools);const adapter=createDeepSeekResponsesAdapter(baseUrl,input);
+      if(!adapter&&input.tool_choice&&typeof input.tool_choice==='object'&&!permitted(input.tool_choice.name))throw agentError('MODEL_TOOL_DENIED','模型指定了未授权工具',403);
+      sent=true;const upstream=await fetchImpl(baseUrl.replace(/\/$/,'')+'/responses',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+apiKey},body:JSON.stringify(adapter?.request||input),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(180000)]):AbortSignal.timeout(180000)});
       const text=await boundedBody(upstream.body,16*1024*1024),type=upstream.headers.get('content-type')||'application/json';if(!upstream.ok)throw agentError('COMPANY_MODEL_HTTP_ERROR','公司模型服务返回 '+upstream.status,upstream.status===429?429:502);
       recordUsage(text,type);accounted=true;
-      verifyCompanyResponse(text,type);res.writeHead(200,{'content-type':type,'cache-control':'no-store'});res.end(text);
+      const response=adapter?adapter.restore(text,type):text;
+      verifyCompanyResponse(response,type);res.writeHead(200,{'content-type':type,'cache-control':'no-store'});res.end(response);
     }catch(error){if(sent&&!accounted)unknownUsage=true;res.writeHead(error.statusCode||502,{'content-type':'application/json'});res.end(JSON.stringify({error:{code:error.code||'MODEL_PROXY_ERROR',message:error.code?error.message:'公司模型连接失败'}}));}
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
