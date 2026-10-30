@@ -35,8 +35,11 @@ try{
     if(sessionStorage.getItem('fixture-role')==='viewer')f.role='viewer';
     const task=()=>({id:'task-1',goal:'整理云仓运费并核对赔付',status:f.status,engine:'codex',createdAt:'2026-10-28T10:00:00Z',updatedAt:'2026-10-28T10:10:00Z',scope:{label:'2026 年 9 月 · 测试账本'}});
     const detail=()=>({task:task(),events:[{sequence:1,type:'created',message:'已接收目标',createdAt:'2026-10-28T10:00:00Z'},{sequence:2,type:'progress',message:'已核对 3 份合成账单',createdAt:'2026-10-28T10:05:00Z'}],result:{id:'result-1',version:f.version,summary:'已准备 3 条运费记录。<img src=x onerror=alert(1)>',scope:{label:'2026 年 9 月 · 测试账本'},blocks:[{type:'table',title:'费用明细',columns:[{key:'month',label:'月份'},{key:'gross',label:'运费（元）',type:'money'},{key:'compensation',label:'赔付抵扣（元）',type:'money'},{key:'net',label:'应记费用（元）',type:'money'}],rows:[{month:'2026-09',gross:'1,500.00',compensation:'100.00',net:'1,400.00'}]},{type:'files',files:[{artifactId:'artifact-1',name:'运费核对结果.xlsx'}]}],changes:[{label:'9 月运费',before:'未导入',after:'1,400.00 元'}],evidence:[{title:'合成官方账单',artifactId:'source-1'}],issues:[{message:'合成测试样本，不是真实账本'}],...(f.status==='completed'?{receipt:{id:'receipt-1',message:'模拟服务回执已核对',state:'verified',receipts:[{id:'synthetic-receipt',state:'completed',idempotencyKey:'synthetic-business-key'}]}}:{})},review:{id:'review-'+f.version,resultVersion:f.version,revision:f.version,canApprove:f.canApprove}});
-    window.launcher={ready:async()=>({ready:true}),agentRequest:async({operation,payload})=>{
+    // Browser-only native bridge contract. These calls do not prove Electron views.
+    window.nativeDeskFixture={calls:[]};
+    window.launcher={ready:async()=>({ready:true}),open:async id=>{window.nativeDeskFixture.calls.push({action:'open',id});return{id};},hide:async()=>{window.nativeDeskFixture.calls.push({action:'hide'});},bounds:async value=>{window.nativeDeskFixture.calls.push({action:'bounds',value});},agentRequest:async({operation,payload})=>{
       f.calls.push({operation,payload});if(f.offline)throw new Error('公司主机暂不可用，已有任务仍保留');
+      if(operation==='skills.list')return{skills:[]};
       if(operation==='status')return{actor:{id:'person-1',label:'测试审核员',role:f.role,canCreateTasks:true,canRunTasks:f.role!=='viewer'},environment:{mode:'test',label:'测试账本'},engines:[{id:'codex',available:true,configured:true,supportedModels:['company-model','company-model-alternative']},{id:'hermes',available:true,configured:true}]};
       if(operation==='tasks.list')return{tasks:[task()]};
       if(operation==='tasks.get')return detail();
@@ -65,6 +68,10 @@ try{
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await page.goto(base+'/desktop/launcher/agent-index.html');
+  await page.locator('#view-business').waitFor({state:'visible'});
+  await page.waitForFunction(()=>window.nativeDeskFixture.calls.some(call=>call.action==='open'&&call.id==='overview'));
+  assert.equal(await page.locator('#desk-tab-overview').getAttribute('aria-selected'),'true','The default business workbench is retained');
+  await page.locator('.main-nav [data-view=home]').click();
   await page.getByRole('button',{name:'开始处理'}).waitFor({state:'visible'});
   await page.waitForFunction(()=>!document.querySelector('#submit-goal').disabled);
   await page.screenshot({path:path.join(evidence,'home-desktop.png'),fullPage:true});
@@ -145,6 +152,7 @@ try{
   await page.evaluate(()=>{window.fixture.offline=true;});await page.getByRole('button',{name:'刷新结果',exact:true}).click();await page.locator('#error-banner').waitFor({state:'visible'});assert.match(await page.locator('#error-message').textContent(),/主机暂不可用/);assert.equal(await page.locator('#result-version').textContent(),'版本 2','Last visible result preserved on network failure');
   await page.evaluate(()=>{window.fixture.offline=false;sessionStorage.setItem('fixture-role','viewer');});
   await page.reload();await page.waitForFunction(()=>document.querySelector('#actor').textContent==='测试审核员');
+  await page.locator('.main-nav [data-view=home]').click();await page.locator('#view-home').waitFor({state:'visible'});
   assert.equal(await page.locator('#submit-goal').isEnabled(),true,'Every authenticated employee may describe business work despite legacy role flags');
   await page.locator('#pending-tasks .task-row').first().click();await page.locator('#review-panel').waitFor({state:'visible'});assert.equal(await page.locator('#review-check').isEnabled(),true);assert.equal(await page.locator('#approve-result').isDisabled(),true,'Result acknowledgement is still required');await page.locator('#review-check').check();assert.equal(await page.locator('#approve-result').isEnabled(),true);
   await page.locator('.main-nav [data-view=settings]').click();await page.waitForFunction(()=>document.querySelector('#company-model').value==='company-model');assert.equal(await page.locator('#save-model').isEnabled(),true);assert.equal(await page.locator('#new-schedule').isEnabled(),true);assert.equal(await page.locator('#save-connection').isEnabled(),true);assert.equal(await page.locator('#add-member').count(),0);
