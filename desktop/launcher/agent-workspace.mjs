@@ -62,7 +62,7 @@ async function navigate(view, {focus=true,desk}={}) {
   if(view==='history')void refreshTasks().catch(showError);
   if(view==='settings')void loadSettings().catch(showError);
   if(view==='skills')void skillsWorkspace.show();
-  if(view==='business')await businessWorkspace.show(desk?{id:desk.id,route:desk.route}:{});
+  if(view==='business')await businessWorkspace.show(desk?{id:desk.id,route:desk.route,locator:desk.locator,sourceModule:desk.sourceModule}:{});
   return epoch===navigationEpoch&&state.view===view;
 }
 function showStatus(value) {

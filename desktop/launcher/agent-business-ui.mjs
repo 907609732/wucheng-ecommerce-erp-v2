@@ -6,13 +6,43 @@ const states={queued:'等待执行',running:'执行中',waiting_input:'需要补
 /** The surface is only a measured native-view slot. It never embeds an untrusted URL. */
 export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>false,loading,showError,notice,onNavigate,openTask,getSkillSelection=()=>({})}){
   const $=id=>document.getElementById(id),tabs=[...document.querySelectorAll('.business-tabs [data-desk]')];
-  let active='overview',visible=false,nativeVisible=false,assistantOpen=false,opening=false,failed=false,startingTask=false,syncingTask=false,epoch=0,measureEpoch=0,lastBounds='',currentTask=null,taskTimer=null,disposed=false;
+  let active='overview',visible=false,nativeVisible=false,assistantOpen=false,opening=false,failed=false,startingTask=false,syncingTask=false,epoch=0,measureEpoch=0,locationEpoch=0,lastBounds='',currentTask=null,taskTimer=null,disposed=false,sourceJourney=null;
   const surface=$('business-surface'),layout=$('business-layout'),assistant=$('business-assistant');
   const taskProgress=document.createElement('div');taskProgress.className='business-task-progress';$('business-task-state').after(taskProgress);
   const moduleName=id=>labels[id]||(id==='system'?'公共事务':id);
   const taskModules=selected=>[...new Set([active,'system',...(selected||[])])];
   try{const last=window.localStorage.getItem('wucheng.workbench.lastPrimary');if(primary.includes(last))active=last;}catch{}
   const drafts=new Map();
+  const sourceRetry=document.createElement('button');sourceRetry.type='button';sourceRetry.className='text-button';sourceRetry.textContent='重新定位';sourceRetry.hidden=true;$('business-source-note').append(sourceRetry);
+  function clearSource(){locationEpoch++;sourceJourney=null;$('business-source-note').hidden=true;sourceRetry.hidden=true;}
+  function sourceDescription(locator){return [locator.period&&'期间 '+locator.period,locator.basis&&'口径 '+locator.basis,locator.recordId&&'记录 '+locator.recordId,locator.sourceId&&'来源 '+locator.sourceId,locator.batchId&&'批次 '+locator.batchId].filter(Boolean).join(' · ');}
+  function renderSource(journey,message,status='pending'){
+    if(sourceJourney!==journey)return;
+    journey.status=status;
+    const locator=journey.locator,origin=journey.origin;$('business-source-note').hidden=false;$('business-source-label').textContent=[message,sourceDescription(locator)].filter(Boolean).join(' · ');
+    $('business-source-back').hidden=!origin;$('business-source-back').textContent=origin?.kind==='task'?'返回 AI 结果':origin?'返回'+labels[origin.module]+'工作台':'返回';
+    sourceRetry.hidden=!['blocked','not-found','error'].includes(status);sourceRetry.disabled=status==='pending';
+  }
+  async function locateSource(journey=sourceJourney){
+    if(!journey||journey!==sourceJourney||!visible||active!==journey.locator.module||!nativeVisible)return;
+    const operation=++locationEpoch,mine=epoch;renderSource(journey,'已打开'+labels[active]+'工作台，正在核对来源定位');sourceRetry.disabled=true;
+    try{
+      if(typeof launcher?.businessSurface!=='function'){renderSource(journey,'已打开'+labels[active]+'工作台，明细定位暂不支持','unsupported');return;}
+      const response=await launcher.businessSurface({module:journey.locator.module,action:'navigate',locator:journey.locator});
+      if(operation!==locationEpoch||mine!==epoch||journey!==sourceJourney||!visible)return;
+      if(response?.status==='located')renderSource(journey,'已定位来源明细','located');
+      else if(response?.status==='navigated')renderSource(journey,'已切换到来源工作面','navigated');
+      else if(response?.status==='unsupported')renderSource(journey,response.openedOnly===false?'目标工作台尚未打开，来源定位未执行':'已打开'+labels[active]+'工作台，明细定位暂不支持','unsupported');
+      else if(response?.status==='blocked')renderSource(journey,response.reason==='save-in-progress'?'目标工作台正在保存，来源定位未执行；完成后可重新定位':'目标工作台有未保存内容，已保留输入；请先继续填写或保存，再重新定位','blocked');
+      else if(response?.status==='not-found')renderSource(journey,'未找到目标来源记录，未定位到其他记录','not-found');
+      else renderSource(journey,'已打开工作台，尚未核实明细定位','error');
+    }catch(error){if(operation===locationEpoch&&mine===epoch&&journey===sourceJourney){renderSource(journey,'来源定位未完成：'+String(error.message||error),'error');}}
+  }
+  async function returnToSource(){
+    const journey=sourceJourney,origin=journey?.origin;if(!origin)return;
+    clearSource();if(origin.kind==='task'){await openTask(origin.taskId);return;}
+    assistantOpen=origin.assistantOpen;await openDesk(origin.module);notice('已返回保留的'+labels[origin.module]+'工作台实例。');
+  }
   function changeActive(id){if(id===active)return;drafts.set(active,{goal:$('business-goal').value,range:$('business-range').value});active=id;const saved=drafts.get(id);$('business-goal').value=saved?.goal||'';$('business-range').value=saved?.range||'';if(primary.includes(id))try{window.localStorage.setItem('wucheng.workbench.lastPrimary',id);}catch{}}
   function isNarrow(){return window.innerWidth<1360||layout.getBoundingClientRect().width-376<760;}
   function updateLabels(){
@@ -38,8 +68,9 @@ export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>
       const mine=epoch,result=await launcher.open(active);if(mine!==epoch||!visible||surface.hidden)return;if(result?.cancelled)return;nativeVisible=true;
     }
   }
-  async function openDesk(id,route){
+  async function openDesk(id,route,{preserveSource=false}={}){
     if(!Object.hasOwn(labels,id))return;
+    if(!preserveSource)clearSource();
     if(!primary.includes(id)){
       const mine=++epoch;opening=true;$('business-more').open=false;
       try{await hideNative();if(mine!==epoch||!visible)return;if(typeof launcher?.open!=='function')throw Error('当前窗口没有桌面业务入口，请使用完整桌面版');const result=await launcher.open(id,route);if(mine!==epoch||!visible||result?.cancelled)return;if(result?.id===id){changeActive(id);nativeVisible=true;updateLabels();}else notice('已请求打开'+labels[id]+'，沿用其现有桌面业务窗口。');}catch(error){if(mine===epoch)showError(error);}finally{if(mine===epoch){opening=false;void measure().catch(showError);}}return;
@@ -50,14 +81,21 @@ export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>
       await hideNative();if(mine!==epoch||!visible)return;changeActive(id);updateLabels();$('business-more').open=false;$('business-failure').hidden=true;loading($('business-loading'),'正在打开'+labels[id]+'工作台','content');
       if(typeof launcher?.open!=='function'||typeof launcher?.bounds!=='function')throw Error('当前窗口没有业务内嵌能力，请使用完整桌面测试版。');
       const rect=surface.getBoundingClientRect();if(rect.width>0&&rect.height>0)await launcher.bounds({x:rect.x,y:rect.y,width:rect.width,height:rect.height});
-      if(mine!==epoch||!visible)return;
-      if(surface.hidden||document.hidden||rect.width<=0||rect.height<=0)return;
+      if(mine!==epoch||!visible)return {cancelled:true};
+      if(surface.hidden||document.hidden||rect.width<=0||rect.height<=0)return {cancelled:true};
       const result=await launcher.open(id,route);if(mine!==epoch||!visible)return;if(result?.cancelled){$('business-loading').replaceChildren();return;}
-      nativeVisible=true;$('business-loading').replaceChildren();
+      nativeVisible=true;$('business-loading').replaceChildren();return {opened:true,id};
     }catch(error){if(mine===epoch){failed=true;$('business-loading').replaceChildren();$('business-failure-message').textContent=String(error.message||error);$('business-failure').hidden=false;showError(error);}}
     finally{if(mine===epoch){opening=false;void measure().catch(showError);}}
   }
-  async function show({id=active,route}={}){visible=true;if(route)assistantOpen=false;updateLabels();await openDesk(id,route);if(visible)startTaskPolling();}
+  async function show({id=active,route,locator,sourceModule}={}){
+    if(locator&&(!primary.includes(id)||locator.module!==id)){showError(Error('来源定位与目标工作台不一致，未执行导航。'));return;}
+    if(locator){const origin=primary.includes(sourceModule)?{kind:'business',module:sourceModule,assistantOpen}:null;sourceJourney={locator:structuredClone(locator),origin};renderSource(sourceJourney,'正在打开'+labels[id]+'来源工作台');}
+    visible=true;if(route||locator)assistantOpen=false;updateLabels();const journey=sourceJourney;
+    const result=await openDesk(id,locator?undefined:route,{preserveSource:!!locator||!!journey&&id===active&&!route});
+    if(journey&&journey===sourceJourney&&visible&&journey.locator.module===active&&(locator||journey.status==='pending')){if(result?.opened)await locateSource(journey);else renderSource(journey,'目标工作台尚未打开，来源定位未执行','error');}
+    if(visible)startTaskPolling();
+  }
   async function leave(){visible=false;const mine=++epoch;opening=false;clearInterval(taskTimer);taskTimer=null;await launcher?.hide?.();if(mine===epoch){nativeVisible=false;lastBounds='';}}
   async function toggleAssistant(value){const mine=epoch;assistantOpen=value;updateLabels();if(value&&isNarrow())await hideNative();else await measure();if(value&&visible&&mine===epoch&&assistantOpen)$('business-goal').focus();}
   function summary(detail){
@@ -88,7 +126,7 @@ export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>
   $('business-ai-toggle').addEventListener('click',()=>void toggleAssistant(!assistantOpen).catch(showError));$('business-ai-close').addEventListener('click',()=>void toggleAssistant(false).catch(showError));$('business-retry').addEventListener('click',()=>void openDesk(active));$('business-ai-form').addEventListener('submit',startTask);$('business-open-task').addEventListener('click',()=>currentTask?.task?.id&&void openTask(currentTask.task.id));
   $('business-range').addEventListener('input',updateLabels);$('business-skill-choice').addEventListener('skill-scope-change',updateLabels);$('business-skill-choice').addEventListener('change',updateLabels);
   $('business-more').addEventListener('toggle',()=>{if($('business-more').open)void hideNative().catch(showError);else if(visible&&!opening)void measure().catch(showError);});
-  $('task-business-back').addEventListener('click',()=>void onNavigate('business'));$('business-source-back').addEventListener('click',()=>currentTask?.task?.id&&void openTask(currentTask.task.id));
+  $('task-business-back').addEventListener('click',()=>void onNavigate('business'));$('business-source-back').addEventListener('click',()=>void returnToSource().catch(showError));sourceRetry.addEventListener('click',()=>void locateSource());
   const unsubscribe=launcher?.onNavigate?.(value=>{if(!value?.id)return;if(Object.hasOwn(labels,value.id))void onNavigate('business',{desk:value});else if(value.id==='home')void onNavigate('business',{desk:{id:'overview'}});else if(['settings','logs'].includes(value.id))void onNavigate('settings');});
   const observer=new ResizeObserver(()=>void measure().catch(showError));observer.observe(layout);observer.observe(document.querySelector('.app-header'));document.addEventListener('visibilitychange',()=>{if(visible)void measure().catch(showError);});
   return {show,leave,measure,suspend:hideNative,hasReturn:()=>!!currentTask?.task,acceptTask(detail){if(detail?.task?.id===currentTask?.task?.id)summary(detail);},dispose(){disposed=true;observer.disconnect();clearInterval(taskTimer);unsubscribe?.();}};

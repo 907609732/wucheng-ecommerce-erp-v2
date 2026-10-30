@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('launcher', {
   open: invoke('modules:open'), offline: invoke('modules:offline'), offlineInstall: invoke('modules:offline-install'),
   offlinePlan:invoke('modules:offline-plan'),
   offlineClose: invoke('modules:offline-close'), openData: invoke('modules:open-data'),
-  hide: invoke('desks:hide'), bounds: invoke('desks:bounds'), services: invoke('desks:status'), stop: invoke('desks:stop'),
+  hide: invoke('desks:hide'), bounds: invoke('desks:bounds'), businessSurface: invoke('desks:surface'), services: invoke('desks:status'), stop: invoke('desks:stop'),
   onProgress: on('modules:progress'), onNavigate: on('desks:navigate'), onMessage: on('modules:message')
   ,checkUpdate:invoke('launcher:update-check'),installUpdate:invoke('launcher:update-install'),onUpdate:on('launcher:update')
 });
