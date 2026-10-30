@@ -46,12 +46,12 @@ function syncActions() {
   $('business-start-task').disabled=!readyForTasks();
 }
 async function navigate(view, {focus=true,desk}={}) {
-  if(!['business','skills','home','task','history','settings'].includes(view))return;
-  if(state.view!==view&&!resultTools.leave())return;
-  if(state.view==='skills'&&state.view!==view&&!skillsWorkspace.leave())return;
+  if(!['business','skills','home','task','history','settings'].includes(view))return false;
+  if(state.view!==view&&!resultTools.leave())return false;
+  if(state.view==='skills'&&state.view!==view&&!skillsWorkspace.leave())return false;
   const epoch=++navigationEpoch;
   if(view!=='business')await businessWorkspace.leave();
-  if(epoch!==navigationEpoch)return;
+  if(epoch!==navigationEpoch)return false;
   state.view=view;
   document.body.classList.toggle('business-mode',view==='business');
   for(const section of document.querySelectorAll('main>.view'))section.hidden=section.id!=='view-'+view;
@@ -63,6 +63,7 @@ async function navigate(view, {focus=true,desk}={}) {
   if(view==='settings')void loadSettings().catch(showError);
   if(view==='skills')void skillsWorkspace.show();
   if(view==='business')await businessWorkspace.show(desk?{id:desk.id,route:desk.route}:{});
+  return epoch===navigationEpoch&&state.view===view;
 }
 function showStatus(value) {
   state.status=value;state.connected=true;
@@ -136,11 +137,13 @@ async function createTask(event) {
 }
 async function openTask(id) {
   if(!resultTools.leave())return;
+  if(!await navigate('task'))return;
+  const viewEpoch=navigationEpoch;
   const epoch=++state.taskEpoch;state.taskId=id;state.detail=null;state.resultSelection=null;state.events=[];state.reviewKey=null;state.displayedBinding=null;state.resultRenderKey=null;state.eventRenderKey=null;state.eventsPending=false;state.inputAttachments=[];renderAttachments(true);$('result-history-label').hidden=true;$('historical-result-note').hidden=true;
   $('task-title').textContent='正在读取任务';$('task-scope').replaceChildren();$('task-events').replaceChildren();$('task-actions').replaceChildren();$('review-panel').hidden=true;$('task-input').value='';
-  loading($('result-content'),'正在读取结果','content');loading($('task-loading'),'正在读取执行动态');await navigate('task');
-  try{await readTaskPages(id,epoch,{replaceEvents:true});if(epoch!==state.taskEpoch)return;$('task-title').focus({preventScroll:true});}
-  catch(error){if(epoch===state.taskEpoch){$('task-loading').replaceChildren();$('result-content').replaceChildren(make('p','暂时无法读取此任务。请刷新结果重试。','empty'));showError(error);}}
+  loading($('result-content'),'正在读取结果','content');loading($('task-loading'),'正在读取执行动态');
+  try{await readTaskPages(id,epoch,{replaceEvents:true});if(epoch!==state.taskEpoch||viewEpoch!==navigationEpoch||state.view!=='task')return;$('task-title').focus({preventScroll:true});}
+  catch(error){if(epoch===state.taskEpoch&&viewEpoch===navigationEpoch&&state.view==='task'){$('task-loading').replaceChildren();$('result-content').replaceChildren(make('p','暂时无法读取此任务。请刷新结果重试。','empty'));showError(error);}}
 }
 function eventMessage(event) {
   const data=event.data || event.payload || {};
@@ -364,13 +367,14 @@ function validateEngineModel(engine,model) {
   const models=engineCatalog()[engine]?.supportedModels;
   if((engine==='codex' || Array.isArray(models)) && !array(models).includes(model))throw new Error('请选择该引擎兼容清单中的公司模型；如清单尚未载入，请刷新设置。');
 }
+function apiOrigin(value){try{return new URL(value).origin;}catch{return null;}}
 function installProviderPresets(){
   const row=make('div','','company-provider-row'),label=make('label','服务预设'),select=make('select');select.id='company-provider-preset';
   for(const [value,text]of [['custom','自定义服务'],['deepseek','DeepSeek（Hermes）'],['openai','OpenAI 官方 / 兼容接口']])select.append(Object.assign(make('option',text),{value}));
   label.append(select);const apply=actionButton('填入服务参数',()=>{
     if(select.value==='custom'){notice('可直接填写公司 API 地址与模型名称。已有密钥留空即可保留。');return;}
-    if(select.value==='deepseek'){$('default-engine').value='hermes';renderModelChoice('deepseek-flash');$('company-base-url').value='https://api.deepseek.com';notice('已填入 DeepSeek 参数。密钥留空保留原值，点击保存公司配置后生效。');}
-    else{$('company-base-url').value='https://api.openai.com/v1';if($('company-model').value.startsWith('deepseek'))renderModelChoice('');notice('已填入 OpenAI 默认地址。请选择实际开通的模型；第三方兼容服务请改为它的接口地址。已有密钥不会更换。');}
+    if(select.value==='deepseek'){$('default-engine').value='hermes';renderModelChoice('deepseek-flash');$('company-base-url').value='https://api.deepseek.com';const changed=state.settings?.company?.hasKey&&apiOrigin(state.settings.company.baseUrl)!=='https://api.deepseek.com';notice(changed?'已填入 DeepSeek 参数。请在本机填写 DeepSeek 密钥后保存；原服务密钥不会自动转用于新服务。':'已填入 DeepSeek 参数。同一服务的密钥留空可保留，点击保存公司配置后生效。');}
+    else{$('company-base-url').value='https://api.openai.com/v1';if($('company-model').value.startsWith('deepseek'))renderModelChoice('');notice('已填入 OpenAI 默认地址。请选择实际开通的模型；第三方兼容服务请改为它的接口地址。切换服务需填写该服务的密钥，原密钥不会自动转用。');}
   });row.append(label,apply);$('model-form').before(row);
 }
 function renderSettings(settings) {
@@ -385,7 +389,11 @@ async function saveModel(event) {
   event.preventDefault();if(!readyForTasks())return;
   const company={baseUrl:$('company-base-url').value.trim(),model:$('company-model').value.trim(),budgetLimit:$('company-budget').value===''?0:Number($('company-budget').value)};
   const key=$('company-api-key').value.trim();if(key)company.apiKey=key;
-  try{await run('settings',async()=>{validateEngineModel($('default-engine').value,company.model);const response=await api.request('settings.save',{defaultEngine:$('default-engine').value,company,...(state.settings?.version!=null?{version:state.settings.version}:{})});renderSettings(response.settings || response);notice('公司 AI 配置已保存。');},[$('save-model')]);}
+  try{await run('settings',async()=>{
+    const previousOrigin=apiOrigin(state.settings?.company?.baseUrl),nextOrigin=apiOrigin(company.baseUrl);
+    if(state.settings?.company?.hasKey&&nextOrigin&&previousOrigin!==nextOrigin&&!key)throw new Error('API 服务已变化，请在本机填写该服务的密钥后再保存。现有配置未修改，编辑内容已保留。');
+    validateEngineModel($('default-engine').value,company.model);const response=await api.request('settings.save',{defaultEngine:$('default-engine').value,company,...(state.settings?.version!=null?{version:state.settings.version}:{})});renderSettings(response.settings || response);notice('公司 AI 配置已保存。');
+  },[$('save-model')]);}
   finally{$('company-api-key').value='';}
 }
 function renderConnection(response) {
