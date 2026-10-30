@@ -24,20 +24,27 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
   if(!q.headers['x-workbench-actor']&&!q.headers['x-workbench-actor-signature'])return next();
   try{
    if(!loopback.has(q.socket.remoteAddress)||! /^(?:127\.0\.0\.1|localhost):\d+$/.test(q.headers.host||''))throw Error('工作台代理必须通过本机回环调用');
-   const actor=verifyWorkbenchActor(q.headers,key,{module,method:q.method,path:q.originalUrl});q.workbenchActor=actor;
+   const actor=verifyWorkbenchActor(q.headers,key,{module,method:q.method,path:q.originalUrl});
+   const localDesktop=actor.localDesktop===true;
+   if(localDesktop){
+    const expectedOrigin='http://'+q.headers.host,hostPort=Number(q.headers.host.split(':').at(-1));
+    if(actor.channel!=='ui'||!actor.id.startsWith('windows:')||actor.id.length<=8||actor.uiOrigin!==expectedOrigin||hostPort!==q.socket.localPort||(q.headers.origin!==undefined&&q.headers.origin!==expectedOrigin))throw Object.assign(Error('本机工作台身份或页面来源无效'),{status:403});
+   }
+   q.workbenchActor=actor;
    if(!safe.has(q.method))r.once('finish',()=>{try{service.onAudit?.({actor,method:q.method,path:q.path,status:r.statusCode});}catch{}});
    r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','same-origin');r.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'self'");
-   const ui='/apps/'+module+'/',api='/apps/'+module;
+   const ui=localDesktop?'/':'/apps/'+module+'/',api=localDesktop?'':'/apps/'+module;
    // Never trust unbound forwarded prefix/header values.
-   q.workbench={module,uiPrefix:ui,apiBase:api};
+   q.workbench={module,uiPrefix:ui,apiBase:api,localDesktop};
    if(q.path.startsWith('/api/')){
     const found=patterns.find(p=>p.operation.method===(q.method==='HEAD'?'GET':q.method)&&p.re.test(q.path));
-    const coordinator=q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.channel==='ui';
+    const coordinator=!localDesktop&&q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.channel==='ui';
+    if(localDesktop&&localOnly.test(q.path))throw Object.assign(Error('本机业务页面不能执行主机维护操作'),{status:403});
     if(!found||!found.operation.remote&&!coordinator)throw Object.assign(Error('此接口仅允许主机本地管理'),{status:403});
     if(found.operation.uiOnly&&actor.channel!=='ui')throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
    }else if(!safe.has(q.method))throw Object.assign(Error('不允许此页面操作'),{status:403});
    const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/agent/')||upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api}));
-   const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(path.extname(file)==='.html'){
+   const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(!localDesktop&&path.extname(file)==='.html'){
     let html=fs.readFileSync(file,'utf8');html=html.replace(/(<(?:script|link|img|a|iframe|form)\b[^>]*?\b(?:src|href|action)=['"])\/(?!\/)/gi,(_,start)=>start+ui);html=html.replace(/<head([^>]*)>/i,'<head$1><script src="'+ui+'workbench-base.js"></script>');r.type('html');return r.send(html);
    }return sendFile(file,...args);};
    // express.static uses sendFile internally, so serve protected HTML explicitly.

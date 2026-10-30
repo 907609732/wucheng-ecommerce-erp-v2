@@ -69,7 +69,7 @@ async function refreshPersonnelSession(force=false){
 }
 function applyPersonnelUI(){
  const role=selectedSalesRole(boot.personnel),selected=!!role;document.body.classList.toggle('selecting-personnel',!selected);document.body.dataset.personnel=role||'';
- $('#personnel-status').hidden=!selected;$('#personnel-name').textContent=role?identityNames[role]+' · 销售台':'';
+ $('#personnel-switch').hidden=role==='member';$('#personnel-status').hidden=!selected;$('#personnel-name').textContent=role?identityNames[role]+' · 销售台':'';
  document.querySelectorAll('[data-nav]').forEach(button=>button.hidden=!selected||!canOpenSalesView(boot.personnel,button.dataset.nav));
  document.querySelectorAll('[data-settings-view]').forEach(link=>link.hidden=!selected||!canOpenSalesView(boot.personnel,link.dataset.settingsView));
  refreshPendingLink();
@@ -185,7 +185,7 @@ $('#shop').onchange=()=>{state.shop=$('#shop').value;if(state.view==='reconcilia
 window.addEventListener('hashchange',()=>{readRoute();render();});
 window.addEventListener('focus',()=>{if(boot)void refreshPersonnelSession();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&boot)void refreshPersonnelSession();});
-$('#personnel-switch').onclick=()=>{boot.personnel={...boot.personnel,role:null,selected:false};showPersonnelPicker();};
+$('#personnel-switch').onclick=()=>{if(selectedSalesRole(boot?.personnel)==='member')return;boot.personnel={...boot.personnel,role:null,selected:false};showPersonnelPicker();};
 try{
  boot=await api('/api/bootstrap');
  const initialURL=new URL(location.href),requestedRole=salesIdentityFromURL(initialURL.href);
