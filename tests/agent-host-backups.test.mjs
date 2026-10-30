@@ -25,11 +25,13 @@ test('Beta company identity binds the existing gateway dataset and fails closed 
 
 test('system backup uses actual host company identity and adapter HTTP binding, not stale capability revision',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-backup-composition-')),previous=process.env.LOCALAPPDATA;process.env.LOCALAPPDATA=root;
+  let server,host;
+  t.after(async()=>{try{await host?.close();}finally{try{if(server?.listening){server.closeIdleConnections();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}}finally{if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(root,{recursive:true,force:true});}}});
   const paths=agentBetaPaths({localAppData:root});prepareAgentProfile(paths);const registry=JSON.parse(fs.readFileSync(paths.registryFile,'utf8')),dataDir=registry.purchase.dataDir;fs.mkdirSync(path.join(dataDir,'attachments'),{recursive:true});
   const db=new DatabaseSync(path.join(dataDir,'purchases.sqlite'));db.exec('CREATE TABLE orders(id INTEGER PRIMARY KEY, amount_cents INTEGER); INSERT INTO orders VALUES(1,12345)');db.close();fs.writeFileSync(path.join(dataDir,'attachments','sample.txt'),'synthetic source');
   const moduleKey=provisionWorkbenchKey(dataDir);fs.writeFileSync(path.join(dataDir,'.integration-key'),randomBytes(32).toString('hex'));
   const moduleDataSetId=randomUUID(),revision=createHash('sha256').update(fs.readFileSync(path.join(dataDir,'purchases.sqlite'))).digest('hex');let bindings=0;
-  const server=http.createServer((req,res)=>{verifyWorkbenchActor(req.headers,moduleKey,{module:'purchase',method:req.method,path:req.url});assert.equal(req.url,'/api/integration/v1/agent/binding');bindings++;res.setHeader('content-type','application/json');res.end(JSON.stringify({dataSetId:moduleDataSetId,revision}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  server=http.createServer((req,res)=>{verifyWorkbenchActor(req.headers,moduleKey,{module:'purchase',method:req.method,path:req.url});assert.equal(req.url,'/api/integration/v1/agent/binding');bindings++;res.setHeader('content-type','application/json');res.end(JSON.stringify({dataSetId:moduleDataSetId,revision}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const load=file=>import(pathToFileURL(file).href);
   const [{createAgentRuntime},{createAgentBackups},{createPurchaseAgentAdapter}]=await Promise.all([
     load(process.env.AGENT_RUNTIME_TEST_ENTRY||path.resolve('desktop/agent-runtime/index.mjs')),
@@ -37,10 +39,9 @@ test('system backup uses actual host company identity and adapter HTTP binding, 
     load(process.env.AGENT_PURCHASE_ADAPTER_TEST_ENTRY||path.resolve('apps/purchase/lib/agent-adapter.mjs'))
   ]);
   const services={config:id=>registry[id],ensure:async()=>({url:'http://127.0.0.1:'+server.address().port,dataSetId:'stale-cached-dataset',revision:'stale-cached-revision'})};
-  const host=await createAgentHost({paths,services,principal:{id:'windows:S-1-5-21-1-1-1-1001',login:'synthetic-owner'},safeStorage:{isEncryptionAvailable:()=>false},startBridge:false,loadDependencies:async({transport})=>({runtimeFactory:options=>createAgentRuntime({...options,autoStart:false}),adapters:[createPurchaseAgentAdapter({transport})],engines:{},createBackups:createAgentBackups})});
-  t.after(async()=>{await host.close();server.closeIdleConnections();await new Promise(resolve=>server.close(resolve));if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(root,{recursive:true,force:true});});
+  host=await createAgentHost({paths,services,principal:{id:'windows:S-1-5-21-1-1-1-1001',login:'synthetic-owner'},safeStorage:{isEncryptionAvailable:()=>false},startBridge:false,loadDependencies:async({transport})=>({runtimeFactory:options=>createAgentRuntime({...options,autoStart:false}),adapters:[createPurchaseAgentAdapter({transport})],engines:{},createBackups:createAgentBackups})});
   const meta={actor:host.identity.localActor(),trustedUi:true};
-  assert.throws(()=>host.request('backups.prepare',{modules:['purchase']},meta),{code:'INTERNAL_OPERATION'});
+  await assert.rejects(()=>host.request('backups.prepare',{modules:['purchase']},meta),{code:'INTERNAL_OPERATION'});
   const {task}=await host.request('tasks.create',{goal:'备份测试采购账本',scope:{modules:['system','purchase']}},meta);host.runtime.store.update('task',task.id,{status:'running'});
   const result=await host.runtime.invokeTool(task.id,'erp_prepare',{module:'system',capabilityId:'backups.create',input:{modules:['purchase']}});
   assert.equal(result.requiresReview,false);assert(bindings>=2);
