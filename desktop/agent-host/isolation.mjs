@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {WORKBENCH_MODULES} from '../workbench/actor.mjs';
 import {atomicJson,hostError,inside} from './common.mjs';
+import {withBetaServiceStartFence} from './data-maintenance.mjs';
 
 function noLinks(target){let current=path.parse(target).root;for(const part of target.slice(current.length).split(path.sep).filter(Boolean)){current=path.join(current,part);if(fs.existsSync(current)&&fs.lstatSync(current).isSymbolicLink())throw hostError('BETA_PATH_REDIRECTED','测试目录不能使用链接或目录重定向',409);}}
 export function agentBetaPaths({localAppData=process.env.LOCALAPPDATA,root=process.env.LINGTU_AGENT_BETA_ROOT}={}){
@@ -46,5 +47,10 @@ export function guardAgentServices(services,paths){
     if(!fs.existsSync(database))throw hostError('TEST_LEDGER_NOT_READY','测试账本尚未准备，请先完成副本迁移',409);
     noLinks(database);
   };
-  services.ensure=id=>{verify(id);return ensure(id);};services.start=id=>{verify(id);return start(id);};return services;
+  // Keep the fence until asynchronous startup has actually finished. Queue local
+  // starts so two modules do not mistake each other's startup for maintenance.
+  let startTail=Promise.resolve();
+  services.ensure=id=>{verify(id);return ensure(id);};
+  services.start=id=>{const pending=startTail.then(()=>withBetaServiceStartFence(paths,async()=>{verify(id);return start(id);}));startTail=pending.catch(()=>{});return pending;};
+  return services;
 }
