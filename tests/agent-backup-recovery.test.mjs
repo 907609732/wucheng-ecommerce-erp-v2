@@ -20,6 +20,7 @@ function fixture(t){
   const attachmentPath=path.join(storeDir,'attachments',attachmentId,'original.txt'),artifactPath=path.join(storeDir,'tasks',taskId,'generated.txt');
   fs.mkdirSync(path.dirname(attachmentPath),{recursive:true});fs.mkdirSync(path.dirname(artifactPath),{recursive:true});fs.writeFileSync(attachmentPath,'original source');fs.writeFileSync(artifactPath,'generated proof');
   store.insert('task',{id:taskId,ownerId:'owner',status:'running',review:{id:'old-review'},engineSession:{sessionId:'private-session'},scope:{modules:['purchase']}});
+  store.event(taskId,'fixture.audit',{message:'preserved audit event',engineSession:{sessionId:'private-event-session'}});
   store.insert('result',{id:'result-1',ownerId:'owner',taskId,prepared:[{commitData:{old:'draft'}}]});
   store.insert('attachment',{id:attachmentId,ownerId:'owner',name:'original.txt',path:attachmentPath,sha256:hash('original source')});
   store.insert('artifact',{id:artifactId,ownerId:'owner',taskId,name:'download name.txt',path:artifactPath,sha256:hash('generated proof')});
@@ -56,6 +57,15 @@ test('backup recovery rejects path parameters, changed manifests and unregistere
   fs.appendFileSync(path.join(directory,'backup.json'),'\n');
   await assert.rejects(()=>f.hooks['backups.restore.commit']({commitData:prepared.commitData},{...f.ctx,capabilityId:'backups.restore-copy',approval:{payload:'trusted-runtime-proof'},idempotencyKey:hash('changed-manifest')}),{code:'BACKUP_MANIFEST_CHANGED'});
   fs.writeFileSync(path.join(directory,'unexpected.txt'),'extra');await assert.rejects(()=>f.hooks['backups.verify']({backupId},f.ctx),{code:'BACKUP_EXTRA_FILE'});
+});
+
+test('verification of an older WAL-mode snapshot does not create sidecars inside the backup',async t=>{
+  const f=fixture(t),backup=await f.hooks['backups.prepare']({modules:['purchase']},f.ctx),backupId=backup.evidence[0].id,directory=path.join(f.root,'backups','backup-'+backupId),manifest=path.join(directory,'backup.json'),report=JSON.parse(fs.readFileSync(manifest,'utf8')),snapshot=path.join(directory,'shared','agent-tasks.sqlite');
+  for(const suffix of ['-wal','-shm','-journal'])assert(!fs.existsSync(snapshot+suffix));
+  const legacy=new DatabaseSync(snapshot);legacy.prepare('PRAGMA journal_mode=WAL').get();legacy.close();
+  const sha=hash(fs.readFileSync(snapshot));report.files.find(item=>item.kind==='task-snapshot').sha256=sha;fs.writeFileSync(manifest,JSON.stringify(report,null,2));
+  await f.hooks['backups.verify']({backupId},f.ctx);assert.equal(hash(fs.readFileSync(snapshot)),sha);
+  for(const suffix of ['-wal','-shm','-journal'])assert(!fs.existsSync(snapshot+suffix));
 });
 
 test('authenticated employees can back up and restore regardless of obsolete role labels or absent policy',async t=>{
