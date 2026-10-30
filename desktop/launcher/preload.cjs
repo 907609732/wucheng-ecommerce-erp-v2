@@ -15,7 +15,6 @@ contextBridge.exposeInMainWorld('launcher', {
   migrationRecover:invoke('migration:recover'),
   migrationList:invoke('migration:list'),
   releaseSource:invoke('migration:release-source'),
-  permissions:invoke('permissions:get'),savePermissions:invoke('permissions:save'),
   list: invoke('modules:list'), refresh: invoke('modules:refresh'), plan: invoke('modules:plan'),
   install: invoke('modules:install'), cancel: invoke('modules:cancel'), uninstall: invoke('modules:uninstall'),
   open: invoke('modules:open'), offline: invoke('modules:offline'), offlineInstall: invoke('modules:offline-install'),

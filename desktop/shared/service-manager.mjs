@@ -137,7 +137,7 @@ export class ServiceManager{
         record={schemaVersion:1,token:randomUUID(),ownerPid:process.pid,childPid:null,module:id,fingerprint,createdAt:new Date().toISOString()};
         writeStartLock(lock,record);
         try{
-          if(this.agentManaged)env.LINGTU_AGENT_MANAGED='1';
+          if(this.agentManaged){env.LINGTU_AGENT_MANAGED='1';delete env.LINGTU_WORKBENCH_POLICY_FILE;}
           const child=spawn(executable,args,{...(!native?{cwd:c.root}:{}),detached:true,windowsHide:true,shell:false,stdio:native?'ignore':['ignore',log,log],env});
           const spawned=new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});spawned.catch(()=>{});
           childExited=new Promise(resolve=>child.once('exit',(code,signal)=>{exitInfo={code,signal};resolve();}));

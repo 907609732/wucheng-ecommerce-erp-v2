@@ -241,8 +241,7 @@ function betaTailnetHost(){const ts=tailscaleHost(),url=new URL(ts.origin);url.p
 const betaServeOptions=()=>({httpsPort:9443,targetPort:agentPaths.gatewayPort});
 async function ensureGateway(){
   requireHost();if(agentGateway)return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
-  const ts=betaTailnetHost(),policyFile=path.join(profile,'workbench-server','access-policy.json');
-  if(!fs.existsSync(policyFile)){fs.mkdirSync(path.dirname(policyFile),{recursive:true});fs.writeFileSync(policyFile,JSON.stringify({schemaVersion:1,users:{[ts.owner]:{role:'admin',modules:MODULE_IDS,canRunTasks:true,enabled:true}}}),{flag:'wx',mode:0o600});}
+  const ts=betaTailnetHost();
   const {runWorkbenchServer}=await import('../workbench/server.mjs'),host=await getAgentHost();
   agentGateway=await runWorkbenchServer({storeDir:path.join(profile,'workbench-server'),publicOrigin:ts.origin,registryFile:services.registryFile,port:agentPaths.gatewayPort,agentPaths,agentRuntime:host.runtime});return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
 }
@@ -275,7 +274,7 @@ async function list(){
 async function refresh(){throw Error('测试版使用本包冻结组件，不连接稳定版组件目录');}
 if (acquired) app.whenReady().then(async () => {
   app.setAppUserModelId(agentPaths.appId);
-  hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host'),policyFile:path.join(profile,'workbench-server','access-policy.json')});
+  hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host')});
   let activation,activationError;
   if(app.isPackaged){
     reportPreparation({phase:'preparing'});
@@ -286,7 +285,7 @@ if (acquired) app.whenReady().then(async () => {
       reportPreparation({phase:'ready'});
     }catch(error){activationError=error;recoveryError='测试组件尚未就绪：'+error.message;diagnostics.write('error','workbench',recoveryError);}
   }
-  services = guardAgentServices(new ServiceManager({registryFile:location.registryFile,policyFile:path.join(profile,'workbench-server','access-policy.json')}),agentPaths);
+  services = guardAgentServices(new ServiceManager({registryFile:location.registryFile}),agentPaths);
   if(activationError){const blocked=()=>{throw Object.assign(Error(recoveryError),{code:'BETA_COMPONENTS_NOT_READY'});};services.ensure=blocked;services.start=blocked;}
   previousCloudExecutable=services.config('warehouse').exe;
   cache=new SnapshotCache({root:path.join(profile,'client-cache'),encrypt:async plain=>{
@@ -529,11 +528,6 @@ if (acquired) app.whenReady().then(async () => {
   handle('migration:recover',id=>migrationRequest('/'+encodeURIComponent(id)+'/recover',{method:'POST',body:{}}));
   handle('migration:archive',async id=>{if(!remote())throw Error('旧账本只能在来源客户端封存');const result=await migrationRequest('/'+encodeURIComponent(id)+'/result');if(result.status!=='completed')throw Error('服务器迁移尚未完整完成，不能封存旧账本');await freezeMigrationSource(services,connection,profile);return connection.archiveMigration(result.receipt);});
   handle('migration:release-source',()=>{if(!remote())throw Error('请在来源客户端处理封存准备');return releaseMigrationSource(services,connection,profile);});
-  handle('permissions:get',()=>{requireHost();return hostIdentity.permissionsGet({}, {actor:hostIdentity.localActor(),trustedUi:true}).policy;});
-  handle('permissions:save',async value=>{
-    requireHost();const meta={actor:hostIdentity.localActor(),trustedUi:true},current=hostIdentity.permissionsGet({},meta);
-    hostIdentity.permissionsSave({policy:value,revision:current.revision},meta);return {ok:true};
-  });
   handle('links:open', name => shell.openExternal(externalLink(name)));
   updater={check:async()=>({status:'disabled',channel:'agent-beta'}),getState:()=>({status:'disabled'})};
   handle('launcher:update-check',()=>updater.check());
