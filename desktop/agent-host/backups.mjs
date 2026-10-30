@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {DatabaseSync, backup} from 'node:sqlite';
 import {validatePolicy} from '../workbench/policy.mjs';
+import {createBackupRecovery} from './backup-recovery.mjs';
 
 const modules = ['warehouse','purchase','sales','overview','exporter'];
 const primary = {warehouse:'workspace/data/erp.sqlite',purchase:'purchases.sqlite',sales:'sales.sqlite',overview:'overview.sqlite',exporter:'orders.sqlite'};
@@ -39,11 +40,11 @@ export function createAgentBackups({paths,services,storeDir,resolveActor,getComp
     const bound={};for(const id of ids){const value=await binding(id,ctx);if(!value||typeof value.dataSetId!=='string'||!value.dataSetId||value.revision===undefined)throw Error('模块账本身份或版本不可核验: '+id);bound[id]={dataSetId:value.dataSetId,revision:value.revision};}
     return {companyId:company.companyId,dataSetId:company.dataSetId,modules:bound};
   }
-  return {'backups.prepare':async(input,ctx)=>{
+  return {...createBackupRecovery({paths,storeDir,resolveActor,getCompanyIdentity}),'backups.prepare':async(input,ctx)=>{
     if(!input||Object.keys(input).some(k=>k!=='modules')||!Array.isArray(input.modules)||!input.modules.length||new Set(input.modules).size!==input.modules.length||input.modules.some(id=>!modules.includes(id)))throw Error('备份参数无效');
     if(!ctx?.actor?.id||!ctx.taskId||!/^[a-zA-Z0-9_-]+$/.test(ctx.taskId)||typeof ctx.registerArtifact!=='function')throw Error('缺少任务身份或产物登记能力');
     if(typeof resolveActor!=='function')throw Error('备份身份服务未接入');
-    const actor=await resolveActor(ctx.actor.id); if(!actor||actor.enabled===false||actor.role!=='admin'||actor.canRunTasks!==true||input.modules.some(id=>!actor.modules?.includes(id)))throw Error('没有备份所选模块的管理员权限');
+    const actor=await resolveActor(ctx.actor.id); if(!actor||actor.enabled===false||actor.role!=='admin'||actor.canRunTasks!==true||modules.some(id=>!actor.modules?.includes(id)))throw Error('公共任务与权限备份需要拥有全部模块权限的管理员');
     const root=path.resolve(paths?.root||''), expected=path.resolve(process.env.LOCALAPPDATA||'', 'WuchengAgentBeta');
     const registryFile=paths?.registryFile;
     if(!process.env.LOCALAPPDATA||root!==expected||registryFile!==path.join(root,'registry.json')||paths.data!==path.join(root,'data')||!within(root,path.resolve(storeDir||'')))throw Error('仅允许使用隔离 Beta 目录');
@@ -56,7 +57,7 @@ export function createAgentBackups({paths,services,storeDir,resolveActor,getComp
     for(const module of input.modules)for(const item of sources[module].files){if(ctx.signal?.aborted)throw Error('备份任务已取消');const source=path.join(sources[module].dir,...item.rel.split('/')),target=path.join(dest,module,...item.rel.split('/'));if(!within(path.join(dest,module),target))throw Error('备份文件路径无效');noLinks(source);noLinks(target);fs.mkdirSync(path.dirname(target),{recursive:true});if(item.kind==='sqlite'){const db=new DatabaseSync(source,{readOnly:true});try{await backup(db,target);}finally{db.close();}files.push({module,relative:item.rel,kind:item.kind,sha256:fileHash(target),tables:fingerprint(target)});}else{fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);const sha256=fileHash(target);if(sha256!==item.sha256)issues.push({module,relative:item.rel,reason:'附件在备份期间发生变化',blocking:true});files.push({module,relative:item.rel,kind:item.kind,sha256});}}
     const shared=path.join(dest,'shared');fs.mkdirSync(shared);const taskCopy=path.join(shared,'agent-tasks.sqlite'),taskDb=new DatabaseSync(taskFile,{readOnly:true});let taskVersion;try{taskVersion=taskDb.prepare('PRAGMA data_version').get().data_version;await backup(taskDb,taskCopy);if(taskDb.prepare('PRAGMA data_version').get().data_version!==taskVersion)throw Error('任务数据库备份期间发生变化');}finally{taskDb.close();}sanitizeTasks(taskCopy);copyTaskAttachments(taskCopy,storeDir,shared,files);copyTaskArtifacts(taskCopy,storeDir,shared,files);files.push({module:'shared',relative:'agent-tasks.sqlite',kind:'task-snapshot',sha256:fileHash(taskCopy),tables:fingerprint(taskCopy)});if(policyBytes){const copy=path.join(shared,'access-policy.json');fs.writeFileSync(copy,policyBytes,{flag:'wx',mode:0o600});validatePolicy(JSON.parse(fs.readFileSync(copy)));files.push({module:'shared',relative:'access-policy.json',kind:'access-policy',sha256:fileHash(copy)});}
     for(const module of input.modules){const before=sources[module].files,after=inventory(sources[module].dir);if(JSON.stringify(before)!==JSON.stringify(after))issues.push({module,reason:'数据目录在备份期间发生变化',blocking:true});}
-    const again=await readBinding(input.modules,ctx),fresh=await resolveActor(actor.id);if(JSON.stringify(bound)!==JSON.stringify(again)||hash(fs.readFileSync(registryFile))!==hash(registryBytes)||!fresh||fresh.enabled===false||fresh.role!=='admin'||fresh.canRunTasks!==true||input.modules.some(id=>!fresh.modules?.includes(id)))throw Error('备份期间身份、权限或账本绑定已变化；副本保留待检查');
+    const again=await readBinding(input.modules,ctx),fresh=await resolveActor(actor.id);if(JSON.stringify(bound)!==JSON.stringify(again)||hash(fs.readFileSync(registryFile))!==hash(registryBytes)||!fresh||fresh.enabled===false||fresh.role!=='admin'||fresh.canRunTasks!==true||modules.some(id=>!fresh.modules?.includes(id)))throw Error('备份期间身份、权限或账本绑定已变化；副本保留待检查');
     let policyAfter;try{policyAfter=fs.readFileSync(policyFile);}catch(error){if(error.code!=='ENOENT')throw error;}if((policyBytes?hash(policyBytes):null)!==(policyAfter?hash(policyAfter):null))throw Error('权限配置在备份期间发生变化');
     const report={format:'agent-beta-backup/v1',id,createdAt:new Date().toISOString(),companyId:bound.companyId,dataSetId:bound.dataSetId,moduleBindings:bound.modules,registrySha256:hash(registryBytes),files,issues,policy:policyBytes?'copied':'absent',taskSnapshotDataVersion:taskVersion,crossDatabaseAtomic:false,attachmentScope:['originals','attachments','images','taobao-source'],notIncluded:['登录与会话凭据','未列明的临时引擎工作目录'],note:'SQLite 在线快照分别一致；跨账本及附件不是同一时点。任务快照移除已知会话与密钥字段；公共权限文件缺失时记录缺失。'};
     const reportText=JSON.stringify(report,null,2);fs.writeFileSync(path.join(dest,'backup.json'),reportText,{flag:'wx',mode:0o600});
