@@ -15,3 +15,5 @@
 Hermes Python 进程无法直接执行 ASAR 内虚拟路径。Beta 构建配置将 `hermes-bootstrap.py` 复制到 `resources/agent-engines/hermes-bootstrap.py`；运行时组必须让打包态显式使用该包外路径，并通过真实打包验证。
 
 内部隔离目录构建使用 LINGTU_AGENT_BETA_INTERNAL_DIR=1 并显式传 --dir；须先准备与 staging 摘要绑定的 stage-public-scan.json，禁止用该模式生成 NSIS。真实安装器仍要求完整能力证据与真实打包隔离运行证据。云仓 worker 及 core 随主程序与网关一起装入；动态子进程实际运行仍需验证。Beta 组件必须由主机激活器安装到独立 programs 路径，不能回退旧稳定版目录；当前激活器联调未完成。
+
+预览与完整 Beta 的宿主版本由 build/agent-beta-stage-plan.json 唯一提供；预览使用隔离 staging 的 package.json 作为 NSIS 项目并根据该版本定位产物。主机和独立网关为各业务适配器携带各自锁定的生产依赖；各目录及动态 worker、原生 Electron 程序仍须在统一打包验收中实际启动。

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
+import {withBetaServiceStartFence} from './data-maintenance.mjs';
 const require=createRequire(import.meta.url),yauzl=require('yauzl');
 const ids=['warehouse','purchase','sales','overview','exporter'];
 const ledgers={warehouse:'workspace/data/erp.sqlite',purchase:'purchases.sqlite',sales:'sales.sqlite',overview:'overview.sqlite',exporter:'orders.sqlite'};
@@ -13,7 +14,7 @@ function findOne(root,name){const hits=[];function walk(dir){for(const e of fs.r
 function fileManifest(root){const output={};function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){const file=path.join(dir,e.name);if(e.isSymbolicLink())throw Error('Beta 资源包含链接');if(e.isDirectory())walk(file);else if(e.isFile())output[path.relative(root,file).replaceAll('\\','/')]=sha(file);else throw Error('Beta 资源类型无效');}}walk(root);return output;}
 /** Trusted host only: expectedManifestSha256 must be pinned by the packaged host. */
 export function createAgentActivation({paths,resourcesDir,expectedManifestSha256,isBusy}={}){
- return async function activate(){
+ return async function activate(){return withBetaServiceStartFence(paths,async()=>{
   const root=path.resolve(paths?.root||''),expected=path.resolve(process.env.LOCALAPPDATA||'','WuchengAgentBeta'),res=path.resolve(resourcesDir||'');
   if(!process.env.LOCALAPPDATA||root!==expected||paths.registryFile!==path.join(root,'registry.json')||paths.programs!==path.join(root,'programs')||paths.data!==path.join(root,'data')||!/^[a-f0-9]{64}$/.test(expectedManifestSha256||'')||typeof isBusy!=='function')throw Error('Beta 激活配置未绑定');
   noLinks(root);noLinks(res);const manifestFile=path.join(res,'agent-beta-resources.json');noLinks(manifestFile);if(sha(manifestFile)!==expectedManifestSha256)throw Error('Beta 资源清单摘要不符');const manifest=JSON.parse(fs.readFileSync(manifestFile,'utf8'));if(manifest.format!=='agent-beta-resources/v1'||manifest.purchaseMobilePort!==27380||!manifest.payloadHashes)throw Error('Beta 资源清单无效');
@@ -25,5 +26,5 @@ export function createAgentActivation({paths,resourcesDir,expectedManifestSha256
   for(const component of manifest.vendor.components){if(!['node-runtime','browser-runtime'].includes(component.id)||typeof component.archive!=='string'||path.basename(component.archive)!==component.archive||manifest.payloadHashes['vendor/'+component.archive]!==component.sha256)throw Error('不允许激活未核验的运行环境');const parent=path.join(paths.programs,component.id),dest=path.join(parent,version),archive=path.join(res,'vendor',component.archive);noLinks(parent);fs.mkdirSync(parent,{recursive:true});fs.mkdirSync(dest);await unzip(archive,dest);programRoots[component.id]=dest;records[component.id]={root:dest,entry:findOne(dest,component.id==='node-runtime'?'node.exe':'chrome.exe')};}
   if(!records['node-runtime']||!records['browser-runtime'])throw Error('Beta 固定运行环境不完整');for(const id of ids)records[id].nodePath=records['node-runtime'].entry;records.warehouse.browserPath=records['browser-runtime'].entry;for(const [id,db,env] of [['purchase','purchases.sqlite','PORT'],['sales','sales.sqlite','SALES_PORT'],['overview','overview.sqlite','OVERVIEW_PORT']])Object.assign(records[id],{db,env});
   if(await isBusy())throw Error('Beta 服务已开始执行任务，未切换注册表');noLinks(paths.registryFile);const programs={};for(const id of [...ids,'node-runtime','browser-runtime']){const dir=path.relative(paths.programs,programRoots[id]);programs[dir]=fileManifest(programRoots[id]);}const tmp=paths.registryFile+'.staging-'+crypto.randomUUID();fs.writeFileSync(tmp,JSON.stringify(Object.fromEntries(ids.map(id=>[id,records[id]])),null,2),{flag:'wx',mode:0o600});fs.renameSync(tmp,paths.registryFile);fs.mkdirSync(paths.profile,{recursive:true});const receiptTmp=receiptFile+'.staging-'+crypto.randomUUID();fs.writeFileSync(receiptTmp,JSON.stringify({manifestSha256:expectedManifestSha256,registrySha256:sha(paths.registryFile),programs}),{flag:'wx',mode:0o600});fs.renameSync(receiptTmp,receiptFile);return {ready:true,reused:false,manifestSha256:expectedManifestSha256,installed:ids,missingData:ids.filter(id=>!fs.existsSync(path.join(paths.data,id,ledgers[id])))};
- };
+ });};
 }
