@@ -102,18 +102,10 @@ async function panel(name) {
   for (const p of ['personnel','home','settings','desk','cache','logs']) $(p+'Panel').hidden = p !== name;
   for(const id of ['home','settings','logs']){if(id===name)$(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');}
 }
-function renderPermissionSettings(){
-  $('permissionSettings').hidden=personnelState.role!=='boss';
-  $('permissionsOpen').disabled=isClient();
-  $('permissionSettingsHint').textContent=isClient()
-    ?'请在主服务器以老板身份打开「设置 → 员工与成员权限」维护；客户端不能修改服务器权限。'
-    :'按员工的独立 Tailscale 身份，设置可访问模块、编辑权限及采集与发送权限。';
-}
 function renderPersonnel(){
   $('personnelHeader').hidden=!personnelState.selected;
   $('personnelLabel').textContent='当前身份 · '+personnelState.label;
   document.querySelector('header nav').hidden=!personnelState.selected;
-  renderPermissionSettings();
   for(const id of ['personnelBoss','personnelEmployee','personnelChange'])$(id).disabled=personnelBusy;
 }
 async function selectPersonnel(role){
@@ -146,7 +138,7 @@ async function load() {
       connectionState.connected=false;
       rows=['warehouse','purchase','sales','overview','exporter'].map(id=>({id,remote:true,status:'unavailable',authorized:false,error:error.message}));
       connectionHealthSequence++;
-      renderConnectionHealth({state:'offline',label:'主服务器连接中断',detail:'当前无法读取主服务器模块，请检查网络、主机和成员权限。',checkedAt:new Date().toISOString()});render();
+      renderConnectionHealth({state:'offline',label:'主服务器连接中断',detail:'当前无法读取主服务器模块，请检查网络、主机和登录状态。',checkedAt:new Date().toISOString()});render();
     }
     throw error;
   }
@@ -207,7 +199,6 @@ async function loadConnection(){
   }
   $('migrationStatus').textContent=isClient()&&!connectionState.canWrite?'检测到旧账本，完成两次迁移核对前只允许查询。':isClient()?'客户端不启动本机业务服务。':'';
   $('refresh').hidden=$('offline').hidden=true;
-  renderPermissionSettings();
   document.querySelector('#homePanel .intro p').textContent=isClient()?'各模块统一连接主服务器。离线仅查看已缓存的只读快照。':'选择需要的模块。独立运行，本地保存，随时回来继续。';
   void pollConnectionStatus({force:true});
 }

@@ -38,13 +38,12 @@
       <p id="migrationStatus"></p>
     </section>
     <section class="moduleRow" id="privateNetworkPanel" hidden><div><strong>内置私网连接</strong><p id="privateNetworkStatus" role="status" aria-live="polite">首次使用请登录私网。</p><p>首次在官方登录页完成授权，之后打开工作台自动连接。客户端账本仍以主服务器为准。</p></div><div class="actions"><button id="privateNetworkLogin" class="primary">登录私网</button><button id="privateNetworkConnect">重新连接</button><button id="privateNetworkLogout">退出私网账号</button></div></section>
-    <section class="moduleRow" id="permissionSettings" hidden><div><strong>员工与成员权限</strong><p id="permissionSettingsHint">按员工的独立 Tailscale 身份，设置可访问模块、编辑权限及采集与发送权限。</p></div><button id="permissionsOpen">管理员工权限</button></section>
     <div class="sectionLabel"><h2>功能状态</h2><p>随工作台统一更新，数据独立保存</p></div>
     <section id="moduleList" aria-label="业务扩展列表"></section>
     <details id="runtimeSettings" class="settingsFold"><summary><strong>运行环境</strong><span>随工作台提供的共享组件</span></summary><section id="runtimeList" aria-label="运行环境列表"></section></details>
     <details id="advancedSettings" class="settingsFold"><summary><strong>更多设置</strong><span>启动、AI 接入与后台服务</span></summary><div class="advancedContent">
       <section class="moduleRow" id="startupSettings"><div><strong>启动与后台</strong><p>关闭窗口后留在托盘，业务后台继续运行。</p></div><label class="toggleLabel"><input id="startAtLogin" type="checkbox">登录 Windows 时启动工作台</label></section>
-      <section class="moduleRow" id="aiSettings"><div><strong>MCP 与 CLI</strong><p>全部业务共用工作台连接与权限；正式写入仍需确认。</p><details class="pathDetails"><summary>查看本机配置</summary><pre id="integrationConfig"></pre></details></div><div class="actions"><button id="copyMcp">复制 MCP 配置</button><button id="copyCli">复制 CLI 配置</button></div></section>
+      <section class="moduleRow" id="aiSettings"><div><strong>MCP 与 CLI</strong><p>全部业务使用已登录身份连接工作台；正式写入须在结果页确认。</p><details class="pathDetails"><summary>查看本机配置</summary><pre id="integrationConfig"></pre></details></div><div class="actions"><button id="copyMcp">复制 MCP 配置</button><button id="copyCli">复制 CLI 配置</button></div></section>
       <section class="moduleRow" aria-label="项目链接"><div><strong>项目链接</strong><p>源码、版本发布与灵兔官网。</p></div><div class="actions"><button id="openRepository" title="在浏览器中打开 GitHub 仓库">GitHub 仓库 ↗</button><button id="openWebsite" title="在浏览器中打开灵兔官网">灵兔官网 ↗</button></div></section>
       <section class="serviceSection"><div class="sectionLabel"><h2>后台服务</h2><button id="serviceRefresh">刷新服务状态</button></div><div id="serviceList"></div></section>
     </div></details>
@@ -78,7 +77,6 @@
     <div id="migrationBatches"></div><div id="migrationRows"></div><pre id="migrationSummary"></pre><p id="migrationMessage" role="alert"></p>
     <footer><button id="migrationClose">关闭</button><button id="migrationBack" hidden>返回逐项修改</button><button id="migrationSave" hidden>保存逐项选择</button><button id="migrationFirst" hidden>第一次确认：逐项已核对</button><button id="migrationSecond" hidden>第二次确认：整批一致</button><button id="migrationCommit" hidden>正式迁移并校验</button><button id="migrationRecover" hidden>处理中断维护</button><button id="migrationArchive" hidden>核对回执并封存本机旧账本</button></footer>
   </dialog>
-  <dialog id="permissionsDialog"><h2>主服务器成员权限</h2><div id="permissionRows"></div><button id="permissionAdd">添加成员</button><p id="permissionMessage" role="alert"></p><footer><button id="permissionClose">关闭</button><button id="permissionSave">保存权限</button></footer></dialog>
   <script src="connection-ui.js"></script>
   <script src="renderer.js"></script>
   <script type="module" src="../shared/loading-screen-auto.mjs"></script>

@@ -40,13 +40,4 @@
  action('migrationSecond',async()=>render(await api.migrationConfirm({id:batch.id,revision:batch.revision,step:2,reviewDigest:batch.reviewDigest})));
  action('migrationCommit',async()=>render(await api.migrationCommit({id:batch.id,revision:batch.revision,reviewDigest:batch.reviewDigest})));
  action('migrationArchive',async()=>{await api.migrationArchive(batch.id);$('migrationMessage').textContent='已核对服务器回执，旧账本保留留档；客户端现在可以在线录入。';});
- function member(login='',value={role:'viewer',modules:[],canRunTasks:false,enabled:true}){
-  const row=node('section');row.className='permissionRow';const name=node('input');name.placeholder='Tailscale 登录邮箱';name.value=login;name.dataset.login='';row.append(name);
-  const role=node('select');role.dataset.role='';for(const key of ['admin','editor','viewer']){const option=node('option',{admin:'管理员',editor:'编辑成员',viewer:'只读成员'}[key]);option.value=key;role.append(option);}role.value=value.role;row.append(role);
-  for(const id of ['warehouse','purchase','sales','overview','exporter']){const label=node('label',names[id]),check=node('input');check.type='checkbox';check.dataset.module=id;check.checked=value.modules.includes(id);label.prepend(check);row.append(label);}
-  for(const [key,label]of [['canRunTasks','允许采集与发送'],['enabled','启用']]){const wrap=node('label',label),check=node('input');check.type='checkbox';check.dataset[key]='';check.checked=value[key];wrap.prepend(check);row.append(wrap);}$('permissionRows').append(row);
- }
- $('permissionsOpen').onclick=async()=>{try{const policy=await api.permissions();$('permissionRows').replaceChildren();Object.entries(policy.users).forEach(([key,value])=>member(key,value));$('permissionsDialog').showModal();}catch(e){$('message').textContent=e.message;}};
- $('permissionAdd').onclick=()=>member();$('permissionClose').onclick=()=>$('permissionsDialog').close();
- $('permissionSave').onclick=async()=>{try{const users={};for(const row of $('permissionRows').children){const login=row.querySelector('[data-login]').value.trim().toLowerCase();if(!login||users[login])throw Error('成员身份缺失或重复');users[login]={role:row.querySelector('[data-role]').value,modules:[...row.querySelectorAll('[data-module]:checked')].map(v=>v.dataset.module),canRunTasks:row.querySelector('[data-can-run-tasks]').checked,enabled:row.querySelector('[data-enabled]').checked};}await api.savePermissions({schemaVersion:1,users});$('permissionMessage').textContent='权限已保存，后续请求立即使用新权限。';}catch(e){$('permissionMessage').textContent=e.message;}};
 })();
