@@ -356,7 +356,7 @@ if (acquired) app.whenReady().then(async () => {
     status:options=>remote()?(remoteConnection(),remoteManager.status()):services.status(options),stop:id=>{requireHost();return services.stop(id);}};
   const desktopUiSessions=createDesktopUiSessions({services,resolveActor:()=>hostIdentity.requireMember(hostIdentity.localActor('ui'),true),assertRequestAllowed:()=>{assertPrivateRequestAllowed();if(remote())throw Object.assign(Error('公司连接已变化，请重新打开业务工作台'),{code:'CONNECTION_CHANGED'});},onError:error=>diagnostics.write('error','workbench','业务页面身份检查未通过 · '+(error.code||'DESKTOP_UI_FAILED'))});
   desks = installDeskViews(win, {manager:viewManager,isRemote:remote,partitionFor:deskPartition,includeWarehouse:true,
-    authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},
+    authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:child-navigate','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:['desks:surface','desks:child-navigate'].includes(name)?args[0]?.module:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},
     prepareView:({id,view,cap})=>{if(!remote())desktopUiSessions.attach({id,view,cap});},
     beforeOpen:beforeBusinessOpen,
     notify:message=>send('modules:message',message)});

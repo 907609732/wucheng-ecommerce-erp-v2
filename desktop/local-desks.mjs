@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ServiceManager} from './shared/service-manager.mjs';
+import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from './agent-host/business-surface.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},prepareView=async()=>{},authorizeOperation=()=>{},decorateURL=(_id,url)=>url}={}){
-  const views=new Map(),readyViews=new Set();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
+  const views=new Map(),viewLocations=new Map(),readyViews=new Set();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
   const rootSender=e=>e.sender===win.webContents&&e.senderFrame===win.webContents.mainFrame;
   const childSender=e=>[...views.values()].some(v=>e.sender===v.webContents&&e.senderFrame===v.webContents.mainFrame);
   const handlers=[];
@@ -27,6 +28,7 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     const cap=await manager.ensure(id);
     if(mine!==generation)return {cancelled:true};
     const targetURL=decorateURL(id,cap.url+(route||'/'));
+    viewLocations.set(id,cap.url);
     let view=views.get(id);
     if(!view){
       view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id)}});
@@ -62,8 +64,33 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   handle('desks:status',e=>{if(!rootSender(e))throw Error('来源不符');return manager.status({includeWarehouse});});
   handle('desks:open',(e,{id,route}={})=>{if(!rootSender(e))throw Error('来源不符');return open(id,route);});
   handle('desks:hide',e=>{if(!rootSender(e))throw Error('来源不符');hide();});
+  handle('desks:child-navigate',async(e,input)=>{
+    if(!childSender(e))throw Error('来源不符');
+    const sourceModule=[...views.entries()].find(([,view])=>e.sender===view.webContents)?.[0],mine=generation,target=controlledBusinessLocator(input);
+    if(sourceModule!==active)throw Error('来源页面已不在当前工作台');
+    try{
+      await beforeOpen(target.module);
+      if(mine!==generation||sourceModule!==active||!childSender(e))return {status:'cancelled'};
+      win.webContents.send('desks:navigate',{id:target.module,locator:target,sourceModule});
+      return {status:'dispatched',target,sourceModule};
+    }catch(error){notify(error.message);throw error;}
+  });
+  handle('desks:surface',async(e,input)=>{
+    if(!rootSender(e))throw Error('来源不符');
+    const request=businessSurfaceRequest(input);await beforeOpen(request.module);
+    const view=views.get(request.module),base=viewLocations.get(request.module);
+    if(!view||!readyViews.has(view)||view.webContents.isDestroyed())return {status:'unsupported',module:request.module,action:request.action,openedOnly:false,reason:'desk-not-open'};
+    if(request.module!=='overview')return {status:'unsupported',module:request.module,action:request.action,openedOnly:true,reason:'surface-unavailable'};
+    const current=view.webContents.getURL?.();if(!base||!current?.startsWith(base+'/'))throw Error('业务页面来源已变化');
+    const mine=generation,script=businessSurfaceScript(request);let timeout;
+    try{
+      const serialized=await Promise.race([view.webContents.executeJavaScript(script,false),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Object.assign(Error('页面定位尚未返回，请查看当前工作面，避免重复操作'),{code:'BUSINESS_SURFACE_PENDING'})),30000);})]);
+      if(mine!==generation||views.get(request.module)!==view||view.webContents.isDestroyed()||!view.webContents.getURL().startsWith(base+'/'))throw Error('业务页面在读取期间已变化，请重新查看');
+      return parseBusinessSurfaceResult(serialized,request);
+    }finally{clearTimeout(timeout);}
+  });
   handle('desks:bounds',(e,b)=>{if(!rootSender(e))throw Error('来源不符');if(!['x','y','width','height'].every(k=>Number.isFinite(b?.[k]))||b.width<0||b.height<0)throw Error('业务视图边界无效');bounds=Object.fromEntries(['x','y','width','height'].map(k=>[k,b[k]]));layout();});
-  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
+  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);viewLocations.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
   handle('desks:logs',async(e,id)=>{if(!rootSender(e)||isRemote()||!['purchase','sales','overview'].includes(id))throw Error('仅主机可查看服务日志');const file=path.join(manager.config(id).dataDir,'integration-service.log');if(fs.existsSync(file))await shell.openPath(file);});
   handle('desks:child-open',(e,id)=>{if(!childSender(e)||!['overview','exporter'].includes(id))throw Error('来源不符');win.webContents.send('desks:navigate',{id});return {requested:true};});
   handle('desks:child-home',e=>{if(!childSender(e))throw Error('来源不符');win.webContents.send('desks:navigate',{id:'home'});});
@@ -79,6 +106,6 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   };
   tick();const timer=setInterval(tick,5000);timer.unref();
   win.on('closed',()=>{clearInterval(timer);for(const name of handlers)ipcMain.removeHandler(name);for(const v of views.values())if(!v.webContents.isDestroyed())v.webContents.close();try{if(JSON.parse(fs.readFileSync(hostFile,'utf8')).pid===process.pid)fs.unlinkSync(hostFile);}catch{}});
-  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);};
+  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);viewLocations.delete(id);};
   return {open,hide,manager,invalidate,reset:()=>{hide();for(const id of [...views.keys()])invalidate(id);}};
 }
