@@ -25,7 +25,7 @@ function fixture(t){
   store.insert('artifact',{id:artifactId,ownerId:'owner',taskId,name:'download name.txt',path:artifactPath,sha256:hash('generated proof')});
   store.insert('schedule',{id:'schedule-1',ownerId:'owner',enabled:true,nextRunAt:'2026-11-01T00:00:00Z'});
   let actor={id:'owner',enabled:true,role:'admin',canRunTasks:true,modules:allModules};
-  const hooks=createAgentBackups({paths:{root,profile,data,registryFile},storeDir,services:{config:id=>registry[id]},resolveActor:async id=>id===actor.id?actor:null,getCompanyIdentity:async()=>({companyId:'company-fixture',dataSetId:'dataset-fixture'}),binding:async()=>({dataSetId:'purchase-fixture',revision:1})});
+  const hooks=createAgentBackups({paths:{root,profile,data,registryFile},storeDir,services:{config:id=>registry[id]},resolveActor:async id=>id===actor?.id?actor:null,getCompanyIdentity:async()=>({companyId:'company-fixture',dataSetId:'dataset-fixture'}),binding:async()=>({dataSetId:'purchase-fixture',revision:1})});
   const ctx={actor,taskId:'backup-task',registerArtifact:()=>({id:'manifest-artifact'})};
   t.after(()=>{store.close();if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(local,{recursive:true,force:true});});
   return {root,store,hooks,ctx,taskId,attachmentPath,artifactPath,setActor:value=>actor=value};
@@ -58,11 +58,27 @@ test('backup recovery rejects path parameters, changed manifests and unregistere
   fs.writeFileSync(path.join(directory,'unexpected.txt'),'extra');await assert.rejects(()=>f.hooks['backups.verify']({backupId},f.ctx),{code:'BACKUP_EXTRA_FILE'});
 });
 
-test('a restricted administrator cannot export or restore shared data belonging to other modules',async t=>{
-  const f=fixture(t);f.setActor({...f.ctx.actor,modules:['purchase']});
-  await assert.rejects(()=>f.hooks['backups.prepare']({modules:['purchase']},f.ctx),/全部模块权限/);
-  await assert.rejects(()=>f.hooks['backups.list']({},f.ctx),{code:'BACKUP_ADMIN_REQUIRED'});
-  await assert.rejects(()=>f.hooks['backups.restore.prepare']({backupId:'00000000-0000-0000-0000-000000000000'},f.ctx),{code:'BACKUP_ADMIN_REQUIRED'});
+test('authenticated employees can back up and restore regardless of obsolete role labels or absent policy',async t=>{
+  const f=fixture(t);f.setActor({...f.ctx.actor,role:'viewer',modules:[],canRunTasks:false,enabled:false});
+  fs.unlinkSync(path.join(f.root,'profile','workbench-server','access-policy.json'));
+  const backup=await f.hooks['backups.prepare']({modules:['purchase']},f.ctx),backupId=backup.evidence[0].id;
+  const report=JSON.parse(fs.readFileSync(path.join(f.root,'backups','backup-'+backupId,'backup.json'),'utf8'));assert.equal(report.policy,'inactive-not-included');assert.equal(report.accessPolicyApplied,false);assert(!report.files.some(item=>item.kind==='access-policy'));
+  const listed=await f.hooks['backups.list']({},f.ctx);assert.equal(listed.blocks[0].rows[0].status,'verified');
+  const prepared=await f.hooks['backups.restore.prepare']({backupId},f.ctx),ctx={...f.ctx,capabilityId:'backups.restore-copy',approval:{payload:'trusted-runtime-proof'},idempotencyKey:hash('employee-restoration')},done=await f.hooks['backups.restore.commit']({commitData:prepared.commitData},ctx);
+  assert.equal(done.receipt.verified,true);assert.equal(done.receipt.accessPolicyApplied,false);
+  const other={id:'other-authenticated-employee',role:'viewer',modules:[],canRunTasks:false};f.setActor(other);
+  assert.equal((await f.hooks['backups.restore.receipt']({idempotencyKey:ctx.idempotencyKey},{...ctx,actor:other})).receipt.actorId,'owner');
+  await assert.rejects(()=>f.hooks['backups.restore.receipt']({idempotencyKey:ctx.idempotencyKey},{...ctx,actor:other,taskId:'unrelated-task'}),{code:'RESTORE_RECEIPT_INVALID'});
+  const unknown={...f.ctx,actor:{id:'unrecognized-login',role:'admin'}};
+  await assert.rejects(()=>f.hooks['backups.prepare']({modules:['purchase']},unknown),/真实人员身份/);
+  await assert.rejects(()=>f.hooks['backups.list']({},unknown),{code:'BACKUP_IDENTITY_REQUIRED'});
+});
+
+test('legacy access policy in an old backup is copied only as inactive historical evidence',async t=>{
+  const f=fixture(t),backup=await f.hooks['backups.prepare']({modules:['purchase']},f.ctx),backupId=backup.evidence[0].id,directory=path.join(f.root,'backups','backup-'+backupId),manifest=path.join(directory,'backup.json'),report=JSON.parse(fs.readFileSync(manifest,'utf8'));
+  const oldPolicy=JSON.stringify({schemaVersion:1,users:{'historical@example.test':{role:'viewer',modules:[],canRunTasks:false,enabled:false}}});fs.writeFileSync(path.join(directory,'shared','access-policy.json'),oldPolicy);report.files.push({module:'shared',relative:'access-policy.json',kind:'access-policy',sha256:hash(oldPolicy)});report.policy='copied';fs.writeFileSync(manifest,JSON.stringify(report,null,2));
+  const prepared=await f.hooks['backups.restore.prepare']({backupId},f.ctx),ctx={...f.ctx,capabilityId:'backups.restore-copy',approval:{payload:'trusted-runtime-proof'},idempotencyKey:hash('legacy-policy-history')},done=await f.hooks['backups.restore.commit']({commitData:prepared.commitData},ctx),copy=path.join(f.root,'recoveries','recovery-'+prepared.commitData.recoveryId);
+  assert.equal(fs.readFileSync(path.join(copy,'shared','history','access-policy.json'),'utf8'),oldPolicy);assert(!fs.existsSync(path.join(copy,'shared','access-policy.json')));assert.equal(done.receipt.accessPolicyApplied,false);assert.equal(done.receipt.legacyPolicy,'historical-only-not-applied');
 });
 
 test('restored domain references point at copied originals and never at the live Beta ledger',async t=>{
