@@ -8,7 +8,7 @@ export function createAgentSettings(store,{secretStore}={}){
   return {get:publicSettings,
     async credentials(){const config=store.get('settings','company');const apiKey=await secretStore?.get?.('company-api-key');if(!apiKey)throw agentError('COMPANY_API_REQUIRED','请管理员在设置中配置公司 API；不会复用个人账号',409);if(!config.company.model)throw agentError('COMPANY_MODEL_REQUIRED','请管理员设置公司使用的模型名称',409);return {...config.company,apiKey};},
     save(input,actor){const operation=saving.then(async()=>{
-      if(actor.role!=='admin')throw agentError('ADMIN_REQUIRED','只有管理员可以修改公司模型设置',403);
+      if(!actor?.id||actor.enabled===false)throw agentError('IDENTITY_REQUIRED','请先登录公司工作台',401);
       const current=store.get('settings','company'),company={...current.company};
       if(input.version!==undefined&&input.version!==current.version)throw agentError('AGENT_REVISION_CHANGED','公司设置已变化，请重新加载后保存',409);
       if(input.defaultEngine&&!['codex','hermes'].includes(input.defaultEngine))throw agentError('ENGINE_INVALID','未知执行引擎');

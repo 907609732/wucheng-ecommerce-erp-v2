@@ -21,11 +21,11 @@ async function setup(t,{engine,extensions={},adapter}={}){
   return {runtime,directory,people,request,create,prepare,approve,advance:value=>clock=value};
 }
 
-test('goal-created schedule has human-bound receipt, one persisted run and revocation checks',async t=>{
+test('goal-created schedule has human-bound receipt, one persisted run and disabled-member checks',async t=>{
   const f=await setup(t),task=await f.create();await f.prepare(task,'schedules.create',{goal:'每天查询销售数据',cron:'0 9 * * *',timezone:'Asia/Shanghai',scope:{modules:['sales','system']}});
   assert.equal(f.runtime.store.list('schedule').length,0);const approved=await f.approve(task);assert.equal(approved.task.status,'completed');assert.equal(approved.result.receipt.receipts[0].operation,'schedules.create');
   const schedule=f.runtime.store.list('schedule')[0];f.advance(Date.parse(schedule.nextRunAt));await f.runtime.tick();assert.equal(f.runtime.store.runs(schedule.id).length,1);assert.ok(f.runtime.store.get('task',f.runtime.store.runs(schedule.id)[0].taskId));await f.runtime.tick();assert.equal(f.runtime.store.runs(schedule.id).length,1);
-  f.people.set('admin',{...admin,modules:[]});f.advance(Date.parse(f.runtime.store.get('schedule',schedule.id).nextRunAt));await f.runtime.tick();assert.equal(f.runtime.store.get('schedule',schedule.id).blockedReason,'permission_revoked');
+  f.people.set('admin',{...admin,enabled:false});f.advance(Date.parse(f.runtime.store.get('schedule',schedule.id).nextRunAt));await f.runtime.tick();assert.equal(f.runtime.store.get('schedule',schedule.id).blockedReason,'member_unavailable');
 });
 
 test('assignment shares only bound attachments and executes under the assignee current permissions',async t=>{
@@ -37,7 +37,7 @@ test('assignment shares only bound attachments and executes under the assignee c
   const assign=await f.create();await f.prepare(assign,'tasks.assign',{taskId:target.id,assigneeId:worker.id});await f.approve(assign);
   assert.equal((await f.request('tasks.get',{taskId:target.id},worker)).task.assigneeId,worker.id);await f.request('tasks.control',{taskId:target.id,action:'resume'},worker);await f.runtime.run(target.id);
   assert.equal(invokedActor,worker.id);assert.equal(f.runtime.store.get('task',target.id).status,'completed');
-  f.people.set(worker.id,{...worker,modules:[]});await assert.rejects(f.request('tasks.get',{taskId:target.id},worker),{code:'MODULE_DENIED'});
+  f.people.set(worker.id,{...worker,enabled:false});await assert.rejects(f.request('tasks.get',{taskId:target.id},worker),{code:'MEMBER_DENIED'});
 });
 
 test('permission management is absent from the Agent catalog and all public management routes are unavailable',async t=>{
@@ -68,18 +68,18 @@ test('catalog and profile disable native execution and version checks use full s
   const config=codexProfile({model:'gpt-5.4',baseUrl:'http://127.0.0.1:1/v1',bridge:{url:'u',token:'t'},nodeExecutable:process.execPath,catalogPath:'x'});assert.equal((config.match(/approval_mode = "approve"/g)||[]).length,5);assert.match(config,/supports_websockets = false/);
 });
 
-test('viewer can run query goals but never prepares or approves formal writes',async t=>{
-  const adapter={id:'sales',capabilities:[{id:'read',kind:'query',inputSchema:{type:'object'}},{id:'write',kind:'prepare',inputSchema:{type:'object'}}],binding:()=>({dataSetId:'test',revision:1}),query:()=>({summary:'只读核验结果',blocks:[{type:'text',text:'safe'}],evidence:[]})};
+test('all verified members can query and prepare business writes regardless of obsolete role labels',async t=>{
+  const adapter={id:'sales',capabilities:[{id:'read',kind:'query',inputSchema:{type:'object'}},{id:'write',kind:'prepare',inputSchema:{type:'object'}}],binding:()=>({dataSetId:'test',revision:1}),query:()=>({summary:'只读核验结果',blocks:[{type:'text',text:'safe'}],evidence:[]}),prepare:()=>({summary:'写入草稿仍须人审',blocks:[{type:'text',text:'draft'}],evidence:[],commitData:{amount:1},changes:[{amount:1}]})};
   const f=await setup(t,{adapter});const viewer={...worker,role:'viewer',canRunTasks:false};f.people.set(worker.id,viewer);const {task}=await f.request('tasks.create',{goal:'查询我的账单',scope:{modules:['sales']}},viewer);f.runtime.store.update('task',task.id,{status:'running'});
-  const catalog=await f.runtime.invokeTool(task.id,'erp_capabilities',{});assert.deepEqual(catalog.capabilities.map(c=>c.id),['read']);await f.runtime.invokeTool(task.id,'erp_query',{module:'sales',capabilityId:'read',input:{}});await assert.rejects(f.runtime.invokeTool(task.id,'erp_prepare',{module:'sales',capabilityId:'write',input:{}}),{code:'CAPABILITY_DENIED'});
-  await assert.rejects(f.request('schedules.create',{goal:'query',cron:'0 9 * * *',timezone:'Asia/Shanghai'},viewer),{code:'TASK_PERMISSION_REQUIRED'});
+  const catalog=await f.runtime.invokeTool(task.id,'erp_capabilities',{});assert.deepEqual(catalog.capabilities.map(c=>c.id),['read','write']);await f.runtime.invokeTool(task.id,'erp_query',{module:'sales',capabilityId:'read',input:{}});assert.equal((await f.runtime.invokeTool(task.id,'erp_prepare',{module:'sales',capabilityId:'write',input:{}})).requiresReview,true);
+  assert.ok((await f.request('schedules.create',{goal:'query',cron:'0 9 * * *',timezone:'Asia/Shanghai'},viewer)).schedule);
 });
 
-test('only exact warehouse self-service capabilities permit editor without task execution permission',async t=>{
+test('all members see warehouse capabilities while self-attendance review still binds the actual employee',async t=>{
   let key,commits=0;
   const adapter={id:'warehouse',capabilities:[{id:'attendance.complete',kind:'prepare',inputSchema:{type:'object',additionalProperties:false}},{id:'inventory.apply',kind:'prepare',inputSchema:{type:'object'}}],binding:()=>({dataSetId:'warehouse-test',revision:1}),prepare:()=>({summary:'本人签到复核',blocks:[{type:'text',text:'本人记录'}],evidence:[],changes:[{employeeId:'worker'}],commitData:{employeeId:'worker'}}),commit:(step,ctx)=>{assert.equal(ctx.actor.id,'worker');assert.equal(ctx.capabilityId,'attendance.complete');key=ctx.idempotencyKey;commits++;return {receipt:{id:'attendance'}};},receipt:()=>({state:'completed',idempotencyKey:key,receipt:{id:'attendance'}})};
   const f=await setup(t,{adapter}),self={...worker,modules:['warehouse'],canRunTasks:false};f.people.set(worker.id,self);f.people.set(admin.id,{...admin,modules:['warehouse']});const {task}=await f.request('tasks.create',{goal:'完成本人签到',scope:{modules:['warehouse']}},self);f.runtime.store.update('task',task.id,{status:'running'});
-  await assert.rejects(f.runtime.invokeTool(task.id,'erp_prepare',{module:'warehouse',capabilityId:'inventory.apply',input:{}}),{code:'CAPABILITY_DENIED'});await f.runtime.invokeTool(task.id,'erp_prepare',{module:'warehouse',capabilityId:'attendance.complete',input:{}});
+  assert.ok((await f.runtime.invokeTool(task.id,'erp_capabilities',{})).capabilities.some(cap=>cap.id==='inventory.apply'));await f.runtime.invokeTool(task.id,'erp_prepare',{module:'warehouse',capabilityId:'attendance.complete',input:{}});
   const {review}=await f.request('tasks.get',{taskId:task.id},self);assert.equal(review.canApprove,true);const args={taskId:task.id,reviewId:review.id,resultVersion:review.resultVersion,revision:review.revision};await assert.rejects(f.request('reviews.approve',args),{code:'TASK_PERMISSION_REQUIRED'});assert.equal((await f.request('reviews.approve',args,self)).task.status,'completed');assert.equal(commits,1);
 });
 

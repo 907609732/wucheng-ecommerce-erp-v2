@@ -6,9 +6,22 @@ Latest user direction: remove permission management. The system Agent no longer
 advertises, queries, prepares or commits permission-policy changes. All public
 `permissions.*` requests fail with FEATURE_REMOVED, even if an old host extension
 is present. Frozen legacy permission-change drafts cannot be approved or committed.
-Existing identity/module guards, task ownership, result review and repeat-write
-protection remain until the access-scope decision is clarified. Regression cases
-were updated for removal; no tests have been run in this implementation phase.
+The user subsequently clarified that every authenticated, enabled member can
+use every business function and view all company business data. Runtime no longer
+enforces obsolete roles, per-person modules, task-owner visibility or historical
+`dataAccessRequirements`. Real membership is still resolved by the host, never
+accepted from model input. Compatibility actors use the common all-business shape.
+Company settings, schedules and backups follow that same authenticated access.
+
+Original task ownership remains an audit fact. Manual continuation or supplementary
+requirements record the actual current executor; reviewed assignment records the
+actual dispatcher and chosen real employee. A follow-up goal invalidates the old
+review, expands future execution to all modules and emits `scope.changed`; simple
+resume preserves its old scope. Old results/reviews never gain an expanded scope.
+Human result confirmation, exact actor signatures, unknown outcomes and repeat-write
+protection remain. Unbound uploads are private until explicitly attached to a task;
+artifact handoff remains same-task and verifies source/path/size/hash. Regression
+cases were updated; no tests have been run in this implementation phase.
 
 The user explicitly resumed the rebuild. The following changes are implemented,
 but remain untested until the single consolidated acceptance after code freeze:
@@ -28,7 +41,7 @@ but remain untested until the single consolidated acceptance after code freeze:
   checks as `artifacts.open`, delegating byte/type validation to the private host.
 - Task artifacts now store their real invoking adapter/capability provenance.
   `context.resolveTaskArtifact(id)` is private, same-task only, rechecks the fresh
-  actor's source-module scope plus real path/size/hash, and rejects legacy artifacts
+  actor's enabled membership and same-task source scope plus real path/size/hash, and rejects legacy artifacts
   without trusted provenance for handoff (preview remains allowed separately).
 - Result blocks carry trusted source module/capability and unique block IDs.
   Human `tasks.input` corrections validate the exact result/row/before-value
@@ -39,13 +52,9 @@ but remain untested until the single consolidated acceptance after code freeze:
 - Backup listing/verification and reviewed `backups.restore-copy` now use the
   private host hooks. The signed plan binds backup ID, recovery ID and manifest
   SHA; receipt recovery cannot accept a different source/target or active ledger.
-- A task now accumulates trusted `dataAccessRequirements` before tool events or
-  artifacts are generated and when results are appended. Reads/list/history and
-  artifact access recheck explicit roles, permission flags and data modules using
-  the current actor and registered capability. Ordinary draft history does not
-  acquire an implicit write-permission gate. Legacy block/step/event/effect
-  provenance is checked; unattributed system results require a fully authorised
-  administrator. All backup capabilities require access to all five data modules.
+- The short-lived role/module `dataAccessRequirements` implementation was retired
+  after the user's explicit all-member decision. Existing metadata stays in saved
+  records for history but is ignored and omitted from public task payloads.
 - `artifacts.preview` requires the current task ID; `artifacts.open` validates it
   when supplied, retaining compatibility with older downloads without task ID.
 - `tests/agent-runtime-resume.test.mjs` contains the new consolidated regression

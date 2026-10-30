@@ -8,7 +8,7 @@ const safeKey=value=>typeof value==='string'&&value.length>0&&value.length<=160&
 export function prepareResultCorrections({payload,task,result,adapterMap,actor,now=Date.now}){
   const request=payload.corrections;
   if(!plain(request)||!Array.isArray(request.edits)||request.edits.length<1||request.edits.length>100)throw agentError('CORRECTIONS_INVALID','请选择 1–100 个草稿字段进行更正');
-  if(!['admin','editor'].includes(actor.role)||actor.canRunTasks!==true)throw agentError('TASK_PERMISSION_REQUIRED','当前人员无权更正业务草稿',403);
+  if(!actor?.id||actor.enabled===false)throw agentError('IDENTITY_REQUIRED','请先登录公司工作台',401);
   if(!result||result.id!==request.resultId||result.version!==request.resultVersion||task.resultId!==result.id)throw agentError('RESULT_STALE','结果版本已变化，请刷新后重新核对更正',409);
   if(!['waiting_review','waiting_input','paused','failed'].includes(task.status)||result.receipt||(task.completedStages||[]).length)throw agentError('RESULT_NOT_EDITABLE','此结果已有提交或不属于可更正草稿，请另建更正任务',409);
   const seen=new Set(),edits=[];
@@ -16,7 +16,7 @@ export function prepareResultCorrections({payload,task,result,adapterMap,actor,n
     if(!plain(edit)||!safeKey(edit.blockId)||!safeKey(edit.field)||!scalar(edit.rowKey)||edit.rowKey===null||!Object.hasOwn(edit,'before')||!Object.hasOwn(edit,'after')||!scalar(edit.before)||!scalar(edit.after))throw agentError('CORRECTIONS_INVALID','更正字段、稳定行标识或数值无效');
     const matching=(result.blocks||[]).filter(block=>block.id===edit.blockId),block=matching[0];
     const cap=adapterMap.get(block?.sourceModule)?.capabilities?.find(item=>item.id===block.sourceCapabilityId);
-    if(matching.length!==1||block.type!=='table'||!safeKey(block.rowKey)||!Array.isArray(block.editableFields)||!block.editableFields.includes(edit.field)||!Array.isArray(cap?.resultEditFields)||!cap.resultEditFields.includes(edit.field)||!actor.modules.includes(block.sourceModule)||!(result.prepared||[]).some(step=>step.module===block.sourceModule&&step.capabilityId===block.sourceCapabilityId))throw agentError('RESULT_FIELD_READ_ONLY','此表格字段未声明为可更正草稿',403);
+    if(matching.length!==1||block.type!=='table'||!safeKey(block.rowKey)||!Array.isArray(block.editableFields)||!block.editableFields.includes(edit.field)||!Array.isArray(cap?.resultEditFields)||!cap.resultEditFields.includes(edit.field)||!(result.prepared||[]).some(step=>step.module===block.sourceModule&&step.capabilityId===block.sourceCapabilityId))throw agentError('RESULT_FIELD_READ_ONLY','此表格字段未声明为可更正草稿',403);
     const rows=(Array.isArray(block.rows)?block.rows:[]).filter(row=>plain(row)&&Object.hasOwn(row,block.rowKey)&&canonicalJson(row[block.rowKey])===canonicalJson(edit.rowKey));
     if(rows.length!==1||!Object.hasOwn(rows[0],edit.field)||canonicalJson(rows[0][edit.field])!==canonicalJson(edit.before))throw agentError('RESULT_ROW_CHANGED','原字段或行标识已变化，请刷新后重新更正',409);
     const key=canonicalJson([edit.blockId,edit.rowKey,edit.field]);

@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {agentError} from './approval.mjs';
+const modules=new Set(['warehouse','purchase','sales','overview','exporter','system']);
 
 export async function nextOccurrence(cron,timezone,after,{allowLegacyThirtySeconds=false}={}){
   if(typeof cron!=='string'||cron.trim().split(/\s+/).length!==5&&!(allowLegacyThirtySeconds&&cron==='*/30 * * * * *'))throw agentError('SCHEDULE_INVALID','请使用五段 cron 表达式');
@@ -13,16 +14,16 @@ export function createAgentScheduler({store,createTask,resolveActor,now=Date.now
   const isMigratedThirtySeconds=schedule=>schedule?.cron==='*/30 * * * * *'&&store.list('schedule_migration').some(marker=>marker.scheduleId===schedule.id);
   const api={
     async prepare(input,actor,{allowLegacyThirtySeconds=false,origin}={}){
-      if(actor.canRunTasks!==true||actor.role==='viewer')throw agentError('TASK_PERMISSION_REQUIRED','无权维护定时任务',403);
+      if(!actor?.id||actor.enabled===false)throw agentError('IDENTITY_REQUIRED','请先登录公司工作台',401);
       const old=input.id?store.get('schedule',input.id):null;
       if(input.id&&!old)throw agentError('SCHEDULE_NOT_FOUND','定时任务不存在',404);
-      if(old&&old.ownerId!==actor.id&&actor.role!=='admin')throw agentError('SCHEDULE_DENIED','只能维护自己的定时任务',403);
       const value={...old,...input,id:old?.id||randomUUID(),ownerId:old?.ownerId||actor.id,goal:String(input.goal??old?.goal??'').trim(),engine:input.engine||old?.engine||'codex',timezone:input.timezone||old?.timezone||'Asia/Shanghai',noOverlap:true,misfirePolicy:input.misfirePolicy||old?.misfirePolicy||'once',enabled:input.enabled??old?.enabled??true};
       value.origin=old?.origin||origin;
       if(!value.goal||value.goal.length>20000||!['codex','hermes'].includes(value.engine)||!['once','skip'].includes(value.misfirePolicy))throw agentError('SCHEDULE_INVALID','定时任务目标、引擎或漏跑规则无效');
-      const selected=value.scope?.modules||[...actor.modules,'system'];
-      if(!Array.isArray(selected)||selected.some(m=>m!=='system'&&!actor.modules.includes(m)))throw agentError('MODULE_DENIED','定时任务包含未授权模块',403);
+      const selected=value.scope?.modules||[...modules];
+      if(!Array.isArray(selected)||selected.some(module=>!modules.has(module)))throw agentError('SCHEDULE_INVALID','定时任务的业务范围无效',400);
       value.scope={modules:[...new Set(selected)]};
+      value.updatedBy=actor.id;
       value.nextRunAt=await next(value.cron,value.timezone,now(),{allowLegacyThirtySeconds:allowLegacyThirtySeconds||isMigratedThirtySeconds(old)});
       if(old&&input.version!==old.version)throw agentError('AGENT_REVISION_CHANGED','定时任务已变化，请重新查看后保存',409);
       return {value,expectedVersion:old?.version};
@@ -34,7 +35,8 @@ export function createAgentScheduler({store,createTask,resolveActor,now=Date.now
       try{for(const schedule of store.list('schedule')){
         if(!schedule.enabled||Date.parse(schedule.nextRunAt)>now())continue;
         const actor=await resolveActor(schedule.ownerId);
-        if(!actor||actor.enabled===false||actor.canRunTasks!==true||actor.role==='viewer'||(schedule.scope?.modules||[]).some(m=>m!=='system'&&!actor.modules?.includes(m))){store.update('schedule',schedule.id,{blockedReason:'permission_revoked'});continue;}
+        if(!actor?.id||actor.enabled===false){store.update('schedule',schedule.id,{blockedReason:'member_unavailable'});continue;}
+        if((schedule.scope?.modules||[]).some(module=>!modules.has(module))){store.update('schedule',schedule.id,{blockedReason:'invalid_scope'});continue;}
         if(store.list('task',schedule.ownerId).some(t=>t.scheduleId===schedule.id&&active.has(t.status))){store.update('schedule',schedule.id,{blockedReason:'previous_run_pending'});continue;}
         const occurrence=schedule.nextRunAt,late=now()-Date.parse(occurrence)>60000;
         const nextRunAt=await next(schedule.cron,schedule.timezone,now(),{allowLegacyThirtySeconds:isMigratedThirtySeconds(schedule)});

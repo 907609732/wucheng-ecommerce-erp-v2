@@ -102,9 +102,12 @@ test('human row corrections invalidate approval and preserve the old draft witho
   const before=await f.request('tasks.get',{taskId:task.id}),payload=correctionPayload(task,result);
   await assert.rejects(f.request('tasks.input',payload,{trustedUi:false}),{code:'HUMAN_REVIEW_REQUIRED'});
   await assert.rejects(f.request('tasks.input',{...payload,corrections:{...payload.corrections,resultVersion:0}}),{code:'RESULT_STALE'});
-  const changed=await f.request('tasks.input',payload);
+  const member={id:'other-authenticated-member',enabled:true,role:'viewer',canRunTasks:false,modules:[]};f.people.set(member.id,member);
+  const changed=await f.request('tasks.input',payload,{actor:member});
   assert.equal(changed.task.status,'queued');assert.equal(changed.task.review,null);
-  assert.equal(changed.task.corrections[0].actorId,actor.id);assert.equal(changed.task.corrections[0].edits[0].after,250);
+  assert.equal(changed.task.corrections[0].actorId,member.id);assert.equal(changed.task.corrections[0].edits[0].after,250);assert.equal(changed.task.ownerId,actor.id);assert.equal(changed.task.executionActorId,member.id);assert.equal(changed.task.lastInputBy,member.id);
+  assert.deepEqual(changed.task.scope.modules,['warehouse','purchase','sales','overview','exporter','system']);
+  const scopeChange=f.runtime.store.events(task.id).find(event=>event.type==='scope.changed');assert.deepEqual(scopeChange.before.modules,['sales']);assert.equal(scopeChange.reason,'authenticated_user_followup_after_permission_removal');assert.equal(scopeChange.actorId,member.id);
   const original=f.runtime.store.get('result',result.id);
   assert.equal(original.blocks[0].rows[0].amountCents,100);assert.equal(original.prepared[0].commitData.amountCents,100);
   assert.equal(f.runtime.store.get('task',task.id).resultId,null);
@@ -147,7 +150,7 @@ test('private artifact handoff binds source to the invoking capability and rejec
   const other=await f.create(['overview','sales']);f.running(other);
   await assert.rejects(f.invoke(other,'sales','handoff',{artifactId:accepted.id}),{code:'ARTIFACT_DENIED'});
   await f.invoke(task,'sales','handoff',{artifactId:accepted.id});
-  f.people.set(actor.id,{...actor,modules:['sales']});await assert.rejects(consumerContext.resolveTaskArtifact(accepted.id),{code:'MODULE_DENIED'});
+  f.people.set(actor.id,{...actor,enabled:false});await assert.rejects(consumerContext.resolveTaskArtifact(accepted.id),{code:'MEMBER_DENIED'});
   f.people.set(actor.id,actor);
   const saved=f.runtime.store.get('artifact',accepted.id);fs.writeFileSync(saved.path,'source-b');
   await assert.rejects(f.invoke(task,'sales','handoff',{artifactId:accepted.id}),{code:'ARTIFACT_CHANGED'});
@@ -172,7 +175,7 @@ function backupHooks({lost=false,mismatched=false}={}){
   }};
 }
 
-test('backup queries are admin-only and a recovery copy requires exact human-bound evidence',async t=>{
+test('backup queries are shared by authenticated members and a recovery copy requires exact human-bound evidence',async t=>{
   const hooks=backupHooks(),f=fixture(t,{extensions:hooks.extensions}),task=await f.create(['system']);f.running(task);
   await f.invoke(task,'system','backups.list');await f.invoke(task,'system','backups.verify',{backupId:hooks.restore.backupId});
   const draft=await f.invoke(task,'system','backups.restore-copy',{backupId:hooks.restore.backupId},'prepare');
@@ -182,8 +185,8 @@ test('backup queries are admin-only and a recovery copy requires exact human-bou
   const done=await f.approve(task);assert.equal(done.task.status,'completed');assert.equal(hooks.writes,1);
   assert.equal(done.result.receipt.receipts[0].manifestSha256,hooks.restore.manifestSha256);
   assert.equal(done.result.receipt.receipts[0].recoveryId,hooks.restore.recoveryId);assert.equal(done.result.receipt.receipts[0].activated,false);
-  const other=await f.create(['system']);f.running(other);f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
-  await assert.rejects(f.invoke(other,'system','backups.list'),{code:'CAPABILITY_DENIED'});
+  const other=await f.create(['system']);f.running(other);f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false,modules:[]});
+  assert.match((await f.invoke(other,'system','backups.list')).result.summary,/备份目录/);
 });
 
 test('lost recovery-copy responses reconcile their receipt without copying twice',async t=>{
@@ -202,7 +205,7 @@ test('a completed response with a different manifest never verifies a recovery c
   assert.equal((await f.request('tasks.control',{taskId:task.id,action:'resume'})).task.status,'unknown');assert.equal(hooks.writes,1);
 });
 
-test('role or module revocation removes sensitive system histories and all artifact entry points',async t=>{
+test('all authenticated members share system histories and task-bound artifacts despite old permission metadata',async t=>{
   let f,artifact,previewed=0;
   f=fixture(t,{extensions:{
     'backups.verify':async(input,ctx)=>{
@@ -215,21 +218,19 @@ test('role or module revocation removes sensitive system histories and all artif
   }});
   const task=await f.create(['system']);f.running(task);
   const first=await f.invoke(task,'system','backups.verify',{backupId:'backup-source'});
-  const requirements=f.runtime.store.get('task',task.id).dataAccessRequirements;
-  assert.deepEqual(requirements[0].roles,['admin']);assert.equal(requirements[0].modules.length,5);
+  f.runtime.store.update('task',task.id,{dataAccessRequirements:[{module:'system',capabilityId:'backups.verify',roles:['obsolete-inaccessible-role'],requiresTaskPermission:true,modules:['obsolete-module']}]});
   await f.request('artifacts.preview',{id:artifact.id,taskId:task.id});assert.equal(previewed,1);
   const other=await f.create(['system']);
   await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:other.id}),{code:'ARTIFACT_TASK_MISMATCH'});
   await assert.rejects(f.request('artifacts.preview',{id:artifact.id}),{code:'ARTIFACT_TASK_MISMATCH'});
-  f.people.set(actor.id,{...actor,role:'editor'});
-  assert.equal((await f.request('tasks.list')).tasks.some(item=>item.id===task.id),false);
-  for(const payload of [{taskId:task.id},{taskId:task.id,resultVersion:first.result.version}])await assert.rejects(f.request('tasks.get',payload),{code:'TASK_DATA_DENIED'});
-  await assert.rejects(f.request('artifacts.open',{id:artifact.id}),{code:'TASK_DATA_DENIED'});
-  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:task.id}),{code:'TASK_DATA_DENIED'});assert.equal(previewed,1);
-  f.people.set(actor.id,{...actor,modules:actor.modules.filter(module=>module!=='overview')});
-  assert.equal((await f.request('tasks.list')).tasks.some(item=>item.id===task.id),false);
-  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'MODULE_DENIED'});
-  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:task.id}),{code:'MODULE_DENIED'});
+  const member={id:'shared-history-member',enabled:true,role:'viewer',canRunTasks:false,modules:[]};f.people.set(member.id,member);
+  assert.equal((await f.request('tasks.list',{}, {actor:member})).tasks.some(item=>item.id===task.id),true);
+  for(const payload of [{taskId:task.id},{taskId:task.id,resultVersion:first.result.version}])assert.equal((await f.request('tasks.get',payload,{actor:member})).result.id,first.result.id);
+  await f.request('artifacts.open',{id:artifact.id},{actor:member});await f.request('artifacts.preview',{id:artifact.id,taskId:task.id},{actor:member});assert.equal(previewed,3);
+  await assert.rejects(f.runtime.request('tasks.get',{taskId:task.id},{}),{code:'IDENTITY_REQUIRED'});
+  f.people.set(member.id,{...member,enabled:false});
+  await assert.rejects(f.request('tasks.get',{taskId:task.id},{actor:member}),{code:'MEMBER_DENIED'});
+  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:task.id},{actor:member}),{code:'MEMBER_DENIED'});
 });
 
 test('ordinary draft history stays readable to a viewer without turning implicit write permission into a read gate',async t=>{
@@ -243,18 +244,18 @@ test('ordinary draft history stays readable to a viewer without turning implicit
   assert.equal((await f.request('tasks.get',{taskId:task.id})).result.blocks[0].rows[0].amountCents,100);
 });
 
-test('unattributed legacy system results fail closed instead of exposing their history after downgrade',async t=>{
+test('legacy system result visibility follows company-wide authenticated access rather than retired role gates',async t=>{
   const f=fixture(t,{extensions:{'backups.verify':async()=>({summary:'旧版公共备份结果',blocks:[{type:'text',text:'合成备份记录'}],evidence:[]})}}),task=await f.create(['system']);f.running(task);
   await f.invoke(task,'system','backups.verify',{backupId:'backup-source'});
   f.runtime.store.update('task',task.id,{dataAccessRequirements:undefined});
   for(const kind of ['result','result_version'])for(const value of f.runtime.store.list(kind).filter(value=>value.taskId===task.id))f.runtime.store.update(kind,value.id,{blocks:value.blocks.map(({sourceModule,sourceCapabilityId,...block})=>block)});
   f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
-  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'TASK_DATA_DENIED'});
-  assert.equal((await f.request('tasks.list')).tasks.some(value=>value.id===task.id),false);
-  f.people.set(actor.id,actor);assert.ok((await f.request('tasks.get',{taskId:task.id})).result);
+  assert.ok((await f.request('tasks.get',{taskId:task.id})).result);
+  assert.equal((await f.request('tasks.list')).tasks.some(value=>value.id===task.id),true);
+  f.people.set(actor.id,{...actor,enabled:false});await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'MEMBER_DENIED'});
 });
 
-test('sensitive tool failures still retain access requirements before emitting files or events',async t=>{
+test('partial evidence remains shared with logged-in members but rejects unauthenticated artifact access',async t=>{
   let f,artifact;
   f=fixture(t,{extensions:{'backups.verify':async(_,ctx)=>{
     const file=path.join(f.directory,'tasks',ctx.taskId,'partial-proof.txt');fs.writeFileSync(file,'partial');
@@ -264,6 +265,21 @@ test('sensitive tool failures still retain access requirements before emitting f
   const task=await f.create(['system']);f.running(task);await assert.rejects(f.invoke(task,'system','backups.verify',{backupId:'backup-source'}));
   assert.equal(f.runtime.store.get('task',task.id).resultId,null);
   f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
-  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'TASK_DATA_DENIED'});
-  await assert.rejects(f.request('artifacts.open',{id:artifact.id}),{code:'TASK_DATA_DENIED'});
+  assert.ok((await f.request('tasks.get',{taskId:task.id})).events.some(event=>event.type==='partial-proof'));
+  assert.equal((await f.request('artifacts.open',{id:artifact.id})).opened,true);
+  await assert.rejects(f.runtime.request('artifacts.open',{id:artifact.id},{}),{code:'IDENTITY_REQUIRED'});
+});
+
+test('taking over a shared task uses the actual logged-in executor while unbound uploads remain private',async t=>{
+  let calledActor;
+  const f=fixture(t,{adapters:[{id:'sales',binding,capabilities:[capability('read')],query:(_,input,ctx)=>{calledActor=ctx.actor.id;return {summary:'已读取当前任务绑定原件',blocks:[{type:'text',text:fs.readFileSync(ctx.resolveAttachment(upload.id).path,'utf8')}],evidence:[]};}}],engine:{run:async({invoke})=>{await invoke('erp_query',{module:'sales',capabilityId:'read',input:{}});return {usage:{totalTokens:1}};}}});
+  const member={id:'actual-member-b',enabled:true,role:'viewer',modules:[],canRunTasks:false};f.people.set(member.id,member);
+  await f.request('settings.save',{company:{model:'synthetic-resume'}},{actor:member});
+  const upload=await f.request('attachments.upload',{name:'private-source.txt',bytes:Buffer.from('explicit task-bound source').toString('base64')});
+  await assert.rejects(f.request('tasks.create',{goal:'不能盗用未绑定的个人暂存附件',attachmentIds:[upload.id]},{actor:member}),{code:'ATTACHMENT_DENIED'});
+  const {task}=await f.request('tasks.create',{goal:'共享业务任务',attachmentIds:[upload.id],scope:{modules:['sales']}});
+  await f.request('tasks.control',{taskId:task.id,action:'pause'});f.runtime.store.update('task',task.id,{engineSession:{id:'previous-member-a-session'}});
+  const resumed=await f.request('tasks.control',{taskId:task.id,action:'resume'},{actor:member});
+  assert.equal(resumed.task.ownerId,actor.id);assert.equal(resumed.task.executionActorId,member.id);assert.deepEqual(resumed.task.scope.modules,['sales']);assert.equal(f.runtime.store.get('task',task.id).engineSession,null);
+  await f.runtime.run(task.id);assert.equal(calledActor,member.id);assert.equal((await f.request('tasks.get',{taskId:task.id},{actor:member})).task.status,'completed');
 });
