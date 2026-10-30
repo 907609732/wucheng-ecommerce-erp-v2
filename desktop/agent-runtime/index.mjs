@@ -9,6 +9,7 @@ import {fromJsonSchema} from '@modelcontextprotocol/server';
 import {createSystemAgentAdapter} from './system-adapter.mjs';
 import {reconcileJobIssues} from './job-issues.mjs';
 import {prepareResultCorrections} from './result-corrections.mjs';
+import {discoverAgentCapabilities} from './capability-discovery.mjs';
 
 const live=new Set(['queued','running','committing']);
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -72,7 +73,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   async function invokeTool(taskId,name,input){
     const original=store.get('task',taskId),actor=await identity({id:original?.executionActorId||original?.ownerId,channel:'mcp'}),task=taskFor(taskId,actor);
     if(!['running','waiting_review'].includes(task.status))throw agentError('TASK_NOT_RUNNING','该任务当前不接受工具调用',409);
-    if(name==='erp_capabilities')return {capabilities:(await capabilities(actor)).filter(c=>task.scope.modules.includes(c.module))};
+    if(name==='erp_capabilities')return discoverAgentCapabilities((await capabilities(actor)).filter(c=>task.scope.modules.includes(c.module)),input,task.scope.modules);
     if(name==='erp_ask'){const question=String(input.question||'').trim();if(!question)throw agentError('QUESTION_INVALID','补充问题不能为空');store.update('task',taskId,{status:'waiting_input',question});emit(taskId,'input.required',{question});return {waitingForUser:true};}
     if(name==='erp_task_result')return {result:publicResult(resultState(taskId))};
     if(!['erp_query','erp_prepare'].includes(name))throw agentError('TOOL_DENIED','此工具不在公司业务能力清单中',403);

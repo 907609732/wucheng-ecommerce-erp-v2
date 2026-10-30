@@ -11,7 +11,7 @@ const fieldLabels={id:'编号',name:'名称',filename:'文件名',fileId:'文件
 const fieldLabel = key => fieldLabels[key] || key;
 const when = value => {const date = new Date(value);return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN',{hour12:false});};
 const pending = new Set(['waiting_input','waiting_review','unknown']);
-const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,connected:false};
+const state = {view:'home',status:null,tasks:[],cursor:null,taskId:null,detail:null,resultSelection:null,events:[],attachments:[],inputAttachments:[],reviewKey:null,displayedBinding:null,resultRenderKey:null,eventRenderKey:null,taskEpoch:0,settingsEpoch:0,settings:null,schedules:[],scheduleId:null,scheduleVersion:null,scheduleEnabled:true,connectionPlan:null,connectionCanConfigure:false,busy:new Set(),polling:false,pollRequested:false,lastTaskPoll:0,eventsPending:false,connected:false};
 const resultTools=createResultTools({api,getDetail:()=>state.detail,getStatus:()=>state.status,isHistorical:()=>!!state.resultSelection,makeTable:tableBlock,onRefresh:()=>pollTask(true),onDraftChange:syncActions,notice,showError,loading});
 
 function errorMessage(error) {
@@ -121,18 +121,32 @@ async function createTask(event) {
 }
 async function openTask(id) {
   if(!resultTools.leave())return;
-  const epoch=++state.taskEpoch;state.taskId=id;state.detail=null;state.resultSelection=null;state.events=[];state.reviewKey=null;state.displayedBinding=null;state.resultRenderKey=null;state.eventRenderKey=null;state.inputAttachments=[];renderAttachments(true);$('result-history-label').hidden=true;$('historical-result-note').hidden=true;
+  const epoch=++state.taskEpoch;state.taskId=id;state.detail=null;state.resultSelection=null;state.events=[];state.reviewKey=null;state.displayedBinding=null;state.resultRenderKey=null;state.eventRenderKey=null;state.eventsPending=false;state.inputAttachments=[];renderAttachments(true);$('result-history-label').hidden=true;$('historical-result-note').hidden=true;
   $('task-title').textContent='正在读取任务';$('task-scope').replaceChildren();$('task-events').replaceChildren();$('task-actions').replaceChildren();$('review-panel').hidden=true;$('task-input').value='';
   loading($('result-content'),'正在读取结果','content');loading($('task-loading'),'正在读取执行动态');navigate('task');
-  try{const detail=await api.request('tasks.get',{taskId:id,afterSequence:0});if(epoch!==state.taskEpoch)return;renderDetail(detail,{replaceEvents:true});$('task-title').focus({preventScroll:true});}
+  try{await readTaskPages(id,epoch,{replaceEvents:true});if(epoch!==state.taskEpoch)return;$('task-title').focus({preventScroll:true});}
   catch(error){if(epoch===state.taskEpoch){$('task-loading').replaceChildren();$('result-content').replaceChildren(make('p','暂时无法读取此任务。请刷新结果重试。','empty'));showError(error);}}
+}
+function eventMessage(event) {
+  const data=event.data || event.payload || {};
+  return event.message || event.text || event.question || event.goal || data.message || data.text || data.question || data.summary || (event.module ? (moduleLabels[event.module] || event.module) : '');
+}
+function displayEvents(events) {
+  const rows=[];
+  for(const event of events){
+    const previous=rows.at(-1);
+    if(event.type==='engine.message' && previous?.type==='engine.message'){
+      previous.message+=String(eventMessage(event));previous.lastSequence=event.sequence ?? event.id;
+    }else rows.push({...event,...(event.type==='engine.message'?{message:String(eventMessage(event))}:{})});
+  }
+  return rows;
 }
 function eventNode(event) {
   const item=make('li');item.dataset.sequence=event.sequence ?? event.id ?? '';
   const data=event.data || event.payload || {};
   const title=event.title || data.title || ({created:'已接收目标','task.created':'已接收目标',started:'开始处理','task.running':'开始处理',progress:'执行进展','engine.message':'AI 工作记录',message:'工作记录',user_input:'补充要求','user.input':'补充要求','input.required':'需要补充信息','step.started':'正在处理业务','step.completed':'业务步骤已完成','result.updated':'结果已更新','review.required':'结果待复核','review.rejected':'结果已退回','review.invalidated':'需要重新复核','commit.verified':'提交回执已核对','commit.blocked':'提交需要处理',review:'结果待复核',completed:'处理结果','task.completed':'处理结果',paused:'已暂停','task.paused':'已暂停',failed:'执行中断','task.cancelled':'已停止任务'}[event.type] || '执行记录');
   item.append(make('strong',title));
-  const message=event.message || event.text || event.question || event.goal || data.message || data.text || data.question || data.summary || (event.module ? (moduleLabels[event.module] || event.module) : '');
+  const message=eventMessage(event);
   if(message)item.append(make('p',message));
   const time=make('time',when(event.createdAt || event.timestamp || event.at));item.append(time);return item;
 }
@@ -153,7 +167,11 @@ function renderDetail(detail,{replaceEvents=false}={}) {
   if(task.assigneeId)$('task-scope').append(make('span','当前负责人：'+(task.assigneeLabel || task.assigneeId)));
   $('task-reference').textContent='任务编号：'+task.id;
   const eventKey=JSON.stringify(state.events);
-  if(eventKey!==state.eventRenderKey){$('task-events').replaceChildren(...state.events.map(eventNode));if(!state.events.length)$('task-events').append(make('li','任务记录尚未返回。'));state.eventRenderKey=eventKey;}
+  if(eventKey!==state.eventRenderKey){
+    const target=$('task-events'),scrollTop=target.scrollTop,follow=!target.children.length || target.scrollHeight-target.clientHeight-scrollTop<=48;
+    target.replaceChildren(...displayEvents(state.events).map(eventNode));if(!state.events.length)target.append(make('li','任务记录尚未返回。'));
+    target.scrollTop=follow?target.scrollHeight:scrollTop;state.eventRenderKey=eventKey;
+  }
   $('task-loading').replaceChildren();
   if(['running','queued','committing'].includes(task.status)){
     loading($('task-loading'),task.progress?.message || taskStates[task.status]);
@@ -220,10 +238,13 @@ function renderResultHistory(detail) {
 }
 function renderResult(detail) {
   renderResultHistory(detail);
-  const target=$('result-content'),result=detail.result,key=JSON.stringify({result,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{id:state.status?.actor?.id,enabled:state.status?.actor?.enabled},capabilities:state.status?.capabilities});
+  const completion=!state.resultSelection && detail.task?.status==='completed'?state.events.findLast(event=>event.type==='task.completed'):null;
+  const aiSummary=completion?String(eventMessage(completion)):'';
+  const target=$('result-content'),result=detail.result,key=JSON.stringify({result,aiSummary,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{id:state.status?.actor?.id,enabled:state.status?.actor?.enabled},capabilities:state.status?.capabilities});
   if(state.resultRenderKey===key){renderReview(detail);return;}
   const {discardedChanges}=resultTools.renderStart(detail);state.resultRenderKey=key;target.replaceChildren();$('result-version').textContent=result?.version!=null?'版本 '+result.version:'';
   if(!result){target.append(make('p','结果准备好后，会在这里展示明细、来源和变更。','empty'));renderReview(detail,{preserveNotice:discardedChanges});return;}
+  if(aiSummary){const explanation=make('section','','result-block');explanation.dataset.aiSummary='true';explanation.append(make('h3','AI 处理说明'),make('p',aiSummary,'result-text'));target.append(explanation);}
   if(result.summary)target.append(make('p',result.summary,'result-summary'));
   for(const block of array(result.blocks)){
     const section=make('section','','result-block');if(block.title)section.append(make('h3',block.title));
@@ -266,12 +287,30 @@ async function review(decision) {
   $('review-check').checked=false;
   await run('review',async()=>{try{await api.request('reviews.'+decision,binding);}catch(error){await pollTask(true);throw error;}$('review-check').checked=false;await pollTask(true);void refreshTasks().catch(showError);},[$('approve-result'),$('reject-result')]);
 }
-async function pollTask(force=false) {
-  if(!state.taskId || state.polling || (!force && (state.view!=='task' || document.hidden)))return;
-  state.polling=true;const id=state.taskId,epoch=state.taskEpoch;
-  try{const sequence=state.events.reduce((max,event)=>Math.max(max,Number(event.sequence)||0),0);const detail=await api.request('tasks.get',{taskId:id,afterSequence:sequence,...state.resultSelection});if(id===state.taskId && epoch===state.taskEpoch)renderDetail(detail);}
-  catch(error){showError(error);}finally{state.polling=false;}
+async function readTaskPages(id,epoch,{afterSequence=0,replaceEvents=false}={}) {
+  let sequence=afterSequence;
+  const selection=state.resultSelection;
+  for(let page=0;page<3;page++){
+    const detail=await api.request('tasks.get',{taskId:id,afterSequence:sequence,...selection});
+    if(id!==state.taskId || epoch!==state.taskEpoch)return;
+    renderDetail(detail,{replaceEvents:replaceEvents && page===0});
+    const incoming=array(detail.events),next=incoming.reduce((max,event)=>Math.max(max,Number(event.sequence)||0),sequence);
+    state.eventsPending=incoming.length>=500 && next>sequence;
+    if(!state.eventsPending)return;
+    sequence=next;
+  }
 }
+async function pollTask(force=false) {
+  if(!state.taskId || (!force && state.view!=='task'))return;
+  if(state.polling){if(force)state.pollRequested=true;return;}
+  const active=['queued','running','committing'].includes(state.detail?.task?.status) || state.eventsPending;
+  if(!force && document.hidden && (!active || Date.now()-state.lastTaskPoll<10000))return;
+  state.polling=true;state.lastTaskPoll=Date.now();const id=state.taskId,epoch=state.taskEpoch;
+  try{const sequence=state.events.reduce((max,event)=>Math.max(max,Number(event.sequence)||0),0);await readTaskPages(id,epoch,{afterSequence:sequence});}
+  catch(error){if(id===state.taskId && epoch===state.taskEpoch)showError(error);}
+  finally{state.polling=false;if(state.pollRequested){state.pollRequested=false;queueMicrotask(()=>void pollTask(true));}}
+}
+function syncVisibleTask() {if(!document.hidden && state.view==='task')void pollTask(true);}
 async function supplement(event) {
   event.preventDefault();const text=$('task-input').value.trim() || (state.inputAttachments.length?'补充资料：'+state.inputAttachments.map(file=>file.name).join('、'):'');if(!text || !canSupplement())return;
   await run('input',async()=>{await api.request('tasks.input',{taskId:state.taskId,text,attachmentIds:state.inputAttachments.map(file=>file.id)});$('task-input').value='';state.inputAttachments=[];state.resultSelection=null;renderAttachments(true);await pollTask(true);},[$('submit-input')]);
@@ -433,8 +472,16 @@ for(const action of ['login','connect','status','logout'])$('network-'+action).a
 $('local-diagnostics').hidden=typeof window.launcher?.readLogs!=='function';for(const action of ['read','copy','export'])$({read:'read-diagnostics',copy:'copy-diagnostics',export:'export-diagnostics'}[action]).addEventListener('click',()=>void diagnosticAction(action));
 $('new-schedule').addEventListener('click',()=>editSchedule());$('cancel-schedule').addEventListener('click',()=>{$('schedule-form').hidden=true;state.scheduleId=null;});$('schedule-frequency').addEventListener('change',scheduleVisibility);$('schedule-form').addEventListener('submit',saveSchedule);
 window.addEventListener('unhandledrejection',event=>showError(event.reason));
-const taskPoll=setInterval(()=>void pollTask(),2000);
-const listPoll=setInterval(()=>{if(!document.hidden && ['home','history'].includes(state.view))void refreshTasks().catch(showError);},15000);
+let taskPoll,listPoll;
+function startPolling() {
+  clearInterval(taskPoll);clearInterval(listPoll);
+  taskPoll=setInterval(()=>void pollTask(),2000);
+  listPoll=setInterval(()=>{if(!document.hidden && ['home','history'].includes(state.view))void refreshTasks().catch(showError);},15000);
+}
+startPolling();
+document.addEventListener('visibilitychange',syncVisibleTask);
+window.addEventListener('focus',syncVisibleTask);
+window.addEventListener('pageshow',()=>{startPolling();syncVisibleTask();});
 window.addEventListener('beforeunload',event=>{if(resultTools.hasChanges()){event.preventDefault();event.returnValue='';}});
 window.addEventListener('pagehide',()=>{clearInterval(taskPoll);clearInterval(listPoll);resultTools.dispose();});
 await run('initialize',async()=>{await refreshStatus();await refreshTasks();});
