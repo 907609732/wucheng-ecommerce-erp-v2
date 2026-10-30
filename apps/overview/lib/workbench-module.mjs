@@ -43,7 +43,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
     if(!found||!found.operation.remote&&!coordinator)throw Object.assign(Error('此接口仅允许主机本地管理'),{status:403});
     if(found.operation.uiOnly&&actor.channel!=='ui')throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
    }else if(!safe.has(q.method))throw Object.assign(Error('不允许此页面操作'),{status:403});
-   const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/agent/')||upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api}));
+   const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/agent/')||upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api,localDesktop}));
    const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(!localDesktop&&path.extname(file)==='.html'){
     let html=fs.readFileSync(file,'utf8');html=html.replace(/(<(?:script|link|img|a|iframe|form)\b[^>]*?\b(?:src|href|action)=['"])\/(?!\/)/gi,(_,start)=>start+ui);html=html.replace(/<head([^>]*)>/i,'<head$1><script src="'+ui+'workbench-base.js"></script>');r.type('html');return r.send(html);
    }return sendFile(file,...args);};
@@ -64,16 +64,17 @@ export function installWorkbenchAudit(integration,store){
  integration.workbench.finalize=()=>{for(const {name}of db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()){if(!/^[a-z_]+$/.test(name)||name.startsWith('sqlite_')||name.startsWith('workbench_')||name.startsWith('agent_')||['settings','mutex','mobile_sessions','mobile_attachment_owners','integration_edit_drafts'].includes(name))continue;for(const event of ['INSERT','UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS workbench_revision_${name}_${event.toLowerCase()} AFTER ${event} ON ${name} BEGIN UPDATE workbench_identity SET value=CAST(value AS INTEGER)+1 WHERE key='${revisionKey}';END;`);}};
  integration.workbench.finalize();
 }
-function remoteValue(value,{module,ui,api}){
- if(Array.isArray(value))return value.map(v=>remoteValue(v,{module,ui,api}));
- if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\'))?'':remoteValue(v,{module,ui,api})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url)result.sources[id].url='/apps/'+id+'/';return result;}
+function remoteValue(value,{module,ui,api,localDesktop=false}){
+ if(Array.isArray(value))return value.map(v=>remoteValue(v,{module,ui,api,localDesktop}));
+ if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\'))?'':remoteValue(v,{module,ui,api,localDesktop})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url){if(localDesktop){delete result.sources[id].url;result.sources[id].target={module:id};}else result.sources[id].url='/apps/'+id+'/';}return result;}
  if(typeof value==='string'){
+  if(localDesktop){const legacy=/^http:\/\/(?:127\.0\.0\.1|localhost):(17868|17870|17890)(?:[/?#]|$)/.exec(value);if(legacy)return {module:{17868:'purchase',17870:'sales',17890:'overview'}[legacy[1]]};}
   if(/^[A-Z]:[\\/]/i.test(value)||value.startsWith('\\\\'))return '[仅主机本地可用]';
   if(/[A-Z]:[\\/]/i.test(value))return value.replace(/[A-Z]:[\\/][^\r\n"'<>|]*/gi,'[主机路径]');
   if(value.startsWith('/api/'))return api+value;
   if(value.startsWith('/')&&!value.startsWith('//'))return ui+value.slice(1);
-  if(/^http:\/\/127\.0\.0\.1:17868\/?$/.test(value))return '/apps/purchase/';
-  if(/^http:\/\/127\.0\.0\.1:178(?:70|90)\/?$/.test(value))return value.includes('17890')?'/apps/overview/':'/apps/sales/';
+  if(/^http:\/\/127\.0\.0\.1:17868\/?$/.test(value))return localDesktop?{module:'purchase'}:'/apps/purchase/';
+  if(/^http:\/\/127\.0\.0\.1:178(?:70|90)\/?$/.test(value))return localDesktop?{module:value.includes('17890')?'overview':'sales'}:value.includes('17890')?'/apps/overview/':'/apps/sales/';
  }
  return value;
 }

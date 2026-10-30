@@ -22,6 +22,7 @@ for(const [module,install] of [['sales',sales],['overview',overview]])test(modul
   middleware(q,r,()=>{r.next=true;});return {q,r};
  }
  const local=request();assert.equal(local.r.next,true);local.r.json({url:'/api/freight/records',token:'secret',dataDir:'secret'});assert.deepEqual(local.r.value,{url:'/api/freight/records'});
+ const sources=request();sources.r.json({sources:{sales:{url:'http://127.0.0.1:17870'},purchase:{url:'http://127.0.0.1:17868'}},filePath:'secret',link:'http://localhost:17890/api/overview?month=2026-09'});assert.deepEqual(sources.r.value,{sources:{sales:{target:{module:'sales'}},purchase:{target:{module:'purchase'}}},link:{module:'overview'}});
  const page=request('/');assert.match(page.r.html,/src="\/app.js"/);assert.doesNotMatch(page.r.html,/workbench-base/);
  const remote=request('/',{localDesktop:false});assert.match(remote.r.html,new RegExp('/apps/'+module+'/workbench-base'));
  for(const claims of [{channel:'mcp'},{id:'member:test'},{uiOrigin:'http://127.0.0.1:19998'}])assert.equal(request('/api/bootstrap',claims).r.statusCode,403);
