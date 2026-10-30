@@ -23,7 +23,11 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
   if(!q.headers['x-workbench-actor']&&!q.headers['x-workbench-actor-signature'])return next();
   try{
    if(!loopback.has(q.socket.remoteAddress)||! /^(?:127\.0\.0\.1|localhost):\d+$/.test(q.headers.host||''))throw Error('工作台代理必须通过本机回环调用');
-   const actor=verifyWorkbenchActor(q.headers,key,{module,method:q.method,path:q.originalUrl});q.workbenchActor=actor;
+   const actor=verifyWorkbenchActor(q.headers,key,{module,method:q.method,path:q.originalUrl});
+   const localDesktop=Object.hasOwn(actor,'localDesktop');
+   if(localDesktop&&actor.localDesktop!==true||!localDesktop&&actor.uiOrigin!==undefined)throw Object.assign(Error('本机签名声明无效'),{status:403});
+   if(localDesktop&&(actor.channel!=='ui'||!actor.id.startsWith('windows:')||actor.uiOrigin!=='http://'+q.headers.host||q.headers.origin&&q.headers.origin!==actor.uiOrigin))throw Object.assign(Error('本机业务页身份或来源不匹配'),{status:403});
+   q.workbenchActor=actor;
    if(!safe.has(q.method))r.once('finish',()=>{try{service.onAudit?.({actor,method:q.method,path:q.path,status:r.statusCode});}catch{}});
    r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','same-origin');r.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'self'");
    const ui='/apps/'+module+'/',api='/apps/'+module;
@@ -31,16 +35,23 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
    q.workbench={module,uiPrefix:ui,apiBase:api};
    if(q.path.startsWith('/api/')){
     const found=patterns.find(p=>p.operation.method===(q.method==='HEAD'?'GET':q.method)&&p.re.test(q.path));
-    const coordinator=q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.channel==='ui';
+    const coordinator=!localDesktop&&q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.channel==='ui';
     if(!found||!found.operation.remote&&!coordinator)throw Object.assign(Error('此接口仅允许主机本地管理'),{status:403});
     if(found.operation.uiOnly&&actor.channel!=='ui')throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
    }else if(!safe.has(q.method))throw Object.assign(Error('不允许此页面操作'),{status:403});
+   if(localDesktop){
+    // Preserve sanitization and business gates, but native local views do not
+    // have a remote /apps prefix or a shared-gateway browser session.
+    const json=r.json.bind(r);r.json=value=>json(remoteValue(value,{module,ui:'/',api:''}));
+    if(service.runWithActor)return service.runWithActor(actor,next);return next();
+   }
    const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api}));
    const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(path.extname(file)==='.html'){
     let html=fs.readFileSync(file,'utf8');html=html.replace(/(<(?:script|link|img|a|iframe|form)\b[^>]*?\b(?:src|href|action)=['"])\/(?!\/)/gi,(_,start)=>start+ui);html=html.replace(/<head([^>]*)>/i,'<head$1><script src="'+ui+'workbench-base.js"></script>');r.type('html');return r.send(html);
    }return sendFile(file,...args);};
    // express.static uses sendFile internally, so serve protected HTML explicitly.
    if(q.method==='GET'&&(q.path==='/'||q.path.endsWith('.html'))){const relative=q.path==='/'?'index.html':q.path.slice(1);if(!relative.includes('..')){const file=path.join(root,'public',relative);if(fs.existsSync(file))return r.sendFile(file);}}
+   if(service.runWithActor)return service.runWithActor(actor,next);
    next();
   }catch(e){r.status(e.status||e.statusCode||401).json({error:e.message,code:e.code||'WORKBENCH_AUTH'});}
  });
@@ -48,6 +59,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
  return service;
 }
 export function installWorkbenchAudit(integration,store){
+ integration.workbench.runWithActor=(actor,next)=>store.withActor(actor,next);
  const {db}=store,module=integration.workbench.module;migrationInstance(store,module);const revisionKey='revision:'+module;db.prepare('INSERT OR IGNORE INTO workbench_identity(key,value) VALUES(?,?)').run(revisionKey,'0');
  Object.defineProperties(integration.state,{dataSetId:{enumerable:true,get:()=>db.prepare('SELECT value FROM workbench_identity WHERE key=?').get('ledger:'+module).value},revision:{enumerable:true,get:()=>db.prepare('SELECT value FROM workbench_identity WHERE key=?').get(revisionKey).value}});
  db.exec('CREATE TABLE IF NOT EXISTS workbench_request_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,method TEXT NOT NULL,path TEXT NOT NULL,status INTEGER NOT NULL,created_at TEXT NOT NULL)');integration.workbench.onAudit=entry=>db.prepare('INSERT INTO workbench_request_audit(actor,method,path,status,created_at) VALUES(?,?,?,?,?)').run(JSON.stringify(entry.actor),entry.method,entry.path,entry.status,new Date().toISOString());

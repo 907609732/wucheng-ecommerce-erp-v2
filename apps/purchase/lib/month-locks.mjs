@@ -58,8 +58,56 @@ export function openMonthLocks(db,{list,transaction}){
    setSetting(attemptKey,JSON.stringify({failures:0,until:0}));return record;
   }finally{checking=false;}
  }
+ // These contexts are supplied by verified UI requests or the central commit
+ // service, never copied from a request body. Existing standalone passwords stay.
+ function checkedReview(review){
+  if(!review?.actorId||!['workbench-ui-review','agent-central-review'].includes(review.authorization))throw failure('需要本次真实登录人员的复核记录','MONTH_REVIEW_REQUIRED',403);
+  if(review.authorization==='workbench-ui-review'&&(!review.sessionId||!review.requestId)||review.authorization==='agent-central-review'&&!review.approvalId)throw failure('复核记录不完整','MONTH_REVIEW_REQUIRED',403);
+  return {...review};
+ }
+ function confirmReviewed(entries,review){
+  const authorization=checkedReview(review);
+  if(!Array.isArray(entries)||!entries.length||entries.length>10000)throw failure('请选择需要锁定的月份和平台','INVALID_MONTH_SCOPE');
+  if(new Set(entries.map(c=>c.month+'|'+c.platform)).size!==entries.length)throw failure('锁定范围重复','INVALID_MONTH_SCOPE');
+  return transaction(()=>{
+   const rows=entries.map(({month,platform,revision})=>{
+    const current=preview(month,platform);
+    if(current.revision!==revision)throw failure('预览后订单已变化，请重新核对','MONTH_CHANGED',409);
+    if(confirmations().some(c=>c.month===month&&c.platform===platform))throw failure('确认状态已变化，请刷新','MONTH_ALREADY_CONFIRMED',409);
+    if(!current.canConfirm)throw failure(`${month} 需到北京时间 ${current.availableOn} 00:00 后确认`,'MONTH_CONFIRMATION_TOO_EARLY',403,{availableOn:current.availableOn,availableAt:current.availableAt});
+    return current;
+   }),batchId=randomBytes(16).toString('hex');
+   for(const row of rows){
+    db.prepare('INSERT INTO month_confirmations(month,platform,confirmed_at,snapshot_json) VALUES(?,?,?,?)').run(row.month,row.platform,new Date().toISOString(),JSON.stringify(row));
+    event('confirm',{...row,...authorization,batchId},row.month,row.platform);db.prepare('UPDATE month_events SET batch_id=? WHERE id=last_insert_rowid()').run(batchId);
+   }
+   return {confirmed:rows.length,batchId};
+  });
+ }
+ function cancelReviewed(entries,review){
+  const authorization=checkedReview(review);
+  if(!Array.isArray(entries)||!entries.length||entries.length>10000)throw failure('请选择需要解锁的月份和平台','INVALID_MONTH_SCOPE');
+  if(new Set(entries.map(c=>c.month+'|'+c.platform)).size!==entries.length)throw failure('解锁范围重复','INVALID_MONTH_SCOPE');
+  return transaction(()=>{
+   const rows=entries.map(({month,platform,version})=>{
+    validateScope(month,platform);const before=confirmations().find(c=>c.month===month&&c.platform===platform);
+    if(!before||typeof version!=='string'||version!==before.version)throw failure('确认状态已变化，请重新核对','MONTH_CONFIRMATION_CHANGED',409);
+    return before;
+   }),batchId=randomBytes(16).toString('hex');
+   for(const before of rows){
+    event('cancel',{confirmationVersion:before.version,confirmedAt:before.confirmedAt,snapshot:before.snapshot,current:preview(before.month,before.platform),...authorization,batchId},before.month,before.platform);
+    db.prepare('UPDATE month_events SET batch_id=? WHERE id=last_insert_rowid()').run(batchId);
+    db.prepare('DELETE FROM month_confirmations WHERE month=? AND platform=?').run(before.month,before.platform);
+   }
+   return {cancelled:rows.length,batchId,scopes:rows.map(({month,platform})=>({month,platform}))};
+  });
+ }
  return {
   configured,confirmations,preview,assertWritable,
+  confirmWithReview(input,review){confirmReviewed([input],review);return confirmations().find(c=>c.month===input.month&&c.platform===input.platform);},
+  confirmBatchWithReview:confirmReviewed,
+  cancelWithReview(input,review){const result=cancelReviewed([input],review);return {...result,month:input.month,platform:input.platform,cancelled:true};},
+  cancelBatchWithReview:cancelReviewed,
   overview(month){return {month,...confirmationTiming(month),basis:'paid',adminConfigured:configured(),platforms:Object.keys(importRules).map(platform=>({...preview(month,platform),confirmation:confirmations().find(c=>c.month===month&&c.platform===platform)||null}))};},
   confirm({month,platform,revision}){return transaction(()=>{
    if(!configured())throw failure('请先在数据与备份设置管理员密码','ADMIN_NOT_CONFIGURED',409);

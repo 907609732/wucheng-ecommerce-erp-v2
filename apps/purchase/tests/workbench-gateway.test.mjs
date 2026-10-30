@@ -40,3 +40,38 @@ test('delegated gateway identity remains signed, scoped and bound to UI confirma
  const plan={...wrong,migrationId:'test-migration'},committed=await request('/api/integration/v1/workbench/migration/commit','POST',{plan,permit:permit(plan)},{role:'admin'});assert.equal(committed.status,200,await committed.clone().text());const result=await committed.json();assert.equal(result.verification.ok,true);assert.equal((await(await request('/api/integration/v1/workbench/migration/verify/'+result.migrationId,'GET',null,{role:'admin'})).json()).ok,true);
  assert.equal((await request('/api/integration/v1/workbench/migration/maintenance','POST',{enabled:false,migrationId:'test-migration'},{role:'admin'})).status,200);
 });
+
+
+// Hybrid acceptance cases: authored only; run with the coordinated freeze.
+test('managed local business pages use verified Windows UI identity, reviewed month locks and durable manual receipts',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-hybrid-http-')),{app,store}=createApp({dataDir:dir,agentManaged:true}),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ t.after(async()=>{await new Promise(r=>server.close(r));store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const origin='http://127.0.0.1:'+server.address().port,key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim(),actorId='windows:S-1-5-21-1234';
+ async function call(route,{body,method=body?'POST':'GET',operationKey=crypto.randomUUID(),patch={},signed=true,requestOrigin=origin}={}){
+  const now=Date.now(),actor={v:1,id:actorId,login:'真实本机用户',label:'真实操作人',role:'admin',modules:['purchase'],canRunTasks:true,sessionId:'hybrid-ui-session',channel:'ui',requestId:crypto.randomUUID(),issuedAt:now,expiresAt:now+30000,module:'purchase',method,path:route,localDesktop:true,uiOrigin:origin,...patch};
+  const r=await fetch(origin+route,{method,headers:{'content-type':'application/json',Origin:requestOrigin,'Idempotency-Key':operationKey,...(signed?signWorkbenchActor(actor,key):{})},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:r.headers.get('content-type')?.includes('json')?await r.json():await r.text()};
+ }
+ assert.equal((await call('/api/bootstrap',{signed:false})).status,401);
+ const page=await call('/');assert.equal(page.status,200);assert.doesNotMatch(page.body,/src="\/apps\/purchase\/workbench-base\.js"/);
+ const bootstrap=await call('/api/bootstrap');assert.equal(bootstrap.status,200);assert.equal(bootstrap.body.confirmationMode,'signed-review');assert.equal(bootstrap.body.token,undefined);assert.equal(bootstrap.body.adminConfigured,false);
+ assert.equal((await call('/api/bootstrap',{patch:{id:'tailscale:spoof'}})).status,403);
+ assert.equal((await call('/api/bootstrap',{patch:{uiOrigin:'http://127.0.0.1:1'}})).status,403);
+ assert.equal((await call('/api/bootstrap',{requestOrigin:'http://untrusted.invalid'})).status,403);
+ assert.equal((await call('/api/backup',{body:{}})).status,403);
+ assert.equal((await call('/api/integration/v1/workbench/migration/export')).status,403);
+ const order={platform:'微信',account:'测试账号',orderNo:'HYBRID-001',date:'2020-01-02',supplier:'测试商家',amountCents:12345,items:[{title:'商品',qty:1}],uploadedBy:'伪造录入人'},saved=await call('/api/orders',{body:order,operationKey:'hybrid-once'});assert.equal(saved.status,200);assert.equal(saved.body.uploadedBy,'真实操作人');
+ assert.deepEqual((await call('/api/orders',{body:order,operationKey:'hybrid-once'})).body,saved.body);assert.equal(store.list().length,1);
+ assert.equal((await call('/api/orders',{body:{...order,amountCents:1},operationKey:'hybrid-once'})).status,409);
+ assert.equal((await call('/api/manual-receipts/hybrid-once')).body.state,'completed');
+ const audit=store.auditLog.detail(store.history(saved.body.id)[0].id);assert.equal(audit.actor.id,actorId);assert.equal(audit.actor.login,'真实本机用户');
+ const preview=(await call('/api/month-confirmations/preview?month=2020-01&platform='+encodeURIComponent('微信'))).body,scope={month:'2020-01',platform:'微信',revision:preview.revision};
+ assert.equal((await call('/api/month-confirmations',{body:scope})).status,400);
+ assert.equal((await call('/api/month-confirmations',{body:{...scope,ack:true},patch:{channel:'mcp',localDesktop:false}})).status,403);
+ const confirmed=await call('/api/month-confirmations',{body:{...scope,ack:true}});assert.equal(confirmed.status,200);assert.equal(store.monthLocks.configured(),false);
+ assert.throws(()=>store.insert({...order,orderNo:'locked'}),e=>e.code==='MONTH_LOCKED');
+ const cancel={month:'2020-01',platform:'微信',version:confirmed.body.version,ack:true};
+ assert.equal((await call('/api/month-confirmations/cancel',{body:cancel})).status,400);
+ assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,version:'stale',reason:'补录依据'}})).status,409);
+ assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,reason:'补录依据'}})).status,200);
+ const history=store.monthLocks.history('2020-01','微信');assert.equal(history.at(-1).details.actorId,actorId);assert.equal(history.at(-1).details.authorization,'workbench-ui-review');assert.equal(store.monthLocks.confirmations().length,0);
+});

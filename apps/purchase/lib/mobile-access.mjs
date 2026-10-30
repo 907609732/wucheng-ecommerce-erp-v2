@@ -71,6 +71,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   try{req.workbenchActor=mobileWorkbenchIdentity(req,{policyFile:agentManaged?undefined:mobilePolicyPath(policyFile),origin:config.origin,managed:agentManaged,workbenchKey});}catch(e){return res.status(e.status||403).json({error:e.message});}
   if(mobileBusinessWrite(req)&&isMaintenance())return res.status(503).json({error:'采购台正在维护，请稍后再保存',code:'MODULE_MAINTENANCE'});
   if(mobileBusinessWrite(req)){activeWrites++;let finished=false;const done=()=>{if(finished)return;finished=true;activeWrites--;if(req.workbenchActor)try{db.prepare('INSERT INTO workbench_request_audit(actor,method,path,status,created_at) VALUES(?,?,?,?,?)').run(JSON.stringify(req.workbenchActor),req.method,req.path,res.statusCode,new Date().toISOString());}catch{}};res.once('finish',done);res.once('close',done);}
+  if(req.workbenchActor&&store.withActor)return store.withActor(req.workbenchActor,next);
   next();
  });
  app.use(express.json({limit:'1mb'}));
@@ -94,9 +95,9 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  app.use('/api/mobile',(req,res,next)=>{
   const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('purchase_mobile='))?.slice(16)||'';
   const [id,value]=raw.split('.'),session=id&&db.prepare('SELECT * FROM mobile_sessions WHERE id=? AND expires_at>?').get(id,now());
-  if(!session||digest(value||'')!==session.secret_hash)return res.status(401).json({error:'请先在电脑上配对手机'});
-  if(agentManaged&&!session.workbench_actor)return res.status(401).json({error:'此旧手机会话尚未绑定真实登录，请重新从共享工作台进入'});
-  if(req.workbenchActor){if(session.workbench_actor&&session.workbench_actor!==req.workbenchActor.id)return res.status(403).json({error:'手机配对会话属于其他 Tailscale 用户，请重新配对'});if(!session.workbench_actor)db.prepare('UPDATE mobile_sessions SET workbench_actor=? WHERE id=?').run(req.workbenchActor.id,id);}
+  if(!session||digest(value||'')!==session.secret_hash)return res.status(401).json({error:agentManaged?'请从工作台建立手机会话':'请先在电脑上配对手机',canEstablishSession:agentManaged&&!!req.workbenchActor});
+  if(agentManaged&&!session.workbench_actor)return res.status(401).json({error:'此旧手机会话尚未绑定真实登录，请重新从共享工作台进入',canEstablishSession:!!req.workbenchActor});
+  if(req.workbenchActor){if(session.workbench_actor&&session.workbench_actor!==req.workbenchActor.id)return res.status(403).json({error:'手机会话属于其他登录人员，请重新建立会话',canEstablishSession:agentManaged});if(!session.workbench_actor)db.prepare('UPDATE mobile_sessions SET workbench_actor=? WHERE id=?').run(req.workbenchActor.id,id);}
   if(!['GET','HEAD'].includes(req.method)&&(req.headers['x-mobile-csrf']||(agentManaged?req.headers['x-review-token']:undefined))!==session.csrf)return res.status(403).json({error:'会话校验失败，请刷新页面'});
   req.mobileSession=session;next();
  });

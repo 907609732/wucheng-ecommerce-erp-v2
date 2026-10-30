@@ -1,5 +1,10 @@
 import {classificationForm,classificationDraft} from './classification-ui.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function openExporter(){
+ if(window.workbenchTransport){location.assign('/apps/exporter/');return;}
+ if(window.lingtuShell){const result=await window.lingtuShell.open('exporter');if(result?.requested||result?.opened)return;throw Error('工作台尚未确认打开订单导出，请在更多业务中重试');}
+ const result=await api('/exporter/open','POST',{});if(result?.route)throw Error('请从工作台的更多业务打开订单导出；本页没有启动其他程序');
+}
 const yuan=n=>n==null?'未知':'¥'+(n/100).toFixed(2);
 const labels={date:'下单日期',paidAt:'付款日期',supplier:'供应商',status:'状态',amountCents:'整单实付',refundCents:'退款金额',shippingCents:'运费（已含在实付）',recipient:'收货人',phone:'电话',address:'地址',logisticsCompany:'物流公司',trackingNo:'运单号',note:'备注',items:'商品明细',classification:'采购分类'};
 let nonce='',current=null,step=1,busy=false;
@@ -63,7 +68,7 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   action(async()=>{
     if(b.dataset.batch)return load(b.dataset.batch);
-    if(b.id==='launch'){if(window.workbenchTransport){location.assign('/apps/exporter/');return;}await (window.lingtuShell?window.lingtuShell.open('exporter'):api('/exporter/open','POST',{}));$('#message').textContent='订单导出台已打开；采集完成后点击其中的“导入采购台”。';return;}
+    if(b.id==='launch'){await openExporter();$('#message').textContent='订单导出台已打开；采集完成后点击其中的“导入采购台”。';return;}
     if(b.id==='save')return save();
     if(b.id==='first-confirm'){await save();if(!current.canConfirm)throw Error('请先处理全部待核对项目');current=await api(`/transfers/${current.id}/review`,'POST',{revision:current.revision});step=2;render();}
     if(b.id==='back'){step=1;render();}
@@ -73,4 +78,4 @@ document.addEventListener('click',e=>{
   });
 });
 document.addEventListener('change',e=>{if(e.target.name==='classificationMode'){const root=e.target.closest('.classification-form'),mixed=e.target.value==='split';root.querySelector('.classification-parts').hidden=!mixed;root.querySelector('.class-single-hint').hidden=mixed;}});
-try{nonce=(await(await fetch('/api/integration/v1/review-session')).json()).nonce;if(!nonce)throw Error('核对会话建立失败，请刷新页面');const params=new URL(location.href).searchParams,id=params.get('batch');if(id)await load(id);else await list();if(params.get('launch')==='1'&&window.workbenchTransport)location.assign('/apps/exporter/');else if(params.get('launch')==='1')await (window.lingtuShell?window.lingtuShell.open('exporter'):api('/exporter/open','POST',{}));}catch(e){$('#message').textContent=e.message;}
+try{nonce=(await(await fetch('/api/integration/v1/review-session')).json()).nonce;if(!nonce)throw Error('核对会话建立失败，请刷新页面');const params=new URL(location.href).searchParams,id=params.get('batch');if(id)await load(id);else await list();if(params.get('launch')==='1')await openExporter();}catch(e){$('#message').textContent=e.message;}

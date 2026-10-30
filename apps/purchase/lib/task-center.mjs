@@ -58,7 +58,7 @@ export function openTaskCenter(store){
    if(!task.canMark)throw failure(task.kind==='confirm'?'请前往月度确认完成真实确认，不能手动勾选':'本月任务范围已锁定，请先到月度确认取消确认','TASK_NOT_WRITABLE',423);
    if(status==='no_activity'&&(task.kind!=='collect'||task.evidence.count>0||!note))throw failure('仅无订单的平台可以标记本月无采购，并须填写核对说明','INVALID_NO_ACTIVITY');
    const scope=store.list().filter(o=>purchaseMonth(o)===month&&(!task.platform||o.platform===task.platform)),before=db.prepare('SELECT * FROM monthly_tasks WHERE month=? AND task_id=?').get(month,taskId)||null;
-   const updatedAt=new Date(Math.max(Date.now(),before?Date.parse(before.updated_at)+1:0)).toISOString(),after={month,taskId,status,operator,note,updatedAt,orderRevision:orderRevision(scope)};
+   const updatedAt=new Date(Math.max(Date.now(),before?Date.parse(before.updated_at)+1:0)).toISOString(),after={month,taskId,status,operator,note,updatedAt,orderRevision:orderRevision(scope),actualActor:store.actorContext?.()||null};
    // Reset removes acknowledgement so a later data edit cannot revive a pending task.
    if(status==='pending')db.prepare('DELETE FROM monthly_tasks WHERE month=? AND task_id=?').run(month,taskId);
    else db.prepare('INSERT INTO monthly_tasks(month,task_id,status,operator,note,updated_at,order_revision) VALUES(?,?,?,?,?,?,?) ON CONFLICT(month,task_id) DO UPDATE SET status=excluded.status,operator=excluded.operator,note=excluded.note,updated_at=excluded.updated_at,order_revision=excluded.order_revision').run(month,taskId,status,operator,note,updatedAt,after.orderRevision);

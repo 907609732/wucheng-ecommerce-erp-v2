@@ -13,6 +13,7 @@ export function mobileWorkbenchIdentity(q,{policyFile,origin,managed=process.env
  if(managed){
   if(!loopback.has(q.socket.remoteAddress)||! /^(?:127\.0\.0\.1|localhost):\d+$/.test(q.headers.host||''))throw Object.assign(Error('Beta手机入口只接受共享工作台签名转发'),{status:403});
   let actor;try{actor=verifyWorkbenchActor(q.headers,workbenchKey,{module:'purchase',method:q.method,path:q.originalUrl});}catch{throw Object.assign(Error('请从已登录的共享工作台打开采购手机页'),{status:401});}
+  if(Object.hasOwn(actor,'localDesktop')&&(actor.localDesktop!==true||!actor.id.startsWith('windows:')||actor.uiOrigin!=='http://'+q.headers.host||q.headers.origin&&q.headers.origin!==actor.uiOrigin))throw Object.assign(Error('本机手机页身份或来源不匹配'),{status:403});
   if(actor.channel!=='ui')throw Object.assign(Error('手机交互必须使用真实工作台页面会话'),{status:403});
   // Role/module fields remain the signed protocol envelope, not an access policy.
   return {...actor,role:'admin',modules:['warehouse','purchase','sales','overview','exporter'],canRunTasks:true,entry:'agent-mobile-gateway'};

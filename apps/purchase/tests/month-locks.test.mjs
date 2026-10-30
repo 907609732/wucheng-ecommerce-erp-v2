@@ -216,3 +216,14 @@ test('勾选月份批量锁定：版本、日期、重复范围与整批失败�
   const one=store.monthLocks.confirmations().filter(c=>c.month==='2026-08');await store.monthLocks.cancelBatch({confirmations:one,password});assert.equal(store.monthLocks.confirmations().length,1);assert.equal(store.monthLocks.confirmations()[0].month,'2026-10');
  }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('reviewed batches need trusted review metadata and retain scope/version/date protections without password',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-reviewed-batch-')),store=openStore(dir);t.after(()=>{store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const review={authorization:'workbench-ui-review',actorId:'windows:synthetic',sessionId:'signed-ui',requestId:'signed-request',reason:'补录凭证'},entries=['微信','淘宝'].map(platform=>{const p=store.monthLocks.preview('2020-01',platform);return {month:p.month,platform,revision:p.revision};});
+ assert.throws(()=>store.monthLocks.confirmBatchWithReview(entries,{actorId:'body-forgery'}),e=>e.code==='MONTH_REVIEW_REQUIRED');
+ assert.equal(store.monthLocks.confirmBatchWithReview(entries,review).confirmed,2);const scopes=store.monthLocks.confirmations().map(({month,platform,version})=>({month,platform,version}));
+ assert.throws(()=>store.monthLocks.cancelBatchWithReview([{...scopes[0],version:'stale'},scopes[1]],review),e=>e.code==='MONTH_CONFIRMATION_CHANGED');assert.equal(store.monthLocks.confirmations().length,2);
+ assert.equal(store.monthLocks.cancelBatchWithReview(scopes,review).cancelled,2);assert.equal(store.monthLocks.confirmations().length,0);
+ const future=store.monthLocks.preview('2099-01','微信');assert.throws(()=>store.monthLocks.confirmWithReview({month:future.month,platform:future.platform,revision:future.revision},review),e=>e.code==='MONTH_CONFIRMATION_TOO_EARLY');
+});

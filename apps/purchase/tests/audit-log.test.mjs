@@ -75,3 +75,12 @@ test('HTTP日志查询、预览、确认、审计与回退统计贯通，修改�
  assert.equal((await post('/api/order-logs/rollback',{auditId:logId,scope:'entry',versions:version(p),reason:'HTTP误改恢复'})).status,200);assert.equal(store.get(o.id).note,'原始备注');list=await get('/api/order-logs?action=rollback');assert.equal(list.total,1);const detail=await get('/api/order-logs/'+list.entries[0].id);assert.equal(detail.rollbackOf,logId);assert.equal(detail.reason,'HTTP误改恢复');assert.equal((await get('/api/orders/'+o.id+'/history'))[0].id,detail.id);
  assert.equal((await post('/api/order-logs/rollback',{auditId:logId,scope:'entry',versions:version(p)})).status,409);assert.equal((await fetch(root+'/api/order-logs/99999999')).status,404);
 });
+
+
+test('overlapping signed request contexts keep actual actors separate from editable order fields',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-actor-audit-')),store=openStore(dir);t.after(()=>{store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const create=async(id,delay)=>store.withActor({id,login:id,label:id,channel:'ui',sessionId:'session-'+id,requestId:'request-'+id},async()=>{await new Promise(r=>setTimeout(r,delay));return store.insert({platform:'微信',account:'测试',orderNo:id,date:'2020-01-01',supplier:'测试店',amountCents:100,items:[{title:'商品',qty:1}],uploadedBy:'不能冒充'});});
+ const [a,b]=await Promise.all([create('actor-a',5),create('actor-b',0)]);
+ for(const order of [a,b]){const log=store.auditLog.detail(store.history(order.id)[0].id);assert.equal(log.actor.id,order.orderNo);assert.equal(store.get(order.id).uploadedBy,order.orderNo);}
+ assert.equal(store.actorContext(),null);
+});

@@ -6,11 +6,11 @@ const fail=(message,code='INVALID_LOG_REQUEST',status=400)=>Object.assign(Error(
 const auditId=value=>{const id=Number(value);if(!Number.isSafeInteger(id)||id<1)throw fail('日志编号无效');return id;};
 const integer=(value,fallback,max)=>{if(value==null||value==='')return fallback;const n=Number(value);if(!Number.isSafeInteger(n)||n<1||n>max)throw fail('分页参数无效');return n;};
 const day=value=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||new Date(value+'T00:00:00Z').toISOString().slice(0,10)!==value)throw fail('请选择有效日期');return Date.parse(value+'T00:00:00+08:00');};
-export function openAuditLog(db,{get,transaction,monthLocks,persistOrder}){
- for(const [name,definition] of [['rollback_of','INTEGER'],['reason',"TEXT NOT NULL DEFAULT ''"]])if(!db.prepare('PRAGMA table_info(audit)').all().some(c=>c.name===name))db.exec(`ALTER TABLE audit ADD COLUMN ${name} ${definition}`);
+export function openAuditLog(db,{get,transaction,monthLocks,persistOrder,auditActor=()=>'null'}){
+ for(const [name,definition] of [['actor_json',"TEXT NOT NULL DEFAULT 'null'"],['rollback_of','INTEGER'],['reason',"TEXT NOT NULL DEFAULT ''"]])if(!db.prepare('PRAGMA table_info(audit)').all().some(c=>c.name===name))db.exec(`ALTER TABLE audit ADD COLUMN ${name} ${definition}`);
  db.exec('CREATE INDEX IF NOT EXISTS audit_order_id ON audit(order_id,id); CREATE INDEX IF NOT EXISTS audit_batch_id ON audit(batch_id); CREATE INDEX IF NOT EXISTS audit_created_at ON audit(created_at);');
  const raw=id=>{const r=db.prepare('SELECT * FROM audit WHERE id=?').get(auditId(id));if(!r)throw fail('日志不存在','LOG_NOT_FOUND',404);return r;};
- const parse=r=>{const before=r.before_json?JSON.parse(r.before_json):null,after=JSON.parse(r.after_json),changes=orderChanges(before,after);return {id:r.id,orderId:r.order_id,action:r.action,actionLabel:auditActions[r.action]||r.action,createdAt:r.created_at,batchId:r.batch_id,rollbackOf:r.rollback_of,reason:r.reason,before,after,changes,canUndo:!!before&&allowed.has(r.action)&&changes.length>0};};
+ const parse=r=>{const before=r.before_json?JSON.parse(r.before_json):null,after=JSON.parse(r.after_json),changes=orderChanges(before,after);return {actor:JSON.parse(r.actor_json||'null'),id:r.id,orderId:r.order_id,action:r.action,actionLabel:auditActions[r.action]||r.action,createdAt:r.created_at,batchId:r.batch_id,rollbackOf:r.rollback_of,reason:r.reason,before,after,changes,canUndo:!!before&&allowed.has(r.action)&&changes.length>0};};
  function entries(input){const r=raw(input?.auditId);if(input.scope!=='entry'&&input.scope!=='batch')throw fail('请选择单笔或整批撤销');if(input.scope==='batch'&&!r.batch_id)throw fail('此记录没有批次');return (input.scope==='batch'?db.prepare('SELECT * FROM audit WHERE batch_id=? ORDER BY id').all(r.batch_id):[r]).map(parse);}
  function preview(input){
   const logs=entries(input),seen=new Set();
@@ -55,7 +55,7 @@ export function openAuditLog(db,{get,transaction,monthLocks,persistOrder}){
    for(const o of p.orders){const v=versions.find(v=>v?.auditId===o.auditId);if(!v||v.orderId!==o.orderId||v.updatedAt!==o.updatedAt)throw fail('预览后订单已变化，整批未保存，请重新预览','ORDER_VERSION_CONFLICT',409);}
    const reason=input.reason??'';if(typeof reason!=='string'||reason.length>500)throw fail('撤销原因最多 500 字');
    const batchId=randomUUID(),orders=[];
-   for(const o of p.orders){const before=get(o.orderId),now=new Date(Math.max(Date.now(),Date.parse(before.updatedAt)+1)).toISOString(),after={...before,...o.target,updatedAt:now};persistOrder(after,o.orderId,now);db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id,rollback_of,reason) VALUES (?,?,?,?,?,?,?,?)').run(o.orderId,'rollback',JSON.stringify(before),JSON.stringify(after),now,batchId,o.auditId,reason.trim());orders.push(get(o.orderId));}
+   for(const o of p.orders){const before=get(o.orderId),now=new Date(Math.max(Date.now(),Date.parse(before.updatedAt)+1)).toISOString(),after={...before,...o.target,updatedAt:now};persistOrder(after,o.orderId,now);db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id,rollback_of,reason,actor_json) VALUES (?,?,?,?,?,?,?,?,?)').run(o.orderId,'rollback',JSON.stringify(before),JSON.stringify(after),now,batchId,o.auditId,reason.trim(),auditActor());orders.push(get(o.orderId));}
    return {batchId,changed:orders.length,orders};
   });}
  };

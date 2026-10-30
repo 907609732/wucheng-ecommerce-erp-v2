@@ -1,3 +1,4 @@
+import {createPurchaseActorContext} from './actor-context.mjs';
 import {openOrderAttachments} from './order-attachments.mjs';
 import {preserveShipments} from '../public/shipments.mjs';
 import {openAuditLog} from './audit-log.mjs';
@@ -15,13 +16,14 @@ import {importRules} from '../public/import-rules.mjs';
 
 export function openStore(dir){
  fs.mkdirSync(dir,{recursive:true});for(const folder of ['originals','staging','backups'])fs.mkdirSync(path.join(dir,folder),{recursive:true});
- const db=new DatabaseSync(path.join(dir,'purchases.sqlite'));
+ const db=new DatabaseSync(path.join(dir,'purchases.sqlite')),actors=createPurchaseActorContext(),auditActor=actors.json;
  db.function('purchase_admin_allowed',()=>0);db.function('purchase_admin_batch',()=> '');
  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, platform TEXT NOT NULL, account TEXT NOT NULL, order_no TEXT NOT NULL, date TEXT NOT NULL, paid_at TEXT NOT NULL, supplier TEXT NOT NULL, status TEXT NOT NULL, amount_cents INTEGER NOT NULL, refund_cents INTEGER NOT NULL, shipping_cents INTEGER NOT NULL, note TEXT NOT NULL, items TEXT NOT NULL, fingerprint TEXT NOT NULL, source_id TEXT, original TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(platform,account,order_no));
  CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY, filename TEXT NOT NULL, hash TEXT NOT NULL, file_path TEXT, created_at TEXT NOT NULL, imported INTEGER NOT NULL, skipped INTEGER NOT NULL, line_count INTEGER NOT NULL, metadata TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL, action TEXT NOT NULL, before_json TEXT, after_json TEXT NOT NULL, created_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
+ if(!db.prepare('PRAGMA table_info(audit)').all().some(c=>c.name==='actor_json'))db.exec("ALTER TABLE audit ADD COLUMN actor_json TEXT NOT NULL DEFAULT 'null'");
  db.exec(`CREATE TABLE IF NOT EXISTS order_supplements(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id TEXT NOT NULL REFERENCES orders(id),source_id TEXT NOT NULL REFERENCES imports(id),raw_json TEXT NOT NULL,fields_json TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(order_id,source_id));`);
  db.exec(`CREATE TABLE IF NOT EXISTS order_fingerprint_compat(order_id TEXT PRIMARY KEY,stored_fingerprint TEXT NOT NULL,canonical_fingerprint TEXT NOT NULL)`);
  db.exec(`CREATE TABLE IF NOT EXISTS order_origins(order_id TEXT PRIMARY KEY,channel TEXT NOT NULL,username TEXT NOT NULL DEFAULT '')`);
@@ -29,7 +31,7 @@ export function openStore(dir){
   const origin=db.prepare('SELECT channel,username FROM order_origins WHERE order_id=?').get(r.id);
   const source=r.source_id?db.prepare('SELECT filename,metadata FROM imports WHERE id=?').get(r.source_id):null;
   const channel=origin?.channel||(source?(JSON.parse(source.metadata||'{}').method==='ocr'?'desktop':'spreadsheet'):'desktop');
-  return {sourceChannel:channel,sourceFilename:source?.filename||'',uploadedBy:origin?.username||'',sourceLabel:(channel==='mobile'?'手机上传':channel==='order-transfer'?'历史订单核对导入':channel==='spreadsheet'?'表格导入':'电脑人工录入 / 上传')+(source?' · '+source.filename:'')};
+  return {sourceChannel:channel,sourceFilename:source?.filename||'',uploadedBy:origin?.username||(()=>{const record=db.prepare("SELECT actor_json FROM audit WHERE order_id=? AND action='create' ORDER BY id LIMIT 1").get(r.id);const actor=JSON.parse(record?.actor_json||'null');return actor?.label||actor?.login||actor?.id||'';})(),sourceLabel:(channel==='mobile'?'手机上传':channel==='order-transfer'?'历史订单核对导入':channel==='spreadsheet'?'表格导入':'电脑人工录入 / 上传')+(source?' · '+source.filename:'')};
  };
  let attachments;
  const decode=r=>r?({id:r.id,platform:r.platform,account:r.account,orderNo:r.order_no,date:r.date,paidAt:r.paid_at,supplier:r.supplier,status:r.status,excludedFromSpend:!!r.excluded_from_spend,amountCents:r.amount_cents,refundCents:r.refund_cents,shippingCents:r.shipping_cents,note:r.note,classification:r.classification?JSON.parse(r.classification):defaultClassification(),...deliveryOf(JSON.parse(r.delivery||'{}')),supplierContact:JSON.parse(r.supplier_contact||'null'),attachmentIds:attachments?.ids(r.id)||[],items:JSON.parse(r.items),fingerprint:db.prepare('SELECT canonical_fingerprint FROM order_fingerprint_compat WHERE order_id=? AND stored_fingerprint=?').get(r.id,r.fingerprint)?.canonical_fingerprint||r.fingerprint,sourceId:r.source_id,...originOf(r),createdAt:r.created_at,updatedAt:r.updated_at}):null;
@@ -65,7 +67,7 @@ export function openStore(dir){
     if(db.prepare('SELECT id FROM orders WHERE platform=? AND account=? AND order_no=? AND id<>?').get(row.platform,account,row.order_no,row.id)){report.conflicts++;continue;}
     const before=decode(row),now=new Date(Math.max(Date.now(),Date.parse(row.updated_at)+1)).toISOString(),after={...before,account,updatedAt:now};after.fingerprint=fingerprint(after);
     db.prepare('UPDATE orders SET account=?,fingerprint=?,updated_at=? WHERE id=?').run(account,after.fingerprint,now,row.id);
-    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at) VALUES (?,?,?,?,?)').run(row.id,'backfill-account',JSON.stringify(before),JSON.stringify(after),now);report.updated++;
+    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,actor_json) VALUES (?,?,?,?,?,?)').run(row.id,'backfill-account',JSON.stringify(before),JSON.stringify(after),now,auditActor());report.updated++;
    }
    db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)').run('account-backfill-report',JSON.stringify(report));
    db.exec('PRAGMA user_version=4; COMMIT');
@@ -80,7 +82,7 @@ export function openStore(dir){
    const batchId=randomUUID(),now=new Date().toISOString();
    for(const row of db.prepare('SELECT * FROM orders').all()){
     const after=decode(row),before={...after};delete before.classification;
-    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id) VALUES (?,?,?,?,?,?)').run(row.id,'initialize-classification',JSON.stringify(before),JSON.stringify(after),now,batchId);
+    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id,actor_json) VALUES (?,?,?,?,?,?,?)').run(row.id,'initialize-classification',JSON.stringify(before),JSON.stringify(after),now,batchId,auditActor());
    }
    db.exec('PRAGMA user_version=5; COMMIT');
   }catch(e){db.exec('ROLLBACK');db.close();throw e;}
@@ -126,7 +128,7 @@ export function openStore(dir){
   db.prepare('INSERT INTO orders (id,platform,account,order_no,date,paid_at,supplier,status,amount_cents,refund_cents,shipping_cents,note,items,fingerprint,source_id,original,created_at,updated_at,delivery,classification,excluded_from_spend) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,o.platform,o.account,o.orderNo,o.date,o.paidAt,o.supplier,o.status,o.amountCents,o.refundCents,o.shippingCents,o.note,JSON.stringify(o.items),o.fingerprint,sourceId||null,JSON.stringify(original||o),createdAt,now,JSON.stringify(deliveryOf(o)),JSON.stringify(o.classification),Number(o.excludedFromSpend));
   attachments.setActive(id,o.attachmentIds||[]);
   db.prepare('UPDATE orders SET supplier_contact=? WHERE id=?').run(JSON.stringify(o.supplierContact),id);
-  db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at) VALUES (?,?,?,?,?)').run(id,'create',null,JSON.stringify(get(id)),now);return get(id);
+  db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,actor_json) VALUES (?,?,?,?,?,?)').run(id,'create',null,JSON.stringify(get(id)),now,auditActor());return get(id);
  });
  let transactionDepth=0;
  const transaction=fn=>{if(transactionDepth)return fn();db.exec('BEGIN IMMEDIATE');transactionDepth++;try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}finally{transactionDepth--;}};
@@ -139,7 +141,7 @@ export function openStore(dir){
   const classification=normalizeClassification(value,before.amountCents,before.refundCents);
   const now=new Date(Math.max(Date.now(),Date.parse(before.updatedAt)+1)).toISOString(),after={...before,classification,updatedAt:now};
   db.prepare('UPDATE orders SET classification=?,updated_at=? WHERE id=?').run(JSON.stringify(classification),now,id);
-  db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id) VALUES (?,?,?,?,?,?)').run(id,'classification',JSON.stringify(before),JSON.stringify(after),now,batchId);
+  db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id,actor_json) VALUES (?,?,?,?,?,?,?)').run(id,'classification',JSON.stringify(before),JSON.stringify(after),now,batchId,auditActor());
   return after;
  };
  const persistOrder=(o,id,now)=>{
@@ -147,8 +149,8 @@ export function openStore(dir){
    db.prepare('UPDATE orders SET supplier_contact=? WHERE id=?').run(JSON.stringify(o.supplierContact??null),id);
    db.prepare('UPDATE orders SET platform=?,account=?,order_no=?,date=?,paid_at=?,supplier=?,status=?,amount_cents=?,refund_cents=?,shipping_cents=?,note=?,items=?,fingerprint=?,updated_at=?,delivery=?,classification=?,excluded_from_spend=? WHERE id=?').run(o.platform,o.account,o.orderNo,o.date,o.paidAt,o.supplier,o.status,o.amountCents,o.refundCents,o.shippingCents,o.note,JSON.stringify(o.items),o.fingerprint,now,JSON.stringify(deliveryOf(o)),JSON.stringify(o.classification),Number(o.excludedFromSpend),id);
  };
- const auditLog=openAuditLog(db,{get,transaction,monthLocks,persistOrder});
- const api={db,dir,list,get,find,transaction,insert,monthLocks,auditLog,attachments,
+ const auditLog=openAuditLog(db,{get,transaction,monthLocks,persistOrder,auditActor});
+ const api={db,dir,list,get,find,transaction,insert,monthLocks,auditLog,attachments,withActor:actors.run,actorContext:actors.read,
   attributesBatch(input){return transaction(()=>{
    const patch=attributePatch(input?.patch),entries=input?.orders;
    if(!Array.isArray(entries)||!entries.length||entries.length>100000)throw Error('请提交明确的订单 ID 和版本列表');
@@ -171,7 +173,7 @@ export function openStore(dir){
     const o=proposed[index];
     const now=new Date(Math.max(Date.now(),Date.parse(before.updatedAt)+1)).toISOString(),after={...before,...o,updatedAt:now};
     db.prepare('UPDATE orders SET status=?,excluded_from_spend=?,supplier=?,account=?,fingerprint=?,updated_at=? WHERE id=?').run(o.status,Number(o.excludedFromSpend),o.supplier,o.account,o.fingerprint,now,before.id);
-    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id) VALUES (?,?,?,?,?,?)').run(before.id,'attributes',JSON.stringify(before),JSON.stringify(after),now,batchId);changed++;return get(before.id);
+    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,batch_id,actor_json) VALUES (?,?,?,?,?,?,?)').run(before.id,'attributes',JSON.stringify(before),JSON.stringify(after),now,batchId,auditActor());changed++;return get(before.id);
    });
    return {batchId,changed,skipped,orders};
   });},
@@ -186,10 +188,10 @@ export function openStore(dir){
   update(id,input){return transaction(()=>{const before=get(id);if(!before)throw Error('订单不存在');if(input.updatedAt!==before.updatedAt)throw Error('此订单已被修改，请刷新后重试');const o=validateOrder({...input,supplierContact:input.supplierContact===undefined?before.supplierContact:input.supplierContact,attachmentIds:[...new Set([...before.attachmentIds,...attachments.validate(id,input.attachmentIds===undefined?[]:input.attachmentIds)])],excludedFromSpend:input.excludedFromSpend===undefined?before.excludedFromSpend:input.excludedFromSpend,classification:input.classification===undefined?before.classification:input.classification,items:preserveShipments(backfillItemUnits(input.items||before.items,{items:before.items}),before.items)}),now=new Date(Math.max(Date.now(),Date.parse(before.updatedAt)+1)).toISOString();
    monthLocks.assertWritable([before,o]);
    persistOrder(o,id,now);
-   db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at) VALUES (?,?,?,?,?)').run(id,'update',JSON.stringify(before),JSON.stringify({...o,updatedAt:now}),now);
+   db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,actor_json) VALUES (?,?,?,?,?,?)').run(id,'update',JSON.stringify(before),JSON.stringify({...o,updatedAt:now}),now,auditActor());
    if(JSON.stringify(before.classification)!==JSON.stringify(o.classification))db.prepare('UPDATE audit SET batch_id=? WHERE id=last_insert_rowid()').run(randomUUID());return get(id);
   });},
-  history(id){return db.prepare('SELECT id,action,before_json,after_json,created_at,batch_id,rollback_of,reason FROM audit WHERE order_id=? ORDER BY id DESC').all(id);},
+  history(id){return db.prepare('SELECT id,action,before_json,after_json,created_at,batch_id,rollback_of,reason,actor_json FROM audit WHERE order_id=? ORDER BY id DESC').all(id);},
   supplements(id){return db.prepare('SELECT s.*,i.filename FROM order_supplements s JOIN imports i ON i.id=s.source_id WHERE order_id=? ORDER BY s.id DESC').all(id).map(r=>({sourceId:r.source_id,filename:r.filename,createdAt:r.created_at,fields:JSON.parse(r.fields_json),original:JSON.parse(r.raw_json)}));},
   supplementBatch(entries,meta){return transaction(()=>{
    const prior=db.prepare('SELECT id,metadata FROM imports WHERE hash=?').all(meta.hash).find(r=>JSON.parse(r.metadata).method==='supplement-taobao');
@@ -208,7 +210,7 @@ export function openStore(dir){
     const after={...before,...e.patch,updatedAt:now};validateOrder(after);monthLocks.assertWritable([before,after]);after.fingerprint=fingerprint(after);
     db.prepare('UPDATE orders SET account=?,paid_at=?,delivery=?,fingerprint=?,updated_at=? WHERE id=?').run(after.account,after.paidAt,JSON.stringify(deliveryOf(after)),after.fingerprint,now,e.id);
     db.prepare('INSERT INTO order_supplements(order_id,source_id,raw_json,fields_json,created_at) VALUES (?,?,?,?,?)').run(e.id,sourceId,JSON.stringify(e.original),JSON.stringify({filled:Object.keys(e.patch),conflicts:e.conflicts}),now);
-    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at) VALUES (?,?,?,?,?)').run(e.id,'supplement-source',JSON.stringify(before),JSON.stringify({...after,supplementSourceId:sourceId}),now);
+    db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,actor_json) VALUES (?,?,?,?,?,?)').run(e.id,'supplement-source',JSON.stringify(before),JSON.stringify({...after,supplementSourceId:sourceId}),now,auditActor());
     if(Object.keys(e.patch).length)updated++;
    }
    return {id:sourceId,alreadyApplied:false,...meta.summary,updated};

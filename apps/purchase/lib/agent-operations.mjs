@@ -48,7 +48,7 @@ export function purchaseAgentOperations({store,taskBoard,taskCenter,supplierMana
   'address.remove':mutation(()=>addresses.list(),i=>addresses.remove(i.id,i)),
   'task.action':mutation((i,c)=>{assignmentInput(i,c);const view=taskBoard.overview(request(c),i.month);if(!view.personnel.selected)throw Object.assign(Error('当前人员未绑定历史采购身份，请管理员明确选择对应人员后绑定'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});return view;},(i,_d,c)=>taskBoard.act(request(c),assignmentInput(i,c))),
   'task.mark':mutation((i,c)=>{const identity=personnel.current(request(c)),operator=identity.staff?.name||c.actor.login||c.actor.id;if(i.operator&&i.operator!==operator)throw Object.assign(Error('经办人须使用当前真实登录身份，不能冒充他人'),{code:'TASK_OPERATOR_MISMATCH',status:403});return taskCenter.overview(i.month);},(i,_d,c)=>taskCenter.update({...i,operator:personnel.current(request(c)).staff?.name||c.actor.login||c.actor.id})),
-  'month.confirm':mutation(i=>store.monthLocks.preview(i.month,i.platform),i=>store.monthLocks.confirm(i)),
+  'month.confirm':mutation(i=>store.monthLocks.preview(i.month,i.platform),(i,_d,c)=>store.monthLocks.confirmWithReview(i,{authorization:'agent-central-review',actorId:c.actor.id,approvalId:c.verifiedApproval.approvalId})),
   'month.cancel':mutation(i=>({preview:store.monthLocks.preview(i.month,i.platform),confirmation:store.monthLocks.confirmations().find(c=>c.month===i.month&&c.platform===i.platform)}),(i,_d,c)=>{return store.monthLocks.cancelWithAgentReview(i,{actorId:c.actor.id,approvalId:c.verifiedApproval.approvalId});}),
   'audit.rollback':mutation(i=>store.auditLog.preview(i),i=>store.auditLog.rollback(i)),
   'attachment.remove':mutation(i=>({id:i.id}),i=>attachments.remove(i.id))

@@ -80,14 +80,14 @@ export function openTaskAssignment(store,taskCenter,personnel){
      }else{
       // Accept the precise submitted scope; nested store transactions remain atomic.
       const base=taskCenter.overview(month);
-      taskCenter.update({month,taskId,status:before.submission_result,operator:(identity.staff?.name||req.workbenchActor?.login||'老板').slice(0,100),note:`经办：${target.name}；提交：${before.submission_note}${note?'；验收：'+note:''}`.slice(0,2000),ack:true,revision:base.revision});
+      taskCenter.update({month,taskId,status:before.submission_result,operator:target.name.slice(0,100),note:`经办：${target.name}；提交：${before.submission_note}${note?'；验收：'+note:''}`.slice(0,2000),ack:true,revision:base.revision});
       Object.assign(after,{state:'accepted',reviewed_by:who,reviewed_at:now,review_note:note,scope_revision:currentScope});
      }
     }
    }
    const fields=['month','task_id','assignee_id','due_on','instructions','state','assigned_by','submitted_by','submitted_at','submission_note','submission_result','reviewed_by','reviewed_at','review_note','scope_revision','updated_at','version'];
    db.prepare(`INSERT INTO purchase_task_assignments(${fields.join(',')}) VALUES(${fields.map(()=>'?').join(',')}) ON CONFLICT(month,task_id) DO UPDATE SET ${fields.slice(2).map(field=>field+'=excluded.'+field).join(',')}`).run(...fields.map(field=>after[field]));
-   db.prepare('INSERT INTO purchase_task_assignment_events(month,task_id,action,actor_id,before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?)').run(month,taskId,action,who,before?JSON.stringify(before):null,JSON.stringify(after),now);
+   db.prepare('INSERT INTO purchase_task_assignment_events(month,task_id,action,actor_id,before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?)').run(month,taskId,action,who,before?JSON.stringify(before):null,JSON.stringify({...after,actualActor:store.actorContext?.()||null,businessOperator:{id:after.assignee_id,name:allStaff().find(s=>s.id===after.assignee_id)?.name||'历史经办人'}}),now);
    return overview(req,month);
   });
  }

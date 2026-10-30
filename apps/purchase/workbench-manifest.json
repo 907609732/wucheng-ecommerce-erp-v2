@@ -1791,6 +1791,15 @@
       "remote": true,
       "uiOnly": true,
       "operationId": "purchase:POST:/api/mobile/orders"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/manual-receipts/:key",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/manual-receipts/:key"
     }
   ]
 }

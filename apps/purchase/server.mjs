@@ -1,3 +1,4 @@
+import {createManualReceipts} from './lib/manual-receipts.mjs';
 import {createPurchaseAgentFiles} from './lib/agent-files.mjs';
 import {openPurchasePersonnel} from './lib/purchase-personnel.mjs';
 import {createPurchaseAgentService,installPurchaseAgentRoutes,purchaseAgentRequestContext} from './lib/agent-service.mjs';
@@ -41,8 +42,14 @@ import {createMobileAccess} from './lib/mobile-access.mjs';
 import {openSupplierManagement} from './lib/supplier-management.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
-export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile,mobileAgentManaged=process.env.LINGTU_AGENT_MANAGED==='1'}={}){
+export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1',mobileAgentManaged=agentManaged}={}){
  const app=express(),store=openStore(dataDir),previews=new Map(),jobs=new Map();let ocrBusy=false,mobile,agentFiles;
+ if(agentManaged)app.use((req,res,next)=>{
+  // Header presence is only an early requirement. installWorkbenchModule below
+  // verifies the HMAC before any of these business handlers can execute.
+  if(/^\/api\/integration\/v1\/(?:agent\/|orders$|transfers(?:\/|$)|edits(?:\/|$)|review-session$|exporter\/open$)/.test(req.path)&&!req.headers['x-workbench-actor']&&!req.headers['x-workbench-actor-signature'])return res.status(401).json({error:'业务操作需要真实工作台签名身份',code:'WORKBENCH_LOGIN_REQUIRED'});
+  next();
+ });
  const taskCenter=openTaskCenter(store),personnel=openPurchasePersonnel(store),taskBoard=openTaskAssignment(store,taskCenter,personnel);
  const transfers=openOrderTransfers(store);
  const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>ocrBusy||agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','exporter.open','edits.prepare','edits.review-ui']});
@@ -64,6 +71,17 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
   return upgrade;
  };
  const token=randomBytes(32).toString('hex');
+ const confirmationMode=agentManaged?'signed-review':'password';
+ const uiReview=(req)=>{
+  const a=req.workbenchActor;
+  if(!a?.id||a.channel!=='ui'||!a.sessionId||!a.requestId)throw Object.assign(Error('需要真实登录的人工复核会话'),{status:403,code:'MONTH_REVIEW_REQUIRED'});
+  if(req.body.ack!==true)throw Object.assign(Error('请核对当前范围并明确勾选确认'),{status:400,code:'MONTH_ACK_REQUIRED'});
+  if(Object.keys(req.body).some(k=>['actor','actorId','approval','approvalId','authorization','confirmed'].includes(k)))throw Object.assign(Error('复核身份不能由表单提供'),{status:400,code:'UNTRUSTED_REVIEW'});
+  const reason=typeof req.body.reason==='string'?req.body.reason.trim():'';
+  if(/cancel/.test(req.path)&&(!reason||reason.length>2000))throw Object.assign(Error('请填写取消确认的原因（最多2000字）'),{status:400,code:'MONTH_REASON_REQUIRED'});
+  return {authorization:'workbench-ui-review',actorId:a.id,actorLabel:a.label||a.login||a.id,sessionId:a.sessionId,requestId:a.requestId,...(reason?{reason}:{})};
+ };
+
  // Locked orders cannot be modified through password headers; cancel confirmation first.
  const write=(req,fn)=>req.mobileSubmission?mobile.commit(req,fn):fn();
  app.disable('x-powered-by');
@@ -72,10 +90,13 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
   res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'none'");
   if(req.path.startsWith('/api'))res.setHeader('Cache-Control','no-store');
+  if(agentManaged&&req.path.startsWith('/api/')&&req.path!=='/api/health'&&!req.workbenchActor)return res.status(401).json({error:'请从工作台登录后打开采购页面',code:'WORKBENCH_LOGIN_REQUIRED'});
   if(!req.workbenchActor&&!['GET','HEAD'].includes(req.method)&&req.headers['x-purchase-token']!==token)return res.status(403).json({error:'页面会话已更新，请刷新后重试'});
   next();
  });
  app.use(express.json({limit:'12mb'}));
+ const manualReceipts=agentManaged?createManualReceipts(store):null;
+ if(manualReceipts)app.use(manualReceipts.middleware);
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1}});
  const attachmentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_FILE_BYTES,files:MAX_FILES}});
  const ocrUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:OCR_MAX_FILE_BYTES,files:OCR_MAX_FILES}});
@@ -94,11 +115,12 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  app.get('/api/health',(req,res)=>res.json({ok:true,app:'purchase-desk',version:appVersion,features:['procurement-classification','monthly-confirmation','batch-order-attributes','order-audit-rollback','order-attachments','address-book','item-tracking','supplier-view','item-shipments','atomic-order-attributes','contact-snapshots','atomic-attachments','upload-limits-v2','monthly-task-center','assigned-task-board'],uploadLimits:{files:MAX_FILES,fileBytes:MAX_FILE_BYTES,totalBytes:MAX_TOTAL_BYTES,ocrPages:MAX_OCR_PAGES}}));
 app.get('/api/app-info',(req,res)=>res.json({brand:appBrand,website:appWebsite,version:appVersion,upgrade,usage:usage.stats()}));
 app.post('/api/upgrade/check',async(req,res)=>res.json(await runUpgradeCheck()));
- app.get('/api/bootstrap',(req,res)=>res.json({token,orders:store.list(),imports:store.imports(),pendingEditsCount:Number(store.db.prepare("SELECT count(*) AS n FROM integration_edit_drafts WHERE state='draft'").get().n),personnel:personnel.current(req),adminConfigured:store.monthLocks.configured(),monthConfirmations:store.monthLocks.confirmations(),ocrReady:['eng','chi_sim'].every(l=>fs.existsSync(path.join(modelDir,l+'.traineddata')))}));
+ app.get('/api/bootstrap',(req,res)=>res.json({token,orders:store.list(),imports:store.imports(),pendingEditsCount:Number(store.db.prepare("SELECT count(*) AS n FROM integration_edit_drafts WHERE state='draft'").get().n),personnel:personnel.current(req),agentManaged,localDesktop:req.workbenchActor?.localDesktop===true,confirmationMode,adminConfigured:store.monthLocks.configured(),monthConfirmations:store.monthLocks.confirmations(),ocrReady:['eng','chi_sim'].every(l=>fs.existsSync(path.join(modelDir,l+'.traineddata')))}));
  app.get('/api/personnel/session',(req,res)=>res.json(personnel.current(req)));
  app.post('/api/personnel/session',(req,res)=>res.json(personnel.select(req,res,req.body)));
  app.get('/api/personnel',(req,res)=>res.json({staff:personnel.list(req)}));
  app.post('/api/personnel',(req,res)=>{const saved=personnel.save(req,req.body);res.json({saved,staff:personnel.list(req)});});
+ app.get('/api/manual-receipts/:key',(req,res)=>{if(!manualReceipts||!req.workbenchActor)return res.status(404).json({error:'回执不存在'});res.json(manualReceipts.read(req.workbenchActor,req.params.key));});
  app.get('/api/task-board',(req,res)=>res.json(taskBoard.overview(req,req.query.month)));
  app.post('/api/task-board/action',(req,res)=>res.json(taskBoard.act(req,req.body)));
  // Task submission and monthly financial confirmation are separate responsibilities.
@@ -110,15 +132,15 @@ app.post('/api/upgrade/check',async(req,res)=>res.json(await runUpgradeCheck()))
   next();
  });
  app.get('/api/tasks',(req,res)=>res.json(taskCenter.overview(req.query.month)));
- app.post('/api/tasks',(req,res)=>res.json(taskCenter.update(req.body)));
- app.get('/api/month-confirmations',(req,res)=>res.json(store.monthLocks.overview(req.query.month)));
+ app.post('/api/tasks',(req,res)=>{let input=req.body;if(agentManaged){const identity=personnel.current(req),selected=input.operatorStaffId?personnel.list(req).find(s=>s.id===input.operatorStaffId):null;if(input.operatorStaffId&&!selected)throw Object.assign(Error('经办人不存在，请明确选择历史人员ID'),{status:400,code:'TASK_OPERATOR_SELECTION_REQUIRED'});const operator=selected?.name||identity.staff?.name||req.workbenchActor.login||req.workbenchActor.id;if(input.operator&&input.operator!==operator&&!selected)throw Object.assign(Error('请明确选择经办人员，实际操作者由登录会话记录'),{status:400,code:'TASK_OPERATOR_SELECTION_REQUIRED'});input={...input,operator:operator.slice(0,100)};}res.json(taskCenter.update(input));});
+ app.get('/api/month-confirmations',(req,res)=>res.json({...store.monthLocks.overview(req.query.month),confirmationMode}));
  app.get('/api/month-confirmations/preview',(req,res)=>res.json(store.monthLocks.preview(req.query.month,req.query.platform)));
  app.get('/api/month-confirmations/history',(req,res)=>res.json(store.monthLocks.history(req.query.month,req.query.platform)));
- app.post('/api/month-confirmations',(req,res)=>res.json(store.monthLocks.confirm(req.body)));
- app.post('/api/month-confirmations/confirm-batch',(req,res)=>res.json(store.monthLocks.confirmBatch(req.body)));
- app.post('/api/month-confirmations/cancel',async(req,res)=>res.json(await store.monthLocks.cancel(req.body)));
- app.post('/api/month-confirmations/cancel-batch',async(req,res)=>res.json(await store.monthLocks.cancelBatch(req.body)));
- app.post('/api/admin/password',async(req,res)=>res.json(await store.monthLocks.setPassword(req.body)));
+ app.post('/api/month-confirmations',(req,res)=>res.json(agentManaged?store.monthLocks.confirmWithReview(req.body,uiReview(req)):store.monthLocks.confirm(req.body)));
+ app.post('/api/month-confirmations/confirm-batch',(req,res)=>res.json(agentManaged?store.monthLocks.confirmBatchWithReview(req.body.confirmations,uiReview(req)):store.monthLocks.confirmBatch(req.body)));
+ app.post('/api/month-confirmations/cancel',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelWithReview(req.body,uiReview(req)):await store.monthLocks.cancel(req.body)));
+ app.post('/api/month-confirmations/cancel-batch',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelBatchWithReview(req.body.confirmations,uiReview(req)):await store.monthLocks.cancelBatch(req.body)));
+ app.post('/api/admin/password',async(req,res)=>{if(agentManaged)return res.status(410).json({error:'工作台月结使用真实登录和复核，不再设置独立管理员密码',code:'FEATURE_REMOVED'});res.json(await store.monthLocks.setPassword(req.body));});
  app.get('/api/dashboard',(req,res)=>res.json(summarize(store.list(),req.query.year||new Date().getFullYear(),req.query.basis||'paid',req.query.platform||'全部',req.query.category||'',req.query.month||'')));
  app.post('/api/import/preview',upload.single('file'),async(req,res)=>{
   if(!req.file)throw Error('请选择表格');if(previews.size>=15)previews.delete(previews.keys().next().value);

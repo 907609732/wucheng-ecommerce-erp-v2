@@ -33,7 +33,7 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
    }
   }
   const writable=selected&&!readOnly;
-  return {selected,role:selected?role:null,source,readOnly,staff:brief(staff),canAssign:writable&&role==='boss',canManagePersonnel:writable&&role==='boss',canSubmit:writable&&(!!actor||!!staff?.active),canReview:writable&&role==='boss'};
+  return {selected,role:selected?role:null,source,readOnly,actor:actor?{id:actor.id,login:actor.login||actor.id,label:actor.label||actor.login||actor.id}:null,staff:brief(staff),canAssign:writable&&role==='boss',canManagePersonnel:writable&&role==='boss',canSubmit:writable&&(!!actor||!!staff?.active),canReview:writable&&role==='boss'};
  }
  function select(req,res,input={}){
   const role=input.role;
