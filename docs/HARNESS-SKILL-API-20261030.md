@@ -90,3 +90,11 @@
 - 额外错误：`SKILL_READ_ONLY` 提示复制内置定义；`COMPANY_API_KEY_ORIGIN_CHANGED` 在公司 API 地址 origin 改变而未提供目标新密钥/明确清除旧密钥时拒绝保存，原配置和旧密钥保持不变。同 origin 的根路径或 `/v1` 调整可以保留原密钥。
 
 新增定向用例在 `tests/agent-runtime-skills.test.mjs` 和 `tests/agent-runtime-settings-origin.test.mjs`。本次实施未运行它们或额外模型调用；双引擎真实运行、UI 完整往返、定时、重启及包体仍以总控后续集中验收证据为准。
+
+### 任务业务日期与恢复锚点
+
+创建任务时由 ERP 冻结 `businessTimezone`：普通目标固定默认 `Asia/Shanghai`；定时目标从真实计划记录读取其 `timezone`。客户端自传的创建日期、触发日期、时区和 `timeContext` 不参与构造。语义锚点优先使用服务端 `scheduledFor`，无定时触发时使用原始 `createdAt`。
+
+两引擎每次运行均取得同一服务端 `{timeZone,anchorSource,anchorUtc,anchorLocalDate,anchorLocalDateTime,executionUtc}`；`executionUtc` 是本轮执行 UTC 时间，相对日期以原 `anchorLocalDate` 解释，不能随漏跑、暂停恢复、换引擎或编辑计划时区改变。普通旧任务沿原创建时间和上海默认时区；缺少已冻时区的旧定时任务不能可靠证实其原日期范围，暂停为 `TASK_TIME_CONTEXT_UNAVAILABLE`，不猜操作系统时区。时间或时区格式损坏报 `TASK_TIME_CONTEXT_INVALID`。
+
+新增 `tests/agent-runtime-time-context.test.mjs` 覆盖跨日、漏跑、恢复、服务端字段与计划时区冻结；仅准备，未运行。

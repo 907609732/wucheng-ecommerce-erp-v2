@@ -11,6 +11,7 @@ import {reconcileJobIssues} from './job-issues.mjs';
 import {prepareResultCorrections} from './result-corrections.mjs';
 import {discoverAgentCapabilities} from './capability-discovery.mjs';
 import {createAgentSkills} from './skills.mjs';
+import {taskTimeContext} from './engine-common.mjs';
 
 const live=new Set(['queued','running','committing']);
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
@@ -122,7 +123,10 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const engine=input.engine||settings.get().defaultEngine;if(!['codex','hermes'].includes(engine))throw agentError('ENGINE_INVALID','未知执行引擎');
     const model=settings.get().company.model;if(model&&engines[engine]?.supportedModels&&!engines[engine].supportedModels.includes(model))throw agentError('ENGINE_MODEL_UNSUPPORTED','公司模型不在该引擎的兼容清单中，请管理员调整模型设置',409);
     const scope=scopeOf(input.scope,actor);skills.assertPrepared(skillPreparation,{...input,scope});
-    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope,engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),...(skillPreparation?.skillSnapshot?{skillSnapshot:structuredClone(skillPreparation.skillSnapshot),skillInputs:structuredClone(skillPreparation.skillInputs)}:{}),status:'queued',createdAt:now(),updatedAt:now(),resultId:null,review:null,environment,scheduleId:internalId?input.scheduleId:null,scheduledFor:internalId?input.scheduledFor:null});
+    const createdAt=now(),scheduledFor=internalId?input.scheduledFor:null,businessTimezone=internalId?store.get('schedule',input.scheduleId)?.timezone:'Asia/Shanghai';
+    if(internalId&&(!businessTimezone||scheduledFor===null||scheduledFor===undefined))throw agentError('TASK_TIME_CONTEXT_INVALID','定时任务缺少服务端计划时区或触发时间',409);
+    taskTimeContext({createdAt,scheduledFor,businessTimezone},createdAt);
+    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope,engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),...(skillPreparation?.skillSnapshot?{skillSnapshot:structuredClone(skillPreparation.skillSnapshot),skillInputs:structuredClone(skillPreparation.skillInputs)}:{}),status:'queued',createdAt,updatedAt:createdAt,businessTimezone,resultId:null,review:null,environment,scheduleId:internalId?input.scheduleId:null,scheduledFor});
     fs.mkdirSync(path.join(storeDir,'tasks',task.id),{recursive:true,mode:0o700});emit(task.id,'task.created',{goal,engine});
     if(autoStart)queueMicrotask(()=>run(task.id).catch(()=>{}));return {task:publicTask(task)};
   }
@@ -133,6 +137,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     try{
       const actor=await identity({id:task.executionActorId||task.ownerId});taskFor(taskId,actor);
       assertTaskSkill(task);
+      const timeContext=taskTimeContext(task,now());
       const engine=engines[task.engine];if(!engine?.run)throw agentError('ENGINE_UNAVAILABLE','公司主机尚未配置此执行引擎',409);
       const credentials=await settings.credentials(),month=new Date(now()).toISOString().slice(0,7);
       usageId=randomUUID();store.transaction(()=>{
@@ -143,7 +148,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
       });
       store.update('task',taskId,{status:'running',pauseReason:null,executionStartedAt:now(),executionEngine:task.engine,executionModel:credentials.model});emit(taskId,'task.running',{engine:task.engine,model:credentials.model});
       const onUsage=value=>{const count=tokenCount(value);if(count!==null){const current=store.get('usage',usageId);store.update('usage',usageId,{totalTokens:Math.max(current.totalTokens,count),details:value});if(current.reservedTokens!==null&&count>=current.reservedTokens)controller.abort();}};
-      const result=await engine.run({task:{...publicTask(task),...(task.skillSnapshot?{skillSnapshot:structuredClone(task.skillSnapshot),skillInputs:structuredClone(task.skillInputs)}:{}),attachments:attachmentMetadata(task.attachmentIds)},session:task.engineSession,credentials,workingDirectory:path.join(storeDir,'tasks',taskId),profileDirectory:path.join(storeDir,'engines',task.engine),signal:controller.signal,invoke:(name,input)=>invokeTool(taskId,name,input),emit:(type,value)=>emit(taskId,type,value),onUsage,checkpoint:session=>store.update('task',taskId,{engineSession:session}),onSession:session=>sessions.set(taskId,session)});
+      const result=await engine.run({task:{...publicTask(task),...(task.skillSnapshot?{skillSnapshot:structuredClone(task.skillSnapshot),skillInputs:structuredClone(task.skillInputs)}:{}),timeContext,attachments:attachmentMetadata(task.attachmentIds)},session:task.engineSession,credentials,workingDirectory:path.join(storeDir,'tasks',taskId),profileDirectory:path.join(storeDir,'engines',task.engine),signal:controller.signal,invoke:(name,input)=>invokeTool(taskId,name,input),emit:(type,value)=>emit(taskId,type,value),onUsage,checkpoint:session=>store.update('task',taskId,{engineSession:session}),onSession:session=>sessions.set(taskId,session)});
       onUsage(result?.usage);store.update('usage',usageId,{state:tokenCount(result?.usage)!==null?'known':'unknown',finishedAt:now()});
       const current=store.get('task',taskId);
       if(current.status==='running'){
