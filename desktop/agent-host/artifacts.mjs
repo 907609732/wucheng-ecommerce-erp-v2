@@ -12,6 +12,16 @@ export function artifactDownload(storeDir,item,{maxBytes=64*1024*1024}={}){
   const name=path.basename(item.name||file).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').slice(0,180)||'result';
   return {download:{name,mimeType:item.mimeType||'application/octet-stream',size:bytes.length,sha256,bytes:bytes.toString('base64')}};
 }
+export function artifactPreview(storeDir,item){
+  const {download}=artifactDownload(storeDir,item,{maxBytes:12*1024*1024}),bytes=Buffer.from(download.bytes,'base64');
+  const mimeType=String(download.mimeType).split(';')[0].trim().toLowerCase();
+  const valid=mimeType==='image/png'&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+    ||mimeType==='image/jpeg'&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255
+    ||mimeType==='image/webp'&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP'
+    ||mimeType==='application/pdf'&&bytes.toString('ascii',0,5)==='%PDF-';
+  if(!valid)throw hostError('ARTIFACT_PREVIEW_UNSUPPORTED','此文件格式暂不支持内嵌预览，请下载查看',415);
+  return {preview:{...download,mimeType}};
+}
 export async function saveArtifactDownload(result,{dialog,window,downloads}){
   const item=result?.download;if(!item)return result;
   if(typeof item.name!=='string'||item.name!==path.basename(item.name)||/[<>:"/\\|?*\x00-\x1f]/.test(item.name)||typeof item.bytes!=='string'||item.bytes.length>90*1024*1024)throw hostError('ARTIFACT_RESPONSE_INVALID','产物下载信息无效',502);

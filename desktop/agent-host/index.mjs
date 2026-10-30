@@ -5,7 +5,7 @@ import {createHostIdentity} from './identity.mjs';
 import {createSafeSecretStore} from './secret-store.mjs';
 import {createAgentModuleTransport} from './module-transport.mjs';
 import {startAgentBridge} from './bridge.mjs';
-import {artifactDownload} from './artifacts.mjs';
+import {artifactDownload,artifactPreview} from './artifacts.mjs';
 import {composeAgentDependencies} from './composition.mjs';
 import {hostError} from './common.mjs';
 import {createCompanyIdentity} from './company-identity.mjs';
@@ -36,11 +36,12 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
   };
   runtime=dependencies.runtimeFactory({storeDir,adapters:dependencies.adapters,engines:dependencies.engines,resolveActor,secretStore,signApproval,environment:{...paths.environment,tenantLabel:'测试租户'},extensions:{
     'permissions.get':identity.permissionsGet,'permissions.inspect':identity.permissionsInspect,'permissions.receipt':identity.permissionsReceipt,'permissions.save':identity.permissionsSave,
-    'artifacts.open':item=>artifactDownload(storeDir,item),...backupHooks,...connectionHandlers
+    ...(typeof identity.listAssignableActors==='function'?{'people.assignable':identity.listAssignableActors}:{}),
+    'artifacts.open':item=>artifactDownload(storeDir,item),'artifacts.preview':item=>artifactPreview(storeDir,item),...backupHooks,...connectionHandlers
   }});
   const takeover=createLegacyScheduleTakeover({warehouse:adapterMap.get('warehouse'),runtime,identity,getCompanyIdentity,onError});
   const dispatch=runtime.request;
-  runtime.request=async(operation,payload,meta)=>{getCompanyIdentity();if(['permissions.inspect','permissions.receipt'].includes(operation)||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);const result=await dispatch(operation,payload,meta);return operation==='status'?{...result,legacyScheduleMigration:takeover.status()}:result;};
+  runtime.request=async(operation,payload,meta)=>{getCompanyIdentity();if(['permissions.inspect','permissions.receipt','people.assignable'].includes(operation)||operation.startsWith('backups.'))throw hostError('INTERNAL_OPERATION','此接口仅用于准备已授权系统任务',403);const result=await dispatch(operation,payload,meta);return operation==='status'?{...result,legacyScheduleMigration:takeover.status()}:result;};
   let tickJob=null,closing=false;
   const timer=setInterval(()=>{if(tickJob||closing)return;tickJob=Promise.resolve().then(()=>takeover.run()).then(()=>runtime.tick()).catch(onError).finally(()=>{tickJob=null;});},15000);timer.unref();
   let bridge;try{bridge=startBridge?await startAgentBridge({storeDir:hostDir,request:runtime.request}):null;}catch(error){clearInterval(timer);await runtime.close();throw error;}

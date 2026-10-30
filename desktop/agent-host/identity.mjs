@@ -39,7 +39,14 @@ export function createHostIdentity({storeDir,policyFile,principal=windowsPrincip
     return {id,login,label:login,role:p.role,modules:[...p.modules],canRunTasks:p.canRunTasks,enabled:true,channel:'mcp'};
   }
   function requireAdmin(actor,trustedUi=false){const fresh=resolveActor(actor?.id);if(!fresh||fresh.role!=='admin'||!trustedUi)throw hostError('ADMIN_REQUIRED','此操作需要管理员在工作台确认',403);return fresh;}
-  return {resolveActor,localActor(channel='ui'){
+  return {resolveActor,listAssignableActors({modules,name}={},ctx={}){
+    const actor=resolveActor(ctx.actor?.id);
+    if(!actor||!['admin','editor'].includes(actor.role)||actor.canRunTasks!==true)throw hostError('TASK_PERMISSION_REQUIRED','无权查询可分派员工',403);
+    if(!Array.isArray(modules)||modules.some(id=>!WORKBENCH_MODULES.includes(id)||!actor.modules.includes(id))||name!==undefined&&(typeof name!=='string'||!name.trim()||name.length>100))throw hostError('PEOPLE_SCOPE_DENIED','人员查询必须限于已授权业务范围',403);
+    const ids=[owner(),...Object.keys(readPolicy().users).map(login=>'tailscale:'+login)],needle=name?.trim().toLocaleLowerCase();
+    const people=[...new Set(ids.filter(Boolean))].map(id=>resolveActor(id)).filter(person=>person?.enabled&&['admin','editor'].includes(person.role)&&person.canRunTasks===true&&modules.every(id=>person.modules.includes(id))&&(!needle||[person.id,person.login,person.label].some(value=>String(value||'').toLocaleLowerCase().includes(needle)))).map(person=>({id:person.id,label:person.label,modules:person.modules.filter(id=>modules.includes(id))}));
+    return {people};
+  },localActor(channel='ui'){
     const actor=resolveActor(principal.id);if(!actor)throw hostError('HOST_OWNER_DENIED','当前 Windows 用户不是此主机配置的所有者',403);
     if(!['ui','mcp','cli'].includes(channel))throw hostError('CHANNEL_DENIED','调用通道无效',403);
     return {...actor,channel};
