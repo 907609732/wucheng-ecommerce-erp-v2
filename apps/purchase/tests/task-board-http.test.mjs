@@ -7,7 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {createApp} from '../server.mjs';
 import {signWorkbenchActor} from '../lib/workbench-actor.mjs';
 
-test('人员分派HTTP闭环、员工隔离、旧入口防绕过及远程签名权限',async t=>{
+test('本地分派兼容与真实签名成员同等访问，身份不可由表单冒充',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-board-http-')),{app,store,integration}=createApp({dataDir:dir}),server=app.listen(0,'127.0.0.1');
  integration.attach(server);await new Promise(resolve=>server.once('listening',resolve));
  t.after(async()=>{await new Promise(resolve=>server.close(resolve));store.close();fs.rmSync(dir,{recursive:true,force:true});});
@@ -52,14 +52,17 @@ test('人员分派HTTP闭环、员工隔离、旧入口防绕过及远程签名�
  assert.equal((await request('/api/month-confirmations',{month},alice.cookie)).status,403);
 
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim();
- async function remote(route,{role='editor',id='tailscale:alice',body}={}){
+ async function remote(route,{role='editor',id='tailscale:alice',body,actorPatch={}}={}){
   const method=body===undefined?'GET':'POST',now=Date.now(),actor={v:1,id,login:id.slice(9),role,modules:['purchase'],canRunTasks:true,sessionId:'remote-test',channel:'ui',requestId:randomUUID(),issuedAt:now,expiresAt:now+30000,module:'purchase',method,path:route};
-  const res=await fetch(base+route,{method,headers:{...signWorkbenchActor(actor,key),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetch(base+route,{method,headers:{...signWorkbenchActor({...actor,...actorPatch},key),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
   return {status:res.status,data:res.headers.get('content-type')?.includes('json')?await res.json():await res.text()};
  }
  assert.equal((await remote('/task-cards.js')).status,200);
- assert.equal((await remote('/api/personnel/session',{body:{role:'boss'}})).status,403);
- assert.equal((await remote('/api/personnel',{role:'viewer',body:{name:'不可写',role:'employee',active:true}})).status,403);
+ const member=await remote('/api/personnel/session',{body:{role:'boss'}});assert.equal(member.status,200);assert.equal(member.data.canAssign,true);assert.equal(member.data.staff.id,a.data.saved.id,'body.role不改变签名登录人员或借用本机老板身份');
+ assert.equal((await remote('/api/personnel/session',{body:{role:'boss',staffId:b.data.saved.id}})).status,403,'即使全员同等访问也不能冒用另一人员身份');
+ assert.equal((await remote('/api/personnel/session',{actorPatch:{path:'/different'}})).status,401,'错误请求签名仍拒绝');
+ assert.equal((await remote('/api/personnel',{role:'viewer',body:{name:'真实登录成员记录',role:'employee',active:true}})).status,200,'旧viewer字段不再限制真实签名成员写入');
  const remoteAdmin=await remote('/api/personnel/session',{role:'admin',id:'tailscale:owner'});assert.equal(remoteAdmin.data.role,'boss');assert.equal(remoteAdmin.data.canManagePersonnel,true);
- assert.equal((await remote('/api/tasks',{body:{month}})).status,403);
+ const sharedTasks=await remote('/api/tasks?month='+month);assert.equal(sharedTasks.status,200);
+ assert.equal((await remote('/api/tasks',{body:{month,taskId:'collect:淘宝',status:'pending',operator:'员工甲',revision:sharedTasks.data.revision}})).status,200,'真实签名成员可按有效业务版本更新任务');
 });

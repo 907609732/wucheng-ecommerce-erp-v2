@@ -9,7 +9,7 @@ const date={type:'string',pattern:'^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01]
 const month={type:'string',pattern:'^\\d{4}-(0[1-9]|1[0-2])$',description:'业务月份 YYYY-MM；采购确认按付款月，缺付款日回退下单月'};
 const integer=(description,minimum=0,maximum=1e12)=>({type:'integer',minimum,maximum,description});
 const money=integer('人民币整数分，100表示1元；不得传元或浮点数');
-const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
+const obj=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const arr=(items,maxItems=100000,minItems=0)=>({type:'array',items,maxItems,minItems});
 const platform={type:'string',enum:Object.keys(importRules),description:'真实采购平台；历史手工平台不作为新录入选项'};
 const category={type:'string',enum:['goods','fixed_asset','expense'],description:'商品采购/固定资产采购/日常支出'};
