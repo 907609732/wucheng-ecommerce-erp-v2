@@ -78,3 +78,12 @@ collect复用原Playwright采集器，把原件复制到受控目录、记录SHA
 
 ## 全员访问增量
 已移除云仓能力 roles 元数据、模块列表、角色与 canRunTasks 业务门槛；已登录员工可查全员安排和提醒、全部采集任务摘要。保留签名入口、本人签到、任务原件归属、重试原执行人、中央复核和防重。主机迁移专用协议仍要求原通道校验，未向普通业务入口开放。详情见 docs/warehouse-agent-capability-matrix.md。未执行测试。
+
+## 2026-10-29 集中验收后定向修复
+- 旧测试仍期望 viewer/editor/canRunTasks 限制，已按全员业务访问契约更新；模块内删除无效的旧权限集合与参数。
+- 员工配置测试补充显式 autoRemind:false。该字段在闭合 schema 中保持必填，不默认开启；缺失参数拒绝用例和默认关闭用例均通过。
+- 中央链路测试原先直接返回旧角色，绕过生产主机身份归一化，实际触发 transport READ_ONLY。现使用主机同一个 withCompanyAccess 函数，保持原真实 id/login，原始员工记录仍为 viewer、canRunTasks:false；不修改 host/runtime 实现。
+- 新增全员查看安排/催办、模拟渠道发送、旧 viewer 本人签到；保留无身份、共享本机身份和代签拒绝，以及签名、幂等、原件与账本变化阻断。
+- 定向命令：node --test tests/warehouse-agent.test.mjs tests/warehouse-daily.test.mjs。独立云仓树通过 AGENT_APPROVAL_HELPER 和 AGENT_HOST_TRANSPORT_HELPER 指向总控 agent-native-rebuild 树的 runtime/host 实现；company-access 由同一 host 相对导入。
+- 首轮35通过2失败（夹具归一化及提示文案），修正后37通过0失败0跳过，退出码0。仅这两个文件复测，未跑公共全套。测试使用临时 SQLite/XLSX 和模拟通知，无正式发送、平台采集、打包安装或正式账本写入。
+- 未完成边界不变：生产包体、真实菜鸟/钉钉、每日22:00真实调度接管仍待总控后续统一验收。

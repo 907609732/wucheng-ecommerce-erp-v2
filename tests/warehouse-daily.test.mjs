@@ -62,8 +62,8 @@ test('same row count and stock total cannot hide changed snapshot contents',asyn
 test('employees sign only themselves; day is unique and requires a known identity',async t=>{
   const f=await fixture(t),worker=employee();
   await assert.rejects(async()=>f.daily.action(employee('unknown@example.com'),{action:'check-in',confirmed:true}));
-  await assert.rejects(async()=>f.daily.configure(worker,{employees:[],autoRemind:true}));
-  await assert.rejects(async()=>f.daily.remind(worker,{logins:[worker.login],channels:['email'],confirmed:true}));
+  await assert.rejects(async()=>f.daily.action(worker,{action:'check-in',login:'other@example.com',confirmed:true}));
+  await assert.rejects(async()=>f.daily.action(admin,{action:'check-in',confirmed:true}));
   await f.daily.action(worker,{action:'check-in',confirmed:true});
   const first=(await f.daily.status(worker)).me;
   assert.ok(checkedAt(first),'check-in records the trusted server timestamp');
@@ -186,4 +186,19 @@ test('uncertain provider outcome is retained and never blindly retried',async t=
   await f.daily.remind(admin,{logins:[employee().login],channels:['email'],confirmed:true});
   assert.equal(attempts,1);
   assert.ok((await f.daily.status(admin)).reminders.some(row=>row.status==='unknown'));
+});
+
+
+test('authenticated legacy viewer can manage team arrangements and reminders without granting identity',async t=>{
+  const f=await fixture(t),worker={...employee(),role:'viewer'},other=person('other@example.com');
+  await assert.rejects(async()=>f.daily.configure(null,{employees:[],autoRemind:false}));
+  f.daily.configure(worker,{employees:[person(),other],autoRemind:false});
+  const state=await f.daily.status(worker);
+  assert.equal(state.employees.length,2);assert.equal(state.config.autoRemind,false);
+  await f.daily.action(worker,{action:'check-in',confirmed:true});
+  assert.ok(checkedAt((await f.daily.status(worker)).me));
+  await assert.rejects(f.daily.remind(worker,{logins:[other.login],channels:['email']}),/确认提醒对象和渠道/);
+  const sent=await f.daily.remind(worker,{logins:[other.login],channels:['email'],confirmed:true});
+  assert.equal(sent.results[0].status,'accepted');assert.equal(f.delivered.length,1);
+  assert.equal((await f.daily.status(worker)).reminders[0].login,other.login);
 });

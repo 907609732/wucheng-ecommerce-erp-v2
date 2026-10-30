@@ -20,8 +20,6 @@ const schema=properties=>({type:'object',properties,additionalProperties:false})
 const str={type:'string',minLength:1,maxLength:160};
 const employeeEditFields=['name','email','mobile','dingtalkUserId','task','deadline','workdays','channels','enabled'];
 const cap=(id,title,kind,properties={},requiresReview=kind==='prepare')=>({id,title,kind,description:title,inputSchema:warehouseCapabilitySchema(id),requiresReview,...(id==='employees.configure'?{resultEditFields:employeeEditFields}:{})});
-const taskCapabilities=new Set(['inventory.collect','inventory.import','inventory.send','inventory.send-latest-valid','sales.collect','sales.backfill','sales.import','sales.send','login.refresh','collection.retry','collection.cancel']);
-const adminCapabilities=new Set(['employees.configure','remind','backup','debug.bundle']);
 export const WAREHOUSE_AGENT_CAPABILITIES=[
   cap('inventory','查看云仓库存与补货预警','query'),cap('sales','查询云仓月销量与缺失月份','query',{from:str,to:str,sku:str}),
   cap('login.refresh','在主机刷新菜鸟登录，验证码由本人处理','prepare'),
@@ -47,7 +45,7 @@ export const WAREHOUSE_AGENT_CAPABILITIES=[
   cap('backup','创建可核对的云仓账本备份','prepare',{},false)
 ];
 
-function actor(ctx,write=false,admin=false){
+function actor(ctx){
   const a=ctx?.actor;
   if(!a?.id)throw error('WAREHOUSE_FORBIDDEN','当前身份无云仓访问权限',403);
   if(!ctx.taskId)throw error('WAREHOUSE_CONTEXT_REQUIRED','缺少可信任务上下文',400);
@@ -184,7 +182,7 @@ export function createWarehouseAgentAdapter(deps={}){
     if(id==='schedules.legacy')blocks.push({type:'table',title:'可迁入统一调度的计划',rows:data.candidates},{type:'table',title:'原设置和时区',rows:[{...data.source,localTimeZone:data.localTimeZone,businessTimeZone:data.businessTimeZone,legacyTimersDisabled:data.legacyTimersDisabled}]});
     if(id==='collection.jobs'){for(const job of data.jobs)blocks.push({type:'job',title:'采集任务',...job});return {summary:'已按持久采集编号回查；没有启动新的导出',scope:{module:'warehouse',...binding(ctx)},blocks,evidence:data.artifacts.map(a=>({...a,module:'warehouse',complete:data.jobs.find(j=>j.jobId===a.jobId)?.complete===true,status:data.jobs.find(j=>j.jobId===a.jobId)?.status})),issues:data.jobs.filter(j=>!j.complete).map(j=>({blocking:true,module:'warehouse',jobId:j.jobId,code:'WAREHOUSE_COLLECTION_'+j.status.toUpperCase().replaceAll('-','_'),message:'采集尚未取得可入库终态：'+j.status})),data};}
     return {summary:WAREHOUSE_AGENT_CAPABILITIES.find(c=>c.id===id).title,scope:{module:'warehouse',...binding(ctx),businessDate:businessDate(now()),timeZone:'Asia/Shanghai'},blocks,evidence:id==='sources'&&data.sha256?[{artifactId:data.artifactId,sha256:data.sha256,filename:data.filename}]:[],data};}
-  async function prepare(id,input={},ctx){const c=await inputFor(id,input,now());actor(ctx,true,adminCapabilities.has(id));if(c.kind!=='prepare')throw error('WAREHOUSE_NOT_PREPARE','该能力只可查询',400);
+  async function prepare(id,input={},ctx){const c=await inputFor(id,input,now());actor(ctx);if(c.kind!=='prepare')throw error('WAREHOUSE_NOT_PREPARE','该能力只可查询',400);
     const before=binding(ctx);let commitData={id,input:structuredClone(input)},blocks=[],evidence=[],changes=[],issues=[];
     if(id.endsWith('.collect')||id==='collection.retry'||id==='collection.cancel'){const original=id.startsWith('collection.')?collections.get(input.jobId,ctx.actor,{writeAccess:id!=='collection.cancel'}):null;const outcome=id==='collection.cancel'?cancelCollection(input.jobId,ctx):await collectArtifact(original?.kind||(id.startsWith('inventory')?'inventory':'sales'),original?{jobId:original.id,month:original.month}:input,ctx,{retry:id==='collection.retry'}),j=collections.publicJob(outcome.job),a=outcome.artifact;blocks=[{type:'job',title:'菜鸟采集',...j}];if(a){commitData.artifactIds=[a.id];blocks.push({type:'table',title:'采集校验结果',rows:[{artifactId:a.id,kind:a.kind,sha256:a.hash,...warehouseValidationSummary(a.validation)}]});evidence=[{module:'warehouse',jobId:j.jobId,complete:j.complete,status:j.status,artifactId:a.id,sha256:a.hash,filename:path.basename(a.file)}];}if(!j.complete)issues.push({blocking:true,module:'warehouse',jobId:j.jobId,code:'WAREHOUSE_COLLECTION_'+j.status.toUpperCase().replaceAll('-','_'),message:j.status==='waiting-host-action'?'采集需要在主机完成登录或验证码；完成后按原编号显式重试':'采集未取得可入库终态，请按原编号查回；禁止盲目重启',errors:a?.validation?.errors});}
     else if(id==='inventory.import'||id==='sales.import'){const a=artifact(input.artifactId,ctx);if(a.kind!==(id.startsWith('inventory')?'inventory':'sales'))throw error('WAREHOUSE_SOURCE_KIND','原件业务类型不符');if(a.kind==='inventory'&&businessDate(new Date(a.createdAt))!==businessDate(now()))throw error('WAREHOUSE_COLLECTION_STALE','库存原件不是今天新采集，请重新采集');const v=await worker('validate',{kind:a.kind,file:a.file,month:a.month},ctx);if(!(v.ok??v.valid))throw error('WAREHOUSE_VALIDATION_FAILED','原件未通过校验');commitData.artifactIds=[a.id];evidence=[{artifactId:a.id,sha256:a.hash,filename:path.basename(a.file)}];changes=[{operation:id,...warehouseValidationSummary(v)}];}
@@ -204,7 +202,7 @@ export function createWarehouseAgentAdapter(deps={}){
   async function commitInner(proposed,ctx){actor(ctx,true);const p=load('warehouse_agent_prepared',proposed.commitData?.preparedId||proposed.id);if(p.actorId!==ctx.actor.id||p.taskId!==ctx.taskId)throw error('WAREHOUSE_PREPARED_FORBIDDEN','结果不属于当前人员或任务',403);
     if(proposed.version!==undefined&&p.version!==proposed.version||p.capabilityId!==proposed.capabilityId||p.changeDigest!==proposed.changeDigest||canonical(p.input)!==canonical(proposed.input)||canonical(p.changes)!==canonical(proposed.changes)||canonical(p.commitData)!==canonical(proposed.commitData))throw error('WAREHOUSE_RESULT_CHANGED','服务端准备结果与提交内容不符');
     const prior=receipt(ctx.idempotencyKey,ctx);if(prior){const row=db.prepare('SELECT digest FROM warehouse_agent_receipts WHERE key=?').get(ctx.idempotencyKey);if(row.digest!==p.changeDigest)throw error('WAREHOUSE_IDEMPOTENCY_CONFLICT','幂等标识已用于其他准备结果');return receiptResult(ctx.idempotencyKey,ctx);}
-    const c=WAREHOUSE_AGENT_CAPABILITIES.find(c=>c.id===p.capabilityId);actor(ctx,true,adminCapabilities.has(c.id));
+    const c=WAREHOUSE_AGENT_CAPABILITIES.find(c=>c.id===p.capabilityId);actor(ctx);
     if(c.requiresReview===false)throw error('WAREHOUSE_AUTOMATIC_NO_COMMIT','自动产物无需正式提交，请读取已经生成的原件',400);
     sameBinding({dataSetId:p.scope.dataSetId,revision:p.scope.revision},ctx);
     if(c.requiresReview){if(typeof verifyApproval!=='function')throw error('WAREHOUSE_APPROVAL_UNAVAILABLE','主机尚未接入中央审批验证器',503);
