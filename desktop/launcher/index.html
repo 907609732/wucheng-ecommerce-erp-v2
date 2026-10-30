@@ -12,18 +12,10 @@
 <body data-loading-logo="../assets/lingtu-icon.png">
   <header>
     <div class="brand"><img src="../assets/lingtu-icon.png" alt=""><div><strong>五成电子商务工作台</strong><span>灵兔 · 按需扩展</span></div></div>
-    <div class="headerTools"><div id="personnelHeader" class="personnelHeader" hidden><span id="personnelLabel"></span><button id="personnelChange">重新选择身份</button></div><span id="connectionIndicator" class="connectionIndicator" data-state="checking" role="status" aria-live="polite">正在检查连接…</span><nav hidden><button id="home">首页</button><button id="logs">日志</button><button id="settings">设置</button><button id="help" hidden>使用说明</button></nav></div>
+    <div class="headerTools"><span id="connectionIndicator" class="connectionIndicator" data-state="checking" role="status" aria-live="polite">正在检查连接…</span><nav><button id="home">首页</button><button id="logs">日志</button><button id="settings">设置</button><button id="help" hidden>使用说明</button></nav></div>
   </header>
   <aside id="toast" class="toast" aria-label="操作提示"><p id="message" role="status" aria-live="polite"></p><button id="messageClose" aria-label="关闭提示" title="关闭提示">×</button></aside>
-  <main id="personnelPanel" class="personnelPanel">
-    <div class="personnelIntro"><span class="eyebrow">开始工作</span><h1>这次以什么身份使用？</h1><p>选好身份，再进入工作台。无需注册或输入密码。</p></div>
-    <section class="personnelCards" aria-label="选择本次使用身份">
-      <button id="personnelBoss" class="personnelCard" data-role="boss"><span class="personnelSymbol" aria-hidden="true">主</span><strong>老板</strong><span>查看经营结果，核对销售资金和月报。</span><span class="personnelCardAction">以老板身份进入 →</span></button>
-      <button id="personnelEmployee" class="personnelCard" data-role="employee"><span class="personnelSymbol" aria-hidden="true">工</span><strong>员工</strong><span>按照月度任务，逐项整理和补齐销售资料。</span><span class="personnelCardAction">以员工身份进入 →</span></button>
-    </section>
-    <p id="personnelStatus" class="personnelHint" role="status" aria-live="polite">每次重新启动工作台时选择，也可以在右上角重新选择。</p>
-  </main>
-  <main id="homePanel" hidden>
+  <main id="homePanel">
     <div class="intro"><div><span class="eyebrow">工作台</span><h1>今天的工作</h1></div><p>选择需要的模块。独立运行，本地保存，随时回来继续。</p></div>
     <section id="cards" class="cards" aria-label="业务模块"></section>
     <p class="hint">功能与运行环境随工作台一起提供；业务数据独立保存在原位置。</p>

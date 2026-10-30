@@ -1,8 +1,7 @@
 const api = window.launcher, $ = id => document.getElementById(id);
 const names = {warehouse:'菜鸟云仓同步',purchase:'采购台',sales:'销售台',overview:'经营收支总览',exporter:'历史订单导出台','node-runtime':'共享运行环境','browser-runtime':'浏览器组件'};
 const descriptions = {overview:'汇总销售、采购及各项费用，查看整体收支与待补数据。',warehouse:'同步云仓库存，查看库存与销售变化。',purchase:'采购记账、历史订单导入与支出核对。',sales:'销售账单、运营数据与运费费用。'};
-let rows = [], chosen, offlineToken, chosenOffline, offlineIds=new Set(), currentPanel = 'personnel', activeDesk = '', openingId = '', openingTimer;
-let personnelState={role:null,selected:false,label:'请选择身份'},personnelBusy=false,pendingNavigation,launcherLoaded=false;
+let rows = [], chosen, offlineToken, chosenOffline, offlineIds=new Set(), currentPanel = 'home', activeDesk = '', openingId = '', openingTimer;
 let connectionState={mode:'standalone'};
 let privateNetworkBusy=false,privateNetworkPolling=false,networkLastVerification=0;
 let lastLoggedConnectionState='';
@@ -96,41 +95,11 @@ function endOpening() {
   render();
 }
 async function panel(name) {
-  if(!personnelState.selected)name='personnel';
   currentPanel = name;
   await api.hide();
-  for (const p of ['personnel','home','settings','desk','cache','logs']) $(p+'Panel').hidden = p !== name;
+  for (const p of ['home','settings','desk','cache','logs']) $(p+'Panel').hidden = p !== name;
   for(const id of ['home','settings','logs']){if(id===name)$(id).setAttribute('aria-current','page');else $(id).removeAttribute('aria-current');}
 }
-function renderPersonnel(){
-  $('personnelHeader').hidden=!personnelState.selected;
-  $('personnelLabel').textContent='当前身份 · '+personnelState.label;
-  document.querySelector('header nav').hidden=!personnelState.selected;
-  for(const id of ['personnelBoss','personnelEmployee','personnelChange'])$(id).disabled=personnelBusy;
-}
-async function selectPersonnel(role){
-  if(personnelBusy)return;
-  personnelBusy=true;renderPersonnel();clearDisplayedCache();
-  try{
-    await api.hide();
-    activeDesk='';
-    for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();
-    personnelState=await api.selectPersonnel(role);activeDesk='';lastDeskBounds='';
-    endOpening();renderPersonnel();await panel(personnelState.selected?'home':'personnel');
-    if(personnelState.selected){
-      $('personnelStatus').textContent='每次重新启动工作台时选择，也可以在右上角重新选择。';
-      if(pendingNavigation){const next=pendingNavigation;pendingNavigation=undefined;await open(next.id,next.route);}
-      if(launcherLoaded)await api.ready?.();
-    }
-  }catch(error){
-    personnelState=await api.personnelState().catch(()=>({role:null,selected:false,label:'请选择身份'}));
-    renderPersonnel();if(!personnelState.selected)await panel('personnel');
-    $('personnelStatus').textContent=error.message;message(error);
-  }finally{personnelBusy=false;renderPersonnel();}
-}
-$('personnelBoss').onclick=()=>selectPersonnel('boss');
-$('personnelEmployee').onclick=()=>selectPersonnel('employee');
-$('personnelChange').onclick=()=>selectPersonnel(null);
 async function load() {
   try{rows=await api.list();if(isClient())connectionState.connected=true;render();}
   catch(error){
@@ -276,7 +245,6 @@ async function prepare(id) {
   }
 }
 async function open(id,route) {
-  if(!personnelState.selected){pendingNavigation={id,route};await panel('personnel');return;}
   if(openingId)throw Error('正在启动'+names[openingId]+'，请稍候');
   const previousPanel=currentPanel;
   beginOpening(id);
@@ -288,7 +256,7 @@ async function open(id,route) {
   }catch(error){
     const invalidIdentity=identityFailure(error);
     if(invalidIdentity)clearDisplayedCache();
-    if((id!=='sales'||personnelState.role==='boss')&&isClient()&&(/主服务器暂不可用|ERR_(?:INTERNET_DISCONNECTED|CONNECTION|NETWORK|TUNNEL|PROXY|ADDRESS_UNREACHABLE)|fetch failed|failed to fetch|ENET|ECONN|timeout|超时/i.test(error.message||'')||['EMBEDDED_BOOTSTRAP_FAILED','EMBEDDED_BOOTSTRAP_TIMEOUT'].includes(error.code))){
+    if(isClient()&&(/主服务器暂不可用|ERR_(?:INTERNET_DISCONNECTED|CONNECTION|NETWORK|TUNNEL|PROXY|ADDRESS_UNREACHABLE)|fetch failed|failed to fetch|ENET|ECONN|timeout|超时/i.test(error.message||'')||['EMBEDDED_BOOTSTRAP_FAILED','EMBEDDED_BOOTSTRAP_TIMEOUT'].includes(error.code))){
       const snapshot=await api.cached(id).catch(()=>null);
       if(snapshot){await panel('cache');$('cacheStatus').textContent=names[id]+' · 更新时间 '+new Date(snapshot.updatedAt).toLocaleString()+' · '+error.message;$('cacheData').textContent=JSON.stringify(snapshot.data,null,2);return;}
     }
@@ -344,7 +312,6 @@ $('serviceRefresh').onclick=async()=>{
   }catch(e){message(e);}
 };
 api.onNavigate(({id,route})=>{
-  if(!personnelState.selected){if(names[id])pendingNavigation={id,route};panel('personnel').catch(message);return;}
   if(id==='logs'){openLogPanel().catch(message);return;}
   if(id==='settings'){$('settings').click();return;}
   if(id==='help'){$('help').click();return;}
@@ -359,7 +326,7 @@ document.addEventListener('click',event=>{for(const details of document.querySel
 document.addEventListener('toggle',event=>{if(event.target.matches?.('details.moduleMore[open]'))for(const details of document.querySelectorAll('details.moduleMore[open]'))if(details!==event.target)details.open=false;},true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){const menus=[...document.querySelectorAll('details.moduleMore[open]')];for(const details of menus)details.open=false;if(menus.length){event.preventDefault();menus.at(-1).querySelector('summary').focus();}}});
 $('home').setAttribute('aria-current','page');
-Promise.resolve().then(async()=>{personnelState=await api.personnelState();renderPersonnel();await panel(personnelState.selected?'home':'personnel');await loadConnection();await load();}).catch(message).finally(()=>{launcherLoaded=true;return api.ready?.().catch(message);});
+Promise.resolve().then(async()=>{await panel('home');await loadConnection();await load();}).catch(message).finally(()=>api.ready?.().catch(message));
 $('cacheBack').onclick=()=>panel('home').catch(message);
 $('saveConnection').onclick=async()=>{try{const mode=$('connectionMode').value;let networkToken;
   if(mode==='server'){const proposal=await api.networkPlan();if(!window.confirm('本次私网配置：\n'+(proposal.difference.add.join('\n')||'复用已有工作台入口')+'\n保留：'+proposal.difference.preserve.join('、')+'\n不启用公网 Funnel。\n回滚配置已保存：'+proposal.backup+'\n\n启用主服务器？'))return;networkToken=proposal.token;}
