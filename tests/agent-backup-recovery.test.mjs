@@ -64,3 +64,14 @@ test('a restricted administrator cannot export or restore shared data belonging 
   await assert.rejects(()=>f.hooks['backups.list']({},f.ctx),{code:'BACKUP_ADMIN_REQUIRED'});
   await assert.rejects(()=>f.hooks['backups.restore.prepare']({backupId:'00000000-0000-0000-0000-000000000000'},f.ctx),{code:'BACKUP_ADMIN_REQUIRED'});
 });
+
+test('restored domain references point at copied originals and never at the live Beta ledger',async t=>{
+  const f=fixture(t),purchase=path.join(f.root,'data','purchase'),original=path.join(purchase,'originals','invoice.pdf');
+  fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,'synthetic original');
+  const ledger=new DatabaseSync(path.join(purchase,'purchases.sqlite'));ledger.exec('CREATE TABLE imports(id TEXT PRIMARY KEY,file_path TEXT)');ledger.prepare('INSERT INTO imports VALUES(?,?)').run('import-1',original);ledger.close();
+  const backup=await f.hooks['backups.prepare']({modules:['purchase']},f.ctx),prepared=await f.hooks['backups.restore.prepare']({backupId:backup.evidence[0].id},f.ctx),ctx={...f.ctx,capabilityId:'backups.restore-copy',approval:{payload:'trusted-runtime-proof'},idempotencyKey:hash('rewrite-domain-path')};
+  const done=await f.hooks['backups.restore.commit']({commitData:prepared.commitData},ctx),copy=path.join(f.root,'recoveries','recovery-'+prepared.commitData.recoveryId),restored=new DatabaseSync(path.join(copy,'purchase','purchases.sqlite'),{readOnly:true});
+  try{const value=restored.prepare('SELECT file_path FROM imports').get().file_path;assert.equal(value,path.join(copy,'purchase','originals','invoice.pdf'));assert.equal(fs.readFileSync(value,'utf8'),'synthetic original');assert.equal(restored.prepare('SELECT amount_cents FROM orders').get().amount_cents,12345);}finally{restored.close();}
+  assert.equal(done.receipt.transformCount,1);const record=JSON.parse(fs.readFileSync(path.join(copy,'recovery.json'),'utf8'));assert.equal(record.transforms[0].kind,'path-remapped');assert.equal(record.transforms[0].before,undefined);assert.equal(record.transforms[0].after,undefined);assert(record.files.find(item=>item.relative==='purchase/purchases.sqlite').sourceSha256);
+  const source=new DatabaseSync(path.join(purchase,'purchases.sqlite'),{readOnly:true});try{assert.equal(source.prepare('SELECT file_path FROM imports').get().file_path,original);}finally{source.close();}
+});
