@@ -3,6 +3,9 @@ import {agentDigest,agentError} from './approval.mjs';
 
 const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const text={type:'string',minLength:1,maxLength:20000};
+const backupId={type:'string',minLength:1,maxLength:200,pattern:'^[A-Za-z0-9_-]+$'};
+const backupModules=['warehouse','purchase','sales','overview','exporter'];
+const restoreCopyReceipt=(receipt,expected,key)=>receipt?.kind==='backup-restore-copy'&&receipt.idempotencyKey===key&&receipt.backupId===expected.backupId&&receipt.recoveryId===expected.recoveryId&&receipt.manifestSha256===expected.manifestSha256&&receipt.verified===true&&receipt.activated===false;
 const policySchema=object({schemaVersion:{const:1},users:{type:'object',propertyNames:{type:'string',minLength:1,maxLength:254,pattern:'^[^A-Z\\s,]+$'},additionalProperties:object({role:{enum:['admin','editor','viewer']},modules:{type:'array',items:{enum:['warehouse','purchase','sales','overview','exporter']},uniqueItems:true},canRunTasks:{type:'boolean',description:'允许执行写入类业务任务；查询不受此标记限制'},enabled:{type:'boolean'}},['role','modules','canRunTasks','enabled'])}},['schemaVersion','users']);
 export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFor,extensions={},now=Date.now}){
   if(!store.get('system','identity'))store.insert('system',{id:'identity',ownerId:'system',dataSetId:randomUUID(),revision:1});
@@ -16,7 +19,10 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
     {id:'tasks.assign',title:'把任务交给指定员工',kind:'prepare',requiresReview:true,inputSchema:object({taskId:text,assigneeId:text},['taskId','assigneeId'])},
     {id:'permissions.list',title:'查询人员权限',kind:'query',roles:['admin'],available:typeof extensions['permissions.inspect']==='function',inputSchema:object()},
     {id:'permissions.update',title:'维护人员权限',description:'先读取权限清单，再提交完整策略；users键是可信登录身份的原值，不得用显示名称代替。',kind:'prepare',requiresReview:true,roles:['admin'],available:typeof extensions['permissions.inspect']==='function'&&typeof extensions['permissions.save']==='function',inputSchema:object({policy:policySchema},['policy'])},
-    {id:'backups.create',title:'创建账本备份',kind:'prepare',requiresReview:false,roles:['admin'],available:typeof extensions['backups.prepare']==='function',inputSchema:object({modules:{type:'array',items:{enum:['warehouse','purchase','sales','overview','exporter']},minItems:1}},['modules'])}
+    {id:'backups.create',title:'创建账本备份',kind:'prepare',requiresReview:false,roles:['admin'],requiresTaskPermission:true,dataAccessModules:backupModules,available:typeof extensions['backups.prepare']==='function',inputSchema:object({modules:{type:'array',items:{enum:['warehouse','purchase','sales','overview','exporter']},minItems:1}},['modules'])},
+    {id:'backups.list',title:'查看隔离账本备份',kind:'query',roles:['admin'],requiresTaskPermission:true,dataAccessModules:backupModules,available:typeof extensions['backups.list']==='function',inputSchema:object()},
+    {id:'backups.verify',title:'核验备份原件与任务资料',kind:'query',roles:['admin'],requiresTaskPermission:true,dataAccessModules:backupModules,available:typeof extensions['backups.verify']==='function',inputSchema:object({backupId},['backupId'])},
+    {id:'backups.restore-copy',title:'从备份生成隔离恢复副本',description:'核验备份清单和原件摘要，复核后生成新的隔离恢复目录；不会覆盖正在运行的账本，也不执行正式切换。',kind:'prepare',requiresReview:true,roles:['admin'],requiresTaskPermission:true,dataAccessModules:backupModules,available:['backups.restore.prepare','backups.restore.commit','backups.restore.receipt'].every(id=>typeof extensions[id]==='function'),inputSchema:object({backupId},['backupId'])}
   ];
   const changed=()=>store.update('system','identity',s=>({revision:s.revision+1}));
   return {id:'system',capabilities,changed,
@@ -26,6 +32,10 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
       if(ctx?.capabilityId==='tasks.assign'&&ctx.capabilityInput?.taskId)revision.task=store.get('task',ctx.capabilityInput.taskId)?.version??'missing';
       return {dataSetId:identity.dataSetId,revision};},
     async query(capabilityId,input,ctx){
+      if(['backups.list','backups.verify'].includes(capabilityId)){
+        if(ctx.actor.role!=='admin'||ctx.actor.canRunTasks!==true)throw agentError('ADMIN_REQUIRED','需要具备业务执行权限的管理员核验备份',403);
+        return extensions[capabilityId](input,ctx);
+      }
       if(capabilityId==='people.assignable'){
         if(!['admin','editor'].includes(ctx.actor.role)||!ctx.actor.canRunTasks)throw agentError('TASK_PERMISSION_REQUIRED','无权分派业务任务',403);
         const target=input.taskId?taskFor(input.taskId,ctx.actor):taskFor(ctx.taskId,ctx.actor),visible=target.scope.modules.filter(module=>module!=='system'&&ctx.actor.modules.includes(module)),requested=visible.length?visible:[...ctx.actor.modules];
@@ -51,13 +61,27 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
       }else if(capabilityId==='permissions.update'){
         if(ctx.actor.role!=='admin')throw agentError('ADMIN_REQUIRED','需要管理员权限',403);const current=await extensions['permissions.inspect']({},ctx);commitData={...commitData,expectedVersion:current.revision};changes=[{kind:'permissions',before:current.policy,after:input.policy}];summary='请复核人员权限变更';
       }else if(capabilityId==='backups.create'){const result=await extensions['backups.prepare'](input,ctx);return {...result,requiresReview:false};}
+      else if(capabilityId==='backups.restore-copy'){
+        if(ctx.actor.role!=='admin'||ctx.actor.canRunTasks!==true)throw agentError('ADMIN_REQUIRED','需要具备业务执行权限的管理员准备恢复副本',403);
+        const result=await extensions['backups.restore.prepare'](input,ctx),restore=result?.commitData;
+        if(!restore||restore.backupId!==input.backupId||typeof restore.manifestSha256!=='string'||!/^[a-f0-9]{64}$/.test(restore.manifestSha256)||typeof restore.recoveryId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(restore.recoveryId)||!(result.evidence||[]).some(item=>item.id===restore.backupId&&item.manifestSha256===restore.manifestSha256)||(result.changes||[]).some(change=>change.activated===true))throw agentError('BACKUP_PREPARATION_INVALID','备份恢复草稿缺少一致的清单摘要和隔离目标',502);
+        return {...result,requiresReview:true,commitData:{operation:capabilityId,input,restore:{backupId:restore.backupId,manifestSha256:restore.manifestSha256,recoveryId:restore.recoveryId}}};
+      }
       else throw agentError('CAPABILITY_UNAVAILABLE','公共能力未登记');
       return {summary,blocks:[{type:'text',text:summary}],changes,evidence:[{id:'system-policy',revision:(await this.binding(ctx)).revision}],commitData};
     },
     async commit(step,ctx){
       if(!ctx.approval||!ctx.idempotencyKey)throw agentError('HUMAN_REVIEW_REQUIRED','公共变更需要有效的结果复核',403);
       const existing=store.get('system_receipt',ctx.idempotencyKey);if(existing)return {receipt:existing.receipt};
-      const {operation,input,expectedVersion}=step.commitData;let result,apply;
+      const {operation,input,expectedVersion,restore}=step.commitData;let result,apply;
+      if(operation==='backups.restore-copy'){
+        if(ctx.actor.role!=='admin'||ctx.actor.canRunTasks!==true)throw agentError('ADMIN_REQUIRED','当前人员无权生成恢复副本',403);
+        store.insert('system_effect',{id:ctx.idempotencyKey,ownerId:ctx.actor.id,operation,restore,startedAt:now()});
+        const response=await extensions['backups.restore.commit']({commitData:restore},ctx);
+        if(response?.ok===false||!restoreCopyReceipt(response?.receipt,restore,ctx.idempotencyKey))throw agentError('BACKUP_RESTORE_RECEIPT_INVALID','恢复副本尚未取得匹配的实际校验回执',409);
+        store.transaction(()=>{store.insert('system_receipt',{id:ctx.idempotencyKey,ownerId:ctx.actor.id,receipt:response.receipt});changed();});
+        return {receipt:response.receipt};
+      }
       if(operation==='schedules.create'||operation==='schedules.update'){const prepared=await getScheduler().prepare({...input,...(expectedVersion?{version:expectedVersion}:{})},ctx.actor);apply=()=>getScheduler().commit(prepared);}
       else if(operation==='schedules.delete'){apply=()=>{const old=store.get('schedule',input.id);if(!old||old.version!==expectedVersion||old.ownerId!==ctx.actor.id&&ctx.actor.role!=='admin')throw agentError('AGENT_REVISION_CHANGED','定时任务已变化，请重新查看',409);store.remove('schedule',input.id);return {id:input.id,deleted:true};};}
       else if(operation==='tasks.assign'){
@@ -70,6 +94,6 @@ export function createSystemAgentAdapter({store,getScheduler,resolveActor,taskFo
       else throw agentError('CAPABILITY_UNAVAILABLE','公共提交能力未登记');
       let receipt;store.transaction(()=>{if(apply)result=apply();receipt={id:randomUUID(),idempotencyKey:ctx.idempotencyKey,state:'completed',operation,recordId:result?.id||null,revision:result?.revision??result?.version??null,at:now(),resultDigest:agentDigest(result)};store.insert('system_receipt',{id:ctx.idempotencyKey,ownerId:ctx.actor.id,receipt});changed();});return {receipt};
     },
-    async receipt(idempotencyKey,ctx){const saved=store.get('system_receipt',idempotencyKey);if(saved)return {state:'completed',idempotencyKey,receipt:saved.receipt};const effect=store.get('system_effect',idempotencyKey);if(effect?.operation==='permissions.update'&&extensions['permissions.receipt'])return extensions['permissions.receipt']({idempotencyKey},ctx);return {state:'unknown',idempotencyKey};}
+    async receipt(idempotencyKey,ctx){const saved=store.get('system_receipt',idempotencyKey);if(saved)return {state:'completed',idempotencyKey,receipt:saved.receipt};const effect=store.get('system_effect',idempotencyKey);if(effect?.operation==='permissions.update'&&extensions['permissions.receipt'])return extensions['permissions.receipt']({idempotencyKey},ctx);if(effect?.operation==='backups.restore-copy'&&extensions['backups.restore.receipt']){const response=await extensions['backups.restore.receipt']({idempotencyKey},ctx);if(['completed','confirmed'].includes(response?.state)&&restoreCopyReceipt(response.receipt,effect.restore,idempotencyKey))return {...response,idempotencyKey};}return {state:'unknown',idempotencyKey};}
   };
 }

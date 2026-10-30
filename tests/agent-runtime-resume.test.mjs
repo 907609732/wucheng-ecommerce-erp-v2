@@ -159,3 +159,111 @@ test('private artifact handoff binds source to the invoking capability and rejec
   f.runtime.store.update('artifact',accepted.id,{sourceModule:undefined,sourceCapabilityId:undefined});
   await assert.rejects(f.invoke(task,'sales','handoff',{artifactId:accepted.id}),{code:'ARTIFACT_SOURCE_UNKNOWN'});
 });
+
+function backupHooks({lost=false,mismatched=false}={}){
+  const restore={backupId:'backup-source',recoveryId:'recovery-copy',manifestSha256:'e'.repeat(64)};
+  let writes=0,receipt;
+  return {restore,get writes(){return writes;},extensions:{
+    'backups.list':async()=>({summary:'备份目录',blocks:[{type:'table',rows:[{backupId:restore.backupId}]}],evidence:[],issues:[]}),
+    'backups.verify':async()=>({summary:'副本核验通过',blocks:[{type:'text',text:'已核验'}],evidence:[{id:restore.backupId,manifestSha256:restore.manifestSha256}],issues:[]}),
+    'backups.restore.prepare':async()=>({summary:'待复核隔离恢复副本',blocks:[{type:'text',text:'不会覆盖当前账本'}],changes:[{kind:'restore-copy',...restore,activated:false}],evidence:[{id:restore.backupId,manifestSha256:restore.manifestSha256}],commitData:{...restore}}),
+    'backups.restore.commit':async({commitData},ctx)=>{assert.deepEqual(commitData,restore);assert.ok(ctx.approval);writes++;receipt={kind:'backup-restore-copy',idempotencyKey:ctx.idempotencyKey,...restore,verified:true,activated:false,...(mismatched?{manifestSha256:'f'.repeat(64)}:{})};if(lost)throw Error('response lost after recovery copy');return {receipt};},
+    'backups.restore.receipt':async({idempotencyKey})=>receipt?{state:'completed',idempotencyKey,receipt}:{state:'unknown',idempotencyKey}
+  }};
+}
+
+test('backup queries are admin-only and a recovery copy requires exact human-bound evidence',async t=>{
+  const hooks=backupHooks(),f=fixture(t,{extensions:hooks.extensions}),task=await f.create(['system']);f.running(task);
+  await f.invoke(task,'system','backups.list');await f.invoke(task,'system','backups.verify',{backupId:hooks.restore.backupId});
+  const draft=await f.invoke(task,'system','backups.restore-copy',{backupId:hooks.restore.backupId},'prepare');
+  assert.equal(draft.requiresReview,true);assert.equal(hooks.writes,0);
+  const before=await f.request('tasks.get',{taskId:task.id});
+  await assert.rejects(f.request('reviews.approve',{taskId:task.id,reviewId:before.review.id,resultVersion:before.review.resultVersion,revision:before.review.revision},{trustedUi:false}),{code:'HUMAN_REVIEW_REQUIRED'});
+  const done=await f.approve(task);assert.equal(done.task.status,'completed');assert.equal(hooks.writes,1);
+  assert.equal(done.result.receipt.receipts[0].manifestSha256,hooks.restore.manifestSha256);
+  assert.equal(done.result.receipt.receipts[0].recoveryId,hooks.restore.recoveryId);assert.equal(done.result.receipt.receipts[0].activated,false);
+  const other=await f.create(['system']);f.running(other);f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
+  await assert.rejects(f.invoke(other,'system','backups.list'),{code:'CAPABILITY_DENIED'});
+});
+
+test('lost recovery-copy responses reconcile their receipt without copying twice',async t=>{
+  const hooks=backupHooks({lost:true}),f=fixture(t,{extensions:hooks.extensions}),task=await f.create(['system']);f.running(task);
+  await f.invoke(task,'system','backups.restore-copy',{backupId:hooks.restore.backupId},'prepare');
+  assert.equal((await f.approve(task)).task.status,'unknown');assert.equal(hooks.writes,1);
+  const reconciled=await f.request('tasks.control',{taskId:task.id,action:'resume'});
+  assert.equal(reconciled.task.status,'completed');assert.equal(hooks.writes,1);
+  assert.equal(reconciled.result.receipt.receipts[0].activated,false);
+});
+
+test('a completed response with a different manifest never verifies a recovery copy',async t=>{
+  const hooks=backupHooks({mismatched:true}),f=fixture(t,{extensions:hooks.extensions}),task=await f.create(['system']);f.running(task);
+  await f.invoke(task,'system','backups.restore-copy',{backupId:hooks.restore.backupId},'prepare');
+  assert.equal((await f.approve(task)).task.status,'unknown');
+  assert.equal((await f.request('tasks.control',{taskId:task.id,action:'resume'})).task.status,'unknown');assert.equal(hooks.writes,1);
+});
+
+test('role or module revocation removes sensitive system histories and all artifact entry points',async t=>{
+  let f,artifact,previewed=0;
+  f=fixture(t,{extensions:{
+    'backups.verify':async(input,ctx)=>{
+      const file=path.join(f.directory,'tasks',ctx.taskId,'backup-proof.txt');fs.writeFileSync(file,'backup-proof');
+      artifact=ctx.registerArtifact({path:file,name:'backup-proof.txt',mimeType:'text/plain'});
+      return {summary:'跨模块备份校验结果',blocks:[{type:'files',files:[{artifactId:artifact.id}]}],evidence:[{id:input.backupId}]};
+    },
+    'artifacts.open':async()=>{previewed++;return {opened:true};},
+    'artifacts.preview':async()=>{previewed++;return {preview:{name:'synthetic'}};}
+  }});
+  const task=await f.create(['system']);f.running(task);
+  const first=await f.invoke(task,'system','backups.verify',{backupId:'backup-source'});
+  const requirements=f.runtime.store.get('task',task.id).dataAccessRequirements;
+  assert.deepEqual(requirements[0].roles,['admin']);assert.equal(requirements[0].modules.length,5);
+  await f.request('artifacts.preview',{id:artifact.id,taskId:task.id});assert.equal(previewed,1);
+  const other=await f.create(['system']);
+  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:other.id}),{code:'ARTIFACT_TASK_MISMATCH'});
+  await assert.rejects(f.request('artifacts.preview',{id:artifact.id}),{code:'ARTIFACT_TASK_MISMATCH'});
+  f.people.set(actor.id,{...actor,role:'editor'});
+  assert.equal((await f.request('tasks.list')).tasks.some(item=>item.id===task.id),false);
+  for(const payload of [{taskId:task.id},{taskId:task.id,resultVersion:first.result.version}])await assert.rejects(f.request('tasks.get',payload),{code:'TASK_DATA_DENIED'});
+  await assert.rejects(f.request('artifacts.open',{id:artifact.id}),{code:'TASK_DATA_DENIED'});
+  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:task.id}),{code:'TASK_DATA_DENIED'});assert.equal(previewed,1);
+  f.people.set(actor.id,{...actor,modules:actor.modules.filter(module=>module!=='overview')});
+  assert.equal((await f.request('tasks.list')).tasks.some(item=>item.id===task.id),false);
+  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'MODULE_DENIED'});
+  await assert.rejects(f.request('artifacts.preview',{id:artifact.id,taskId:task.id}),{code:'MODULE_DENIED'});
+});
+
+test('ordinary draft history stays readable to a viewer without turning implicit write permission into a read gate',async t=>{
+  const f=fixture(t,{adapters:[draftAdapter()]}),task=await f.create(['sales']);f.running(task);
+  const first=await f.invoke(task,'sales','draft',{amountCents:100},'prepare');
+  f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false,modules:['sales']});
+  assert.equal((await f.request('tasks.get',{taskId:task.id,resultVersion:first.result.version})).result.blocks[0].rows[0].amountCents,100);
+  assert.equal((await f.request('tasks.list')).tasks.some(item=>item.id===task.id),true);
+  // Legacy tasks can recover ordinary access from their registered block/step.
+  f.runtime.store.update('task',task.id,{dataAccessRequirements:undefined});
+  assert.equal((await f.request('tasks.get',{taskId:task.id})).result.blocks[0].rows[0].amountCents,100);
+});
+
+test('unattributed legacy system results fail closed instead of exposing their history after downgrade',async t=>{
+  const f=fixture(t,{extensions:{'permissions.inspect':async()=>({revision:'policy-r1',policy:{schemaVersion:1,users:{}}})}}),task=await f.create(['system']);f.running(task);
+  await f.invoke(task,'system','permissions.list');
+  f.runtime.store.update('task',task.id,{dataAccessRequirements:undefined});
+  for(const kind of ['result','result_version'])for(const value of f.runtime.store.list(kind).filter(value=>value.taskId===task.id))f.runtime.store.update(kind,value.id,{blocks:value.blocks.map(({sourceModule,sourceCapabilityId,...block})=>block)});
+  f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
+  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'TASK_DATA_DENIED'});
+  assert.equal((await f.request('tasks.list')).tasks.some(value=>value.id===task.id),false);
+  f.people.set(actor.id,actor);assert.ok((await f.request('tasks.get',{taskId:task.id})).result);
+});
+
+test('sensitive tool failures still retain access requirements before emitting files or events',async t=>{
+  let f,artifact;
+  f=fixture(t,{extensions:{'backups.verify':async(_,ctx)=>{
+    const file=path.join(f.directory,'tasks',ctx.taskId,'partial-proof.txt');fs.writeFileSync(file,'partial');
+    artifact=ctx.registerArtifact({path:file,name:'partial-proof.txt'});ctx.emit('partial-proof',{artifactId:artifact.id});
+    throw Error('failed after registering evidence');
+  },'artifacts.open':async()=>({opened:true})}});
+  const task=await f.create(['system']);f.running(task);await assert.rejects(f.invoke(task,'system','backups.verify',{backupId:'backup-source'}));
+  assert.equal(f.runtime.store.get('task',task.id).resultId,null);
+  f.people.set(actor.id,{...actor,role:'viewer',canRunTasks:false});
+  await assert.rejects(f.request('tasks.get',{taskId:task.id}),{code:'TASK_DATA_DENIED'});
+  await assert.rejects(f.request('artifacts.open',{id:artifact.id}),{code:'TASK_DATA_DENIED'});
+});

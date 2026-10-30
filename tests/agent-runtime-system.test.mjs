@@ -48,7 +48,7 @@ test('permission preparation uses an admin-only internal read and rejects public
 });
 
 test('automatic backup prepares verified results without inventing a formal commit',async t=>{
-  const f=await setup(t,{extensions:{'backups.prepare':async()=>({summary:'已校验合成备份',blocks:[{type:'text',text:'备份已生成'}],evidence:[{id:'synthetic-backup'}]})}}),task=await f.create();const result=await f.prepare(task,'backups.create',{modules:['sales']});assert.ok(result.result);assert.equal(f.runtime.store.get('task',task.id).review,null);assert.equal(f.runtime.store.list('system_receipt').length,0);
+  const f=await setup(t,{extensions:{'backups.prepare':async()=>({summary:'已校验合成备份',blocks:[{type:'text',text:'备份已生成'}],evidence:[{id:'synthetic-backup'}]})}});f.people.set(admin.id,{...admin,modules:['warehouse','purchase','sales','overview','exporter']});const task=await f.create();const result=await f.prepare(task,'backups.create',{modules:['sales']});assert.ok(result.result);assert.equal(f.runtime.store.get('task',task.id).review,null);assert.equal(f.runtime.store.list('system_receipt').length,0);
 });
 
 test('budget reservation serializes concurrent tasks, error usage remains unknown',async t=>{

@@ -28,6 +28,20 @@ but remain untested until the single consolidated acceptance after code freeze:
   the old review, and regenerate rather than mutating saved rows or commit data.
   A still-running engine turn is stopped before checkpoint reset to avoid queued
   tasks losing their executor. All of this remains pending consolidated testing.
+- Backup listing/verification and reviewed `backups.restore-copy` now use the
+  private host hooks. The signed plan binds backup ID, recovery ID and manifest
+  SHA; receipt recovery cannot accept a different source/target or active ledger.
+- A task now accumulates trusted `dataAccessRequirements` before tool events or
+  artifacts are generated and when results are appended. Reads/list/history and
+  artifact access recheck explicit roles, permission flags and data modules using
+  the current actor and registered capability. Ordinary draft history does not
+  acquire an implicit write-permission gate. Legacy block/step/event/effect
+  provenance is checked; unattributed system results require a fully authorised
+  administrator. All backup capabilities require access to all five data modules.
+- `artifacts.preview` requires the current task ID; `artifacts.open` validates it
+  when supplied, retaining compatibility with older downloads without task ID.
+- `tests/agent-runtime-resume.test.mjs` contains the new consolidated regression
+  cases; they were written but not run during this implementation phase.
 
 The older checklist below describes the pause baseline, not current acceptance.
 

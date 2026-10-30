@@ -26,10 +26,45 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   const adapterMap=new Map(adapters.map(a=>[a.id,a])),sessions=new Map(),jobs=new Map();let closed=false;
   async function identity(actor){if(!actor?.id)throw agentError('IDENTITY_REQUIRED','请先登录公司工作台',401);const fresh=await resolveActor(actor.id);if(!fresh||fresh.enabled===false||!Array.isArray(fresh.modules))throw agentError('MEMBER_DENIED','人员权限已停用或撤销',403);return {...fresh,sessionId:actor.sessionId,channel:actor.channel};}
   const allowedModule=(actor,id)=>id==='system'||actor.modules.includes(id);
-  function taskFor(id,actor){const task=store.get('task',id);if(!task)throw agentError('TASK_NOT_FOUND','任务不存在',404);if(task.ownerId!==actor.id&&task.assigneeId!==actor.id&&actor.role!=='admin')throw agentError('TASK_DENIED','无权查看此任务',403);if(task.scope.modules.some(m=>!allowedModule(actor,m)))throw agentError('MODULE_DENIED','任务包含未授权业务数据',403);return task;}
+  const requirementFor=(module,capabilityId)=>{const cap=adapterMap.get(module)?.capabilities.find(value=>value.id===capabilityId);return cap?{module,capabilityId,roles:cap.roles||null,requiresTaskPermission:cap.requiresTaskPermission===true,modules:cap.dataAccessModules||(module==='system'?[]:[module])}:null;};
+  function taskRequirements(task){
+    if(Array.isArray(task.dataAccessRequirements))return task.dataAccessRequirements;
+    const found=[],seen=new Set();let unattributed=false;
+    const add=value=>{if(value){const key=agentDigest(value);if(!seen.has(key)){seen.add(key);found.push(value);}}};
+    // Legacy records lack a task-level access summary. Recover requirements only
+    // from registered block provenance and internal prepared steps. Unattributed
+    // system results are held for a fully authorised administrator to inspect.
+    const records=[...store.list('result'),...store.list('result_version')].filter(value=>value.taskId===task.id);
+    for(const result of records){
+      for(const step of result.prepared||[]){const requirement=requirementFor(step.module,step.capabilityId);add(requirement);if(step.module==='system'&&!requirement)unattributed=true;}
+      for(const block of result.blocks||[]){const requirement=requirementFor(block.sourceModule,block.sourceCapabilityId);if(requirement)add(requirement);else if(task.scope.modules.includes('system'))unattributed=true;}
+      if(!(result.blocks||[]).length&&!(result.prepared||[]).length&&task.scope.modules.includes('system'))unattributed=true;
+    }
+    let after=0;
+    while(true){const events=store.events(task.id,after);for(const event of events)if(event.type==='step.started'){const requirement=requirementFor(event.module,event.capabilityId);if(requirement)add(requirement);else if(event.module==='system')unattributed=true;}if(events.length<500)break;after=events.at(-1).sequence;}
+    for(const effect of store.db.prepare('SELECT json FROM effects WHERE task_id=?').all(task.id)){
+      const value=JSON.parse(effect.json);if(value.module==='system'&&!found.some(item=>item.module==='system'))unattributed=true;
+      else if(modules.includes(value.module)&&value.module!=='system')add({module:value.module,capabilityId:'legacy-effect',roles:null,requiresTaskPermission:false,modules:[value.module]});
+    }
+    if(unattributed)add({module:'system',capabilityId:'legacy-unattributed-result',roles:['admin'],requiresTaskPermission:true,modules:modules.filter(module=>module!=='system')});
+    return found;
+  }
+  function accessFailure(task,actor){
+    if(task.ownerId!==actor.id&&task.assigneeId!==actor.id&&actor.role!=='admin')return ['TASK_DENIED','无权查看此任务'];
+    if(task.scope.modules.some(module=>!allowedModule(actor,module)))return ['MODULE_DENIED','任务包含未授权业务数据'];
+    for(const saved of taskRequirements(task)){
+      const current=requirementFor(saved.module,saved.capabilityId);
+      for(const requirement of [saved,...(current?[current]:[])]){
+        if(!Array.isArray(requirement.modules)||requirement.modules.some(module=>!allowedModule(actor,module)))return ['MODULE_DENIED','历史结果包含当前未授权模块的数据'];
+        if(requirement.roles&&!requirement.roles.includes(actor.role)||requirement.requiresTaskPermission&&actor.canRunTasks!==true)return ['TASK_DATA_DENIED','当前权限不能查看此任务及其历史结果'];
+      }
+    }
+    return null;
+  }
+  function taskFor(id,actor){const task=store.get('task',id);if(!task)throw agentError('TASK_NOT_FOUND','任务不存在',404);const denied=accessFailure(task,actor);if(denied)throw agentError(...denied,403);return task;}
   function canRun(actor){if(actor.role==='viewer'||actor.canRunTasks!==true)throw agentError('TASK_PERMISSION_REQUIRED','当前人员没有执行任务权限',403);}
   const selfService=(module,id)=>module==='warehouse'&&['attendance.check-in','attendance.complete'].includes(id);
-  function canUse(actor,module,cap){return !!cap&&allowedModule(actor,module)&&(!cap.roles||cap.roles.includes(actor.role))&&(!cap.requiresTaskPermission||actor.canRunTasks===true)&&(cap.kind==='query'||['admin','editor'].includes(actor.role)&&(actor.canRunTasks===true||selfService(module,cap.id)));}
+  function canUse(actor,module,cap){return !!cap&&allowedModule(actor,module)&&(!cap.roles||cap.roles.includes(actor.role))&&(!cap.dataAccessModules||cap.dataAccessModules.every(module=>allowedModule(actor,module)))&&(!cap.requiresTaskPermission||actor.canRunTasks===true)&&(cap.kind==='query'||['admin','editor'].includes(actor.role)&&(actor.canRunTasks===true||selfService(module,cap.id)));}
   function canReview(task,actor){const prepared=resultState(task.id)?.prepared||[];return prepared.length>0&&prepared.every(step=>canUse(actor,step.module,adapterMap.get(step.module)?.capabilities.find(cap=>cap.id===step.capabilityId))&&(!selfService(step.module,step.capabilityId)||actor.id===(task.executionActorId||task.ownerId)));}
   function emit(id,type,data){const task=store.get('task',id);if(task?.scheduleId&&task.scheduledFor)store.finishRun(task.scheduleId,task.scheduledFor,task.status);return store.event(id,type,data);}
   function scopeOf(input,actor){const selected=input?.modules||[...actor.modules,'system'];if(!Array.isArray(selected)||selected.some(m=>!modules.includes(m)||!allowedModule(actor,m)))throw agentError('MODULE_DENIED','任务范围包含未授权模块',403);return {...input,modules:[...new Set(selected)]};}
@@ -67,7 +102,8 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const saved=previous?store.update('result',result.id,result):store.insert('result',result);
     snapshotResult(saved);
     const review=saved.prepared.length?{id:randomUUID(),resultVersion:saved.version,revision:agentDigest(saved.prepared.map(s=>({module:s.module,binding:s.binding,digest:s.changeDigest}))),canApprove:!saved.issues.some(i=>i.blocking===true)}:null;
-    store.update('task',task.id,{resultId:saved.id,review,status:review?'waiting_review':'running'});emit(task.id,'result.updated',{resultId:saved.id,resultVersion:saved.version});return saved;
+    const dataAccessRequirements=taskRequirements(task),requirement=requirementFor(source.module,source.capabilityId);if(requirement&&!dataAccessRequirements.some(value=>agentDigest(value)===agentDigest(requirement)))dataAccessRequirements.push(requirement);
+    store.update('task',task.id,{resultId:saved.id,review,dataAccessRequirements,status:review?'waiting_review':'running'});emit(task.id,'result.updated',{resultId:saved.id,resultVersion:saved.version});return saved;
   }
   async function invokeTool(taskId,name,input){
     const original=store.get('task',taskId),actor=await identity({id:original?.executionActorId||original?.ownerId,channel:'mcp'}),task=taskFor(taskId,actor);
@@ -84,10 +120,17 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!cap.inputSchema)throw agentError('CAPABILITY_SCHEMA_MISSING','业务能力缺少输入校验契约',503);
     const validated=await fromJsonSchema(cap.inputSchema)['~standard'].validate(params);
     if(validated.issues)throw agentError('CAPABILITY_INPUT_INVALID','业务参数不符合能力输入约定',400);
-    const ctx={...context(task,actor,jobs.get(taskId)?.controller.signal),registerArtifact:input=>registerArtifact(task,actor,input,{module:adapter.id,capabilityId:cap.id}),capabilityId:cap.id,capabilityInput:params},before=await binding(adapter,ctx);
+    // Record the access boundary before a module can emit events or register a
+    // file, including failures/cancellation that never append a final result.
+    const executionActor=await identity({id:actor.id,channel:'mcp'}),current=taskFor(taskId,executionActor);
+    if(!['running','waiting_review'].includes(current.status))throw agentError('TASK_NOT_RUNNING','该任务当前不接受工具调用',409);
+    if(!canUse(executionActor,adapter.id,cap))throw agentError('CAPABILITY_DENIED','人员权限已变化，不能调用此能力',403);
+    const dataAccessRequirements=taskRequirements(current),requirement=requirementFor(adapter.id,cap.id);
+    if(requirement&&!dataAccessRequirements.some(value=>agentDigest(value)===agentDigest(requirement))){dataAccessRequirements.push(requirement);store.update('task',taskId,{dataAccessRequirements});}
+    const ctx={...context(task,executionActor,jobs.get(taskId)?.controller.signal),registerArtifact:input=>registerArtifact(task,executionActor,input,{module:adapter.id,capabilityId:cap.id}),capabilityId:cap.id,capabilityInput:params},before=await binding(adapter,ctx);
     emit(taskId,'step.started',{module:adapter.id,capabilityId:cap.id,title:cap.title});
     const output=await adapter[kind](cap.id,params,ctx);
-    const latest=store.get('task',taskId);if(!['running','waiting_review'].includes(latest.status))throw agentError('TASK_INTERRUPTED','任务已暂停或取消，结果未自动提交',409);
+    const fresh=await identity({id:actor.id,channel:'mcp'}),latest=taskFor(taskId,fresh);if(!['running','waiting_review'].includes(latest.status))throw agentError('TASK_INTERRUPTED','任务已暂停或取消，结果未自动提交',409);if(!canUse(fresh,adapter.id,cap))throw agentError('CAPABILITY_DENIED','业务查询期间人员权限已变化，未交付结果',403);
     if(!plain(output))throw agentError('RESULT_INVALID','模块未返回结构化结果',502);
     if(output.ok===false)throw agentError(output.code||'MODULE_FAILED',output.error||'模块处理失败',409);
     if(typeof output.summary!=='string'||!output.summary.trim()||!Array.isArray(output.blocks)&&!Array.isArray(output.evidence))throw agentError('RESULT_CONTRACT_INVALID','模块必须返回带摘要、结果内容或证据的结构化结果',502);
@@ -107,7 +150,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const goal=String(input.goal||'').trim();if(!goal||goal.length>20000)throw agentError('GOAL_INVALID','请输入 1 至 20000 字的工作目标');
     const engine=input.engine||settings.get().defaultEngine;if(!['codex','hermes'].includes(engine))throw agentError('ENGINE_INVALID','未知执行引擎');
     const model=settings.get().company.model;if(model&&engines[engine]?.supportedModels&&!engines[engine].supportedModels.includes(model))throw agentError('ENGINE_MODEL_UNSUPPORTED','公司模型不在该引擎的兼容清单中，请管理员调整模型设置',409);
-    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope:scopeOf(input.scope,actor),engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),status:'queued',createdAt:now(),updatedAt:now(),resultId:null,review:null,environment,scheduleId:internalId?input.scheduleId:null,scheduledFor:internalId?input.scheduledFor:null});
+    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope:scopeOf(input.scope,actor),engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),status:'queued',createdAt:now(),updatedAt:now(),resultId:null,review:null,dataAccessRequirements:[],environment,scheduleId:internalId?input.scheduleId:null,scheduledFor:internalId?input.scheduledFor:null});
     fs.mkdirSync(path.join(storeDir,'tasks',task.id),{recursive:true,mode:0o700});emit(task.id,'task.created',{goal,engine});
     if(autoStart)queueMicrotask(()=>run(task.id).catch(()=>{}));return {task:publicTask(task)};
   }
@@ -247,7 +290,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const actor=await identity(meta.actor);if(!plain(payload))throw agentError('INPUT_INVALID','请求参数无效');
     if(operation==='status')return {actor:{...actor,label:actor.label||actor.login||actor.id,canCreateTasks:true,canManageSettings:actor.role==='admin'},environment,engines:await Promise.all(['codex','hermes'].map(async id=>({id,...await engines[id]?.check?.(),configured:settings.get().company.hasKey}))),capabilities:await capabilities(actor)};
     if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');return createTask(payload,actor);}
-    if(operation==='tasks.list')return {tasks:store.list('task').filter(t=>(actor.role==='admin'||t.ownerId===actor.id||t.assigneeId===actor.id)&&t.scope.modules.every(m=>allowedModule(actor,m))).map(publicTask)};
+    if(operation==='tasks.list')return {tasks:store.list('task').filter(task=>!accessFailure(task,actor)).map(publicTask)};
     if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:{...publicTask(task),review},events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
     if(operation==='tasks.control')return control(payload.taskId,payload.action,actor,payload);
     if(operation==='tasks.input'){
@@ -274,7 +317,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(operation==='attachments.upload'){
       if(!meta.trustedUi)throw agentError('UPLOAD_DENIED','附件需要通过工作台上传',403);const name=String(payload.name||''),bytes=Buffer.from(String(payload.bytes||''),'base64');if(!name||name.length>200||/[\\/:*?"<>|\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name)||bytes.length===0||bytes.length>50*1024*1024)throw agentError('UPLOAD_INVALID','附件名无效、内容为空或超过 50 MiB');const id=randomUUID(),directory=path.join(storeDir,'attachments',id);fs.mkdirSync(directory,{recursive:true,mode:0o700});const file=path.join(directory,name);fs.writeFileSync(file,bytes,{flag:'wx',mode:0o600});store.insert('attachment',{id,ownerId:actor.id,name,size:bytes.length,mimeType:String(payload.type||'application/octet-stream'),path:file,sha256:createHash('sha256').update(bytes).digest('hex')});return {id,name,size:bytes.length,mimeType:payload.type||'application/octet-stream'};
     }
-    if(['artifacts.open','artifacts.preview'].includes(operation)){const item=store.get('artifact',payload.id);if(!item)throw agentError('ARTIFACT_NOT_FOUND','产物不存在',404);taskFor(item.taskId,actor);if(!meta.trustedUi||!extensions[operation])throw agentError('ARTIFACT_OPEN_UNAVAILABLE',operation==='artifacts.preview'?'此终端暂不支持预览产物':'此终端暂不支持打开产物',409);return extensions[operation]({...item},{...meta,actor});}
+    if(['artifacts.open','artifacts.preview'].includes(operation)){const item=store.get('artifact',payload.id);if(!item)throw agentError('ARTIFACT_NOT_FOUND','产物不存在',404);if((operation==='artifacts.preview'||payload.taskId!==undefined)&&payload.taskId!==item.taskId)throw agentError('ARTIFACT_TASK_MISMATCH','原件与当前任务不匹配，请刷新后重新选择',403);taskFor(item.taskId,actor);if(!meta.trustedUi||!extensions[operation])throw agentError('ARTIFACT_OPEN_UNAVAILABLE',operation==='artifacts.preview'?'此终端暂不支持预览产物':'此终端暂不支持打开产物',409);return extensions[operation]({...item},{...meta,actor});}
     if(['permissions.inspect','permissions.receipt','people.assignable'].includes(operation)||operation.startsWith('backups.'))throw agentError('INTERNAL_OPERATION','此操作仅供受控业务工具调用',403);
     if(extensions[operation]){if(operation.endsWith('.save')&&(!meta.trustedUi||actor.role!=='admin'))throw agentError('ADMIN_REQUIRED','仅管理员能修改公司配置',403);return extensions[operation](payload,{...meta,actor});}
     throw agentError('OPERATION_UNAVAILABLE','此操作尚未接入当前工作台',404);
