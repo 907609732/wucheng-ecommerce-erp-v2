@@ -48,7 +48,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
     let html=fs.readFileSync(file,'utf8');html=html.replace(/(<(?:script|link|img|a|iframe|form)\b[^>]*?\b(?:src|href|action)=['"])\/(?!\/)/gi,(_,start)=>start+ui);html=html.replace(/<head([^>]*)>/i,'<head$1><script src="'+ui+'workbench-base.js"></script>');r.type('html');return r.send(html);
    }return sendFile(file,...args);};
    // express.static uses sendFile internally, so serve protected HTML explicitly.
-   if(q.method==='GET'&&(q.path==='/'||q.path.endsWith('.html'))){const relative=q.path==='/'?'index.html':q.path.slice(1);if(!relative.includes('..')){const file=path.join(root,'public',relative);if(fs.existsSync(file))return r.sendFile(file);}}
+   if(q.method==='GET'&&(q.path==='/'||q.path.endsWith('.html'))){const relative=q.path==='/'?'index.html':q.path.slice(1);if(!relative.includes('..')){const file=path.join(publicRoot,relative);if(fs.existsSync(file))return localDesktop?r.sendFile(relative,{root:publicRoot}):r.sendFile(file);}}
    next();
   }catch(e){r.status(e.status||e.statusCode||401).json({error:e.message,code:e.code||'WORKBENCH_AUTH'});}
  });

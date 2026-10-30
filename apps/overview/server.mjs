@@ -64,7 +64,7 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  app.get('/api/backups/:name',(req,res)=>{if(!/^overview-[\w.-]+\.zip$/.test(req.params.name))throw fail('备份名称无效');res.download(path.join(s.dir,'backups',req.params.name));});
  app.post('/api/backups/restore',restoreUpload.single('file'),async(req,res)=>{if(!req.file)throw fail('请选择备份');res.json(await restoreBackup(req.file.buffer,path.join(s.dir,'restored')));});
  app.get('/api/audit',(_req,res)=>res.json(s.all('SELECT * FROM audit ORDER BY id DESC LIMIT 200')));
- for(const [url,p]of Object.entries({'chart.js':'chart.js/dist/chart.umd.js','tabulator.js':'tabulator-tables/dist/js/tabulator.min.js','tabulator.css':'tabulator-tables/dist/css/tabulator.min.css'}))app.get('/vendor/'+url,(_req,res)=>res.sendFile(path.join(root,'node_modules',p)));
+ for(const [url,p]of Object.entries({'chart.js':'chart.js/dist/chart.umd.js','tabulator.js':'tabulator-tables/dist/js/tabulator.min.js','tabulator.css':'tabulator-tables/dist/css/tabulator.min.css'}))app.get('/vendor/'+url,(_req,res)=>res.sendFile(p,{root:path.join(root,'node_modules')}));
  app.use(express.static(path.join(root,'public')));integration.workbench.finalize();
  app.use((err,_req,res,_next)=>{const msg=err.code==='SQLITE_CONSTRAINT_UNIQUE'||/UNIQUE constraint/.test(err.message)?'账单编号、关联记录或付款流水号重复':err.message;res.status(err.status||err.statusCode||(/UNIQUE constraint/.test(err.message)?409:400)).json({error:msg,...(err.code?{code:err.code}:{})});});return {app,store:s,cainiao,integration};
 }
