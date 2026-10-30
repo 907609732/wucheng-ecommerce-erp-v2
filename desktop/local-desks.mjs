@@ -4,18 +4,25 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ServiceManager} from './shared/service-manager.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},decorateURL=(_id,url)=>url}={}){
-  const views=new Map();let active='',generation=0,bounds={x:12,y:140,width:1000,height:600};
+export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},prepareView=async()=>{},authorizeOperation=()=>{},decorateURL=(_id,url)=>url}={}){
+  const views=new Map();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
   const rootSender=e=>e.sender===win.webContents&&e.senderFrame===win.webContents.mainFrame;
   const childSender=e=>[...views.values()].some(v=>e.sender===v.webContents&&e.senderFrame===v.webContents.mainFrame);
   const handlers=[];
-  function handle(name,fn){ipcMain.handle(name,fn);handlers.push(name);}
-  const layout=()=>{const size=win.getContentBounds();for(const v of views.values())v.setBounds({x:Math.max(0,bounds.x),y:Math.max(0,bounds.y),width:Math.max(100,Math.min(bounds.width,size.width-bounds.x)),height:Math.max(100,size.height-bounds.y-12)});};
+  function handle(name,fn){ipcMain.handle(name,(event,...args)=>{authorizeOperation(name,args,event);return fn(event,...args);});handlers.push(name);}
+  const layout=()=>{
+    const size=win.getContentBounds(),zoom=win.webContents.getZoomFactor?.()||1;
+    const x=Math.max(0,Math.min(size.width,Math.round(bounds.x*zoom))),y=Math.max(0,Math.min(size.height,Math.round(bounds.y*zoom)));
+    const right=Math.max(0,Math.min(size.width,Math.round((bounds.x+bounds.width)*zoom))),bottom=Math.max(0,Math.min(size.height,Math.round((bounds.y+bounds.height)*zoom)));
+    const rect={x,y,width:right-x,height:bottom-y},visible=rect.width>0&&rect.height>0&&!win.isMinimized?.();
+    for(const [id,v]of views){const show=visible&&active===id;if(show)v.setBounds(rect);v.setVisible(show);}
+    return visible;
+  };
   const hide=(cancel=true)=>{if(cancel)generation++;active='';for(const v of views.values())v.setVisible(false);};
   async function open(id,route){
     if(!['purchase','sales','overview',...(isRemote()?['warehouse','exporter']:[])].includes(id))throw Error('该扩展不支持内嵌打开');
-    if(route&&!/^\/[a-zA-Z0-9/_-]+\.html(?:\?[a-zA-Z0-9%=&._-]+)?$/.test(route)||route?.includes('..'))throw Error('扩展页面无效');
-    const mine=++generation;await beforeOpen(id);
+    if(route!==undefined&&(typeof route!=='string'||route.length>2000||!/^\/(?:[a-zA-Z0-9/_-]+\.html)?(?:\?[a-zA-Z0-9%=&._-]+)?(?:#[a-zA-Z0-9/_-]+)?$/.test(route)||route.includes('..')))throw Error('扩展页面无效');
+    const mine=++generation;hide(false);await beforeOpen(id);
     if(mine!==generation)return {cancelled:true};
     const cap=await manager.ensure(id);
     if(mine!==generation)return {cancelled:true};
@@ -24,32 +31,43 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     if(!view){
       view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id)}});
       views.set(id,view);win.contentView.addChildView(view);view.setVisible(false);
-      const external=url=>{if(/^https?:\/\//i.test(url))void shell.openExternal(url).catch(e=>notify(e.message));};
+      const external=url=>{let target;try{target=new URL(url);}catch{return;}if(['127.0.0.1','localhost','[::1]'].includes(target.hostname)){notify('此本机链接不属于当前测试工作台，已阻止跳转');return;}if(/^https?:$/.test(target.protocol))void shell.openExternal(url).catch(e=>notify(e.message));};
       const crossModule=url=>{
-        if(!isRemote())return false;const target=new URL(url),base=new URL(cap.url);if(target.origin!==base.origin)return false;
-        const match=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)$/);if(!match||match[1]===id)return false;
-        win.webContents.send('desks:navigate',{id:match[1],...(match[2]!=='/'?{route:match[2]+target.search}:{})});return true;
+        const target=new URL(url),base=new URL(cap.url);let destination,route;
+        if(isRemote()){
+          if(target.origin!==base.origin)return false;
+          const match=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)$/);if(!match)return false;
+          destination=match[1];route=match[2]+target.search+target.hash;
+        }else{
+          if(target.protocol!=='http:'||!['127.0.0.1','localhost'].includes(target.hostname))return false;
+          destination=['purchase','sales','overview'].find(candidate=>{try{return Number(target.port)===manager.config(candidate).port;}catch{return false;}});
+          route=target.pathname+target.search+target.hash;
+        }
+        if(!destination||destination===id)return false;
+        win.webContents.send('desks:navigate',{id:destination,...(route!=='/'?{route}:{})});return true;
       };
       view.webContents.setWindowOpenHandler(({url})=>{if(crossModule(url))return {action:'deny'};if(url.startsWith(cap.url+'/'))void view.webContents.loadURL(url).catch(e=>notify(e.message));else external(url);return {action:'deny'};});
       view.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith(cap.url+'/')){event.preventDefault();if(!crossModule(url))external(url);}});
       view.webContents.on('render-process-gone',()=>notify(`${id} 页面意外退出，请重新打开`));
       view.webContents.session.on('will-download',(_e,item)=>{item.setSaveDialogOptions({title:'保存扩展导出文件'});});
-      await view.webContents.loadURL(targetURL);
-    }else if(route)await view.webContents.loadURL(targetURL);
+    }
+    await prepareView({id,view,cap});
+    const currentURL=view.webContents.getURL?.();
+    if(!currentURL||currentURL.startsWith('chrome-error:')||route&&currentURL!==targetURL)await view.webContents.loadURL(targetURL);
     if(mine!==generation)return {cancelled:true};
-    hide(false);active=id;layout();view.setVisible(true);view.webContents.focus();
+    hide(false);active=id;if(layout())view.webContents.focus();
     return {id,url:cap.url};
   }
   handle('desks:status',e=>{if(!rootSender(e))throw Error('来源不符');return manager.status({includeWarehouse});});
   handle('desks:open',(e,{id,route}={})=>{if(!rootSender(e))throw Error('来源不符');return open(id,route);});
   handle('desks:hide',e=>{if(!rootSender(e))throw Error('来源不符');hide();});
-  handle('desks:bounds',(e,b)=>{if(!rootSender(e))throw Error('来源不符');if(['x','y','width'].every(k=>Number.isFinite(b?.[k]))){bounds={...bounds,...Object.fromEntries(['x','y','width'].map(k=>[k,Math.round(b[k])]))};layout();}});
+  handle('desks:bounds',(e,b)=>{if(!rootSender(e))throw Error('来源不符');if(!['x','y','width','height'].every(k=>Number.isFinite(b?.[k]))||b.width<0||b.height<0)throw Error('业务视图边界无效');bounds=Object.fromEntries(['x','y','width','height'].map(k=>[k,b[k]]));layout();});
   handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);views.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
   handle('desks:logs',async(e,id)=>{if(!rootSender(e)||isRemote()||!['purchase','sales','overview'].includes(id))throw Error('仅主机可查看服务日志');const file=path.join(manager.config(id).dataDir,'integration-service.log');if(fs.existsSync(file))await shell.openPath(file);});
   handle('desks:child-open',(e,id)=>{if(!childSender(e)||!['overview','exporter'].includes(id))throw Error('来源不符');win.webContents.send('desks:navigate',{id});return {requested:true};});
   handle('desks:child-home',e=>{if(!childSender(e))throw Error('来源不符');win.webContents.send('desks:navigate',{id:'home'});});
   handle('desks:data-changed',e=>{if(!childSender(e))throw Error('来源不符');views.get('overview')?.webContents.send('desks:source-changed');return {ok:true};});
-  win.on('resize',layout);
+  win.on('resize',layout);win.on('restore',layout);win.on('minimize',layout);
   const registryDir=path.dirname(manager.registryFile);fs.mkdirSync(registryDir,{recursive:true});
   const hostFile=path.join(registryDir,'host.json'),requestFile=path.join(registryDir,'open-request.json');let last='';
   let advertised=false;

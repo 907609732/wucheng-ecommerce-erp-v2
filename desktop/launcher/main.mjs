@@ -33,6 +33,7 @@ import {createAgentHost} from '../agent-host/index.mjs';
 import {assertLauncherSender,agentEnvelope} from '../agent-host/trust.mjs';
 import {saveArtifactDownload} from '../agent-host/artifacts.mjs';
 import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent-host/launcher-policy.mjs';
+import {createDesktopUiSessions} from '../agent-host/desktop-ui-sessions.mjs';
 import {betaProcessesRunning} from '../agent-host/startup.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -345,20 +346,23 @@ if (acquired) app.whenReady().then(async () => {
   });
   win.setMenu(null);
   win.setMenuBarVisibility(false);
+  const beforeBusinessOpen=async id=>{
+    assertLauncherOperationAllowed('modules:open',{moduleId:id});assertPrivateRequestAllowed();
+    if(remote()){await remoteConnection().connect();const target=session.fromPartition(deskPartition(id));guardPrivateSession(target);await preparePrivateSession(target);}
+    else{hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(fs.existsSync(modules.journalFile))throw Error('模块正在激活或等待恢复检查，请稍后打开');if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');}
+  };
   const viewManager={registryFile:services.registryFile,config:id=>{requireHost();return services.config(id);},
-    ensure:async id=>{if(remote()){remoteConnection();await preparePrivateSession(clientSession);return remoteManager.ensure(id);}if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');return services.ensure(id);},
+    ensure:async id=>{assertPrivateRequestAllowed();if(remote()){remoteConnection();return remoteManager.ensure(id);}hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');return services.ensure(id);},
     status:options=>remote()?(remoteConnection(),remoteManager.status()):services.status(options),stop:id=>{requireHost();return services.stop(id);}};
+  const desktopUiSessions=createDesktopUiSessions({services,resolveActor:()=>hostIdentity.requireMember(hostIdentity.localActor('ui'),true),assertRequestAllowed:()=>{assertPrivateRequestAllowed();if(remote())throw Object.assign(Error('公司连接已变化，请重新打开业务工作台'),{code:'CONNECTION_CHANGED'});},onError:error=>diagnostics.write('error','workbench','业务页面身份检查未通过 · '+(error.code||'DESKTOP_UI_FAILED'))});
   desks = installDeskViews(win, {manager:viewManager,isRemote:remote,partitionFor:deskPartition,includeWarehouse:true,
-    beforeOpen:async id=>{
-      if(id==='sales'){
-        const target=session.fromPartition(deskPartition(id));
-        if(remote()){guardPrivateSession(target);await preparePrivateSession(target);}
-      }
-    },
+    authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},
+    prepareView:({id,view,cap})=>{if(!remote())desktopUiSessions.attach({id,view,cap});},
+    beforeOpen:beforeBusinessOpen,
     notify:message=>send('modules:message',message)});
   const legacyHandlers=new Map();
   const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
-    trusted(event);assertLauncherOperationAllowed(name);const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
+    trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='modules:open'?args[0]:undefined});const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
     if(name!=='agent:request'&&/^(?:launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireMember(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
     catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='agent:request')return {ok:false,code:error.code||'AGENT_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
@@ -519,12 +523,13 @@ if (acquired) app.whenReady().then(async () => {
   handle('modules:open', async (id, route) => {
     assertPrivateRequestAllowed();
     if(remote()){
-      await remoteConnection().connect();const result=await desks.open(id,route);
+      const result=await desks.open(id,route);
       // Cache only successful, authenticated business reads. Never cache secrets or attachments implicitly.
       void transport.snapshot(id).catch(()=>{});return result;
     }
     if(fs.existsSync(modules.journalFile))throw Error('模块正在激活或等待恢复检查，请稍后打开');
     if (['exporter','warehouse'].includes(id)) {
+      await beforeBusinessOpen(id);
       const cap=await services.ensure(id);
       if(services.config(id).managed)return services.request(id,'/open',{method:'POST',body:{confirm:true}});
       if(cap?.running){
