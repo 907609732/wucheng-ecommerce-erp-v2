@@ -222,8 +222,8 @@ function renderResult(detail) {
   renderResultHistory(detail);
   const target=$('result-content'),result=detail.result,key=JSON.stringify({result,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{id:state.status?.actor?.id,enabled:state.status?.actor?.enabled},capabilities:state.status?.capabilities});
   if(state.resultRenderKey===key){renderReview(detail);return;}
-  resultTools.renderStart(detail);state.resultRenderKey=key;target.replaceChildren();$('result-version').textContent=result?.version!=null?'版本 '+result.version:'';
-  if(!result){target.append(make('p','结果准备好后，会在这里展示明细、来源和变更。','empty'));renderReview(detail);return;}
+  const {discardedChanges}=resultTools.renderStart(detail);state.resultRenderKey=key;target.replaceChildren();$('result-version').textContent=result?.version!=null?'版本 '+result.version:'';
+  if(!result){target.append(make('p','结果准备好后，会在这里展示明细、来源和变更。','empty'));renderReview(detail,{preserveNotice:discardedChanges});return;}
   if(result.summary)target.append(make('p',result.summary,'result-summary'));
   for(const block of array(result.blocks)){
     const section=make('section','','result-block');if(block.title)section.append(make('h3',block.title));
@@ -248,12 +248,12 @@ function renderResult(detail) {
   if(array(result.issues).length){const issues=make('section','','result-issues');issues.append(make('h3','异常与需要关注的事项'));const list=make('ul');for(const issue of result.issues){const resolved=issue?.resolved===true,item=make('li',(resolved?'已解决 · ':'')+(typeof issue==='string'?issue:issue.message || issue.summary || issue.code),resolved?'issue-resolved':'');list.append(item);}issues.append(list);target.append(issues);}
   if(array(result.evidence).length){const section=make('section','','result-block');section.append(make('h3','来源与原件'));const list=make('ul','','evidence-list');for(const source of result.evidence){const li=make('li'),copy=make('div');copy.append(make('span',source.label || source.title || source.name || source.filename || '业务来源'));if(source.note || source.period)copy.append(make('small',source.note || source.period));const details=make('details','','record-details');details.append(make('summary','查看来源、单位与范围'),structuredValue(source));copy.append(details);li.append(copy);if(source.artifactId)li.append(resultTools.fileActions(source.artifactId,source));list.append(li);}section.append(list);target.append(section);}
   if(result.receipt){const receipt=make('section','','receipt'),verified=result.receipt.verified===true||result.receipt.state==='verified';receipt.append(make('h3',verified?'提交结果已核对':result.receipt.state==='partial'?'部分提交已核对':'提交回执'));receipt.append(make('p',result.receipt.message || result.receipt.summary || '已保存业务回执。'));if(result.receipt.id)receipt.append(make('p','回执编号：'+result.receipt.id));if(result.receipt.verified===false||['unknown','partial'].includes(result.receipt.state))receipt.append(make('p','其余业务结果仍需核对，当前不能视为全部提交完成。'));if(array(result.receipt.receipts).length){const records=make('details','','record-details');records.append(make('summary','查看 '+result.receipt.receipts.length+' 项业务回执'),make('pre',JSON.stringify(result.receipt.receipts,null,2)));receipt.append(records);}target.append(receipt);}
-  renderReview(detail);
+  renderReview(detail,{preserveNotice:discardedChanges});
 }
-function renderReview(detail) {
+function renderReview(detail,{preserveNotice=false}={}) {
   const binding=state.resultSelection?null:reviewBinding(detail),key=binding?JSON.stringify(binding):null,changed=state.reviewKey && key && state.reviewKey!==key;
   if(key!==state.reviewKey)$('review-check').checked=false;
-  if(changed)notice('结果或账本版本已变化，请重新核对当前结果。');
+  if(changed&&!preserveNotice)notice('结果或账本版本已变化，请重新核对当前结果。');
   state.reviewKey=key;state.displayedBinding=binding;
   $('review-panel').hidden=!detail.review || !binding || detail.task.status!=='waiting_review';
   $('review-description').textContent=detail.review?.canApprove===true ? (detail.review.description || `确认后，将按结果版本 ${detail.review.resultVersion} 提交列出的变更，并核对实际回执。`) : (detail.review?.reason || '此结果暂不能提交，请核对异常或刷新结果。');

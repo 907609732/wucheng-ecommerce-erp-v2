@@ -22,3 +22,5 @@
 遗留 launcher 页也已完成删除扫尾：index.html 的权限卡片与弹窗、renderer.js 的展示/调用、connection-ui.js 的权限成员构建/读取/保存处理，以及专用 CSS 均移除。迁移界面与连接功能保留，MCP 说明改为已登录身份与结果确认。不运行中间测试。
 
 遗留 launcher 的老板/员工手动选择页、身份头部与切换按钮、personnelState/selectPersonnel 桥调用和角色选择状态也已删除。旧入口直接载入首页，真实公司/私网登录仍由既有连接与主机负责；不再用选择角色充当登录，不更改服务器来源分区。不运行测试。
+
+集中验收已开始后，定向执行 `node tests/agent-result-tools-ui.mjs` 并通过，最终日志为 `.codex-artifacts/acceptance-20261029/ui-result-tools-rerun-2.log`。修复通用复核版本提示覆盖“陈旧更正未应用＋原更正摘要”的 UI 问题；调整迟到预览测试以观察实际原件节点并等待原生 close 清理，而非把 Loading logo 误判为原件，同时断言关闭后的迟到结果不会创建 Blob URL。通过范围为生产 DOM、真实 ECharts 与合成主机响应，包含更正只读/失效、图片 SHA/类型、Blob 释放、迟到响应、缺数/真实零/来源/币种隔离、resolved 历史与窄屏。没有重跑已通过的另外两份 UI 脚本，不代表真实公司 API、业务服务、Electron PDF 或安装器验收。

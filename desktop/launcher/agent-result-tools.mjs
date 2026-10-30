@@ -19,12 +19,12 @@ export function createResultTools({api,getDetail,getStatus,isHistorical,makeTabl
   function hasChanges(){return [...drafts.values()].some(draft=>draft.edits.size);}
   function leave({ask=true}={}){if(ask&&hasChanges()&&!window.confirm('有尚未提交的草稿更正。离开会放弃这些更正，是否继续？'))return false;drafts.clear();closePreview();disposeCharts();return true;}
   function renderStart(detail){
-    const key=fingerprint(detail?.result);
-    if(hasChanges()){
+    const key=fingerprint(detail?.result),discardedChanges=hasChanges();
+    if(discardedChanges){
       const summary=[...drafts.values()].flatMap(draft=>[...draft.edits.values()].map(edit=>`${edit.field}：${printable(edit.before)} → ${printable(edit.after)}`)).join('；');
       notice((resultKey!==key?'结果已更新':'任务或登录状态已变化')+'，未提交的更正未应用。请核对当前结果后重新更正。原更正：'+summary);
     }
-    drafts.clear();resultKey=key;closePreview();disposeCharts();
+    drafts.clear();resultKey=key;closePreview();disposeCharts();return {discardedChanges};
   }
   async function download(id){try{await api.request('artifacts.open',{taskId:getDetail()?.task?.id,id});}catch(error){showError(error);}}
   async function preview(id,file={},source=document.activeElement){
