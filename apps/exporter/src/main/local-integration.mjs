@@ -70,7 +70,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
   app.use('/api/integration/v1',router);
   const api={router,requireReview,state,workbench:{key:workbenchKey},maintenance,maintenanceOwner,setMaintenance(enabled,{actor,migrationId}={}){
     if(typeof enabled!=='boolean'||typeof migrationId!=='string'||!/^[-\w]{1,200}$/.test(migrationId))throw integrationError('维护操作缺少有效迁移批次',400,'MIGRATION_ID_REQUIRED');
-    if(!actor?.id||actor.role!=='admin'||actor.channel!=='ui')throw integrationError('维护操作需要签名管理员身份',403,'MAINTENANCE_OWNED');
+    if(!actor?.id||actor.channel!=='ui')throw integrationError('维护操作需要签名管理员身份',403,'MAINTENANCE_OWNED');
     const held=maintenanceOwner();if(held&&held.migrationId!==migrationId)throw integrationError('维护窗口由其他迁移批次持有，不能抢占或解除',409,'MAINTENANCE_OWNED');
     if(busy()||writes>1)throw integrationError('有采集或保存请求正在执行，请稍后切换维护状态',409,'SERVICE_BUSY');
     let owner=null;if(enabled){owner={maintenance:true,actor:held?.actor||actor.id,migrationId,createdAt:held?.createdAt||new Date().toISOString(),lastActor:actor.id};fs.writeFileSync(maintenanceFile,JSON.stringify(owner),{flag:held?'w':'wx',mode:0o600});}else if(held)fs.unlinkSync(maintenanceFile);return {ok:true,maintenance:maintenance(),owner};

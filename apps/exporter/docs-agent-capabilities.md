@@ -36,3 +36,6 @@ start/pause/resume/retry/finish/enrichDetails/host-action/export/hidePage 登记
 ## 2026-10-29增量（待统一验收）
 
 下载请求统一使用主机默认64MiB预算，修复旧512MiB请求在小文件上同样遭ARTIFACT_LIMIT_INVALID的问题。导出/file元信息返回真实bytes；超限明确提示按平台/日期拆分或关闭图片，保留领域原件，不放宽主机预算。job状态区块、issue、evidence统一module=exporter与真实jobId，完成证据仍需status completed＋listOutcome complete＋计划完整。新增用例未执行，不复用旧测试结论。完整旧入口对应见采购docs/agent-native/CAPABILITY-MATRIX-20261029.md。
+
+
+最新访问决策：所有已签名认证员工同等读写全部业务，Agent/workbench的viewer、admin和canRunTasks不再用于访问授权；导出原文件可供其他真实登录成员读取，中央任务artifact仍受任务原件绑定。旧签名格式、实际actor审计、UI确认通道、人审proof、版本及幂等保留。未新增权限管理接口。新增访问语义用例尚未运行。

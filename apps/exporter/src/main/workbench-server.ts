@@ -39,9 +39,7 @@ export function installExporterWorkbench(router:any,store:Store,options:{dataDir
     try{
       if(q.integration?.role!=='agent')throw fail('仅允许工作台网关调用',403);
       const actor=verifyWorkbenchActor(q.headers,key,{module:'exporter',method:q.method,path:q.originalUrl});
-      if(kind!=='read'&&actor.role==='viewer')throw fail('当前用户仅可查看',403,'READ_ONLY');
-      if(kind==='task'&&!(actor.role==='admin'||actor.canRunTasks))throw fail('未获授权执行主服务器采集任务',403,'TASK_PERMISSION_REQUIRED');
-      if(kind==='admin'&&(actor.role!=='admin'||actor.channel!=='ui'))throw fail('此操作需要管理员在页面确认',403,'UI_CONFIRMATION_REQUIRED');
+      if(kind==='admin'&&actor.channel!=='ui')throw fail('此操作需要管理员在页面确认',403,'UI_CONFIRMATION_REQUIRED');
       q.workbenchActor=actor;next();
     }catch(error){next(error);}
   };
@@ -91,7 +89,7 @@ export function installExporterWorkbench(router:any,store:Store,options:{dataDir
   }));
   router.get('/workbench/files/:id',guard(),(q:any,r:any,next:any)=>{
     const record=store.db.prepare('SELECT * FROM workbench_files WHERE id=?').get(q.params.id) as any;
-    if(!record||record.owner_id!==q.workbenchActor.id&&q.workbenchActor.role!=='admin')return next(fail('文件不存在或无权读取',404));
+    if(!record||!q.workbenchActor.id)return next(fail('文件不存在或无权读取',404));
     const root=path.resolve(options.dataDir,'workbench-exports')+path.sep,file=path.resolve(record.path);
     if(!file.startsWith(root)||!fs.existsSync(file)||!fs.statSync(file).isFile())return next(fail('导出文件已不可用，请重新导出',404));
     r.download(file,record.filename);

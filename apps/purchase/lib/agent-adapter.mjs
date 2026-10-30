@@ -79,7 +79,7 @@ export const purchaseAgentCapabilities=[
   ['edits','查看历史待确认修改与原差异','query'],['edit.commit','经中央审批保存历史待确认修改','prepare'],
   ['audit.detail','读取审计记录明细','query'],['suppliers.summary','读取历史采购店铺支出汇总','query'],['image.file','下载当前订单已缓存的来源图片','query'],
   ['people.mapping','查询全局登录身份与历史采购任务归属映射；重名必须明确选择','query'],
-  ['people.bind','管理员复核后绑定明确的主页人员ID和历史采购人员ID；不创建人员或修改权限','prepare'],
+  ['people.bind','复核后绑定明确的主页人员ID和历史采购人员ID；不创建人员或修改权限','prepare'],
   ['orders','采购订单与详情','query'],['dashboard','采购支出统计','query'],
   ['sources','导入来源与原件','query'],['audit','订单审计与补充来源','query'],
   ['suppliers','供应商与历史','query'],['addresses','收货地址','query'],

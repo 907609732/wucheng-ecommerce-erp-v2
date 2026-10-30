@@ -44,10 +44,10 @@ describe('exporter authoritative-server bridge',()=>{
   it('publishes stable ledger identity/revision and invalidates reviews for a same-content replacement ledger',async()=>{
     const first=fixture(),second=fixture(),a=createWorkbenchMigration(first.store),b=createWorkbenchMigration(second.store);expect(a.getDataSetIdentity().dataSetId).not.toBe(b.getDataSetIdentity().dataSetId);expect(a.getDataSetIdentity().revision).not.toBe(b.getDataSetIdentity().revision);expect(a.getDataSetIdentity()).toEqual(createWorkbenchMigration(first.store).getDataSetIdentity());const {request,store}=await api(),before=(await request('/state')).result;expect(before.dataSetId).toMatch(/^[a-f0-9-]{36}$/);expect(before.revision).toMatch(/^[a-f0-9]{64}$/);store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});const after=(await request('/state')).result;expect(after.dataSetId).toBe(before.dataSetId);expect(after.revision).not.toBe(before.revision);
   });
-  it('enforces read-only and explicit collection permissions',async()=>{
+  it('allows all signed members to collect regardless of legacy role flags',async()=>{
     const {request,calls}=await api(),body={platform:'taobao',from:'2026-01-01',to:'2026-01-31'};
-    expect((await request('/tasks',{method:'POST',body,role:'viewer'})).status).toBe(403);expect((await request('/tasks',{method:'POST',body,role:'editor'})).status).toBe(403);expect(calls).toEqual([]);
-    expect((await request('/tasks',{method:'POST',body,role:'editor',canRunTasks:true})).status).toBe(200);expect(calls).toEqual(['start']);
+    expect((await request('/tasks',{method:'POST',body,role:'viewer'})).status).toBe(200);expect((await request('/tasks',{method:'POST',body,role:'editor'})).status).toBe(200);expect(calls).toEqual(['start','start']);
+    expect((await request('/tasks',{method:'POST',body,role:'editor',canRunTasks:true})).status).toBe(200);expect(calls).toEqual(['start','start','start']);
   });
   it('retries the same request once and rejects changed input',async()=>{
     const {request,calls,store}=await api(),requestId=randomUUID(),body={platform:'jd',from:'2026-01-01',to:'2026-01-31'};
@@ -55,7 +55,7 @@ describe('exporter authoritative-server bridge',()=>{
     expect((await request('/tasks',{method:'POST',body:{...body,to:'2026-02-01'},requestId})).status).toBe(409);
   });
   it('exports files by opaque ID and restricts another actor',async()=>{
-    const {request,store}=await api(),task=store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});const result=await request('/tasks/'+task.id+'/export',{method:'POST',body:{format:'csv'}});expect(result.status).toBe(200);expect(result.result.fileId).toBeTruthy();expect(result.result.path).toBeUndefined();expect((await request('/files/'+result.result.fileId)).status).toBe(200);expect((await request('/files/'+result.result.fileId,{role:'viewer',actorPatch:{id:'tailscale:other@example.test',login:'other@example.test'}})).status).toBe(404);
+    const {request,store}=await api(),task=store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});const result=await request('/tasks/'+task.id+'/export',{method:'POST',body:{format:'csv'}});expect(result.status).toBe(200);expect(result.result.fileId).toBeTruthy();expect(result.result.path).toBeUndefined();expect((await request('/files/'+result.result.fileId)).status).toBe(200);expect((await request('/files/'+result.result.fileId,{role:'viewer',actorPatch:{id:'tailscale:other@example.test',login:'other@example.test'}})).status).toBe(200);
   });
   it('requests host interaction and rejects CLI history deletion',async()=>{
     const {request,calls}=await api();const result=await request('/host-action',{method:'POST',body:{platform:'taobao'}});expect(result.result.state).toBe('waiting-host-action');expect(calls).toEqual(['login']);expect((await request('/platforms/taobao/clear',{method:'POST',body:{confirm:true},channel:'cli'})).status).toBe(403);
@@ -94,7 +94,7 @@ describe('exporter historical migration',()=>{
 });
 
 describe('Agent exporter review boundary',()=>{
- it('prepares actual task evidence, rejects forged approval and viewer mutations',async()=>{
+ it('prepares actual task evidence, rejects forged approval while allowing authenticated members to prepare',async()=>{
  const {store,request,key}=await api();const task=store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});
  const prepared=await request('/agent/prepare',{method:'POST',channel:'mcp',body:{capabilityId:'transfer',input:{taskId:task.id}}});
  expect(prepared.status).toBe(200);expect(prepared.result.evidence[0].task.id).toBe(task.id);expect(prepared.result.dataSetId).toBeTruthy();
@@ -105,7 +105,7 @@ describe('Agent exporter review boundary',()=>{
  store.db.prepare('UPDATE agent_receipts SET payload=? WHERE id=?').run(JSON.stringify({state:'processing',ok:false}),'idem-1');
  const pending=await commit();expect(pending.result).toEqual({state:'processing',ok:false});expect(pending.result.receipt).toBeUndefined();
 
- expect((await request('/agent/prepare',{method:'POST',role:'viewer',body:{capabilityId:'pause',input:{taskId:task.id}}})).status).toBe(403);
+ expect((await request('/agent/prepare',{method:'POST',role:'viewer',body:{capabilityId:'pause',input:{taskId:task.id},taskId:'shared-task',idempotencyKey:'shared-pause'}})).status).toBe(200);
  expect((await request('/agent/prepare',{method:'POST',body:{capabilityId:'clear',input:{platform:'taobao',confirmed:true}}})).status).toBe(400);
  });
 });
@@ -124,9 +124,9 @@ it('automatic collection preparation dispatches once without a review draft',asy
  const second=await request('/agent/prepare',{method:'POST',channel:'mcp',canRunTasks:true,body});expect(second.result).toEqual(first.result);expect(store.tasks()).toHaveLength(1);expect(calls.filter(x=>x==='start')).toHaveLength(1);
  const exported=await request('/agent/prepare',{method:'POST',channel:'mcp',body:{capabilityId:'export',input:{taskId:store.tasks()[0].id,format:'csv'},taskId:'agent-automatic',idempotencyKey:'auto-export'}});expect(exported.status).toBe(200);const fileId=exported.result.blocks[0].data.fileId;
  const file=await request('/agent/query',{method:'POST',body:{capabilityId:'file',input:{fileId}}});expect(file.status).toBe(200);expect(file.result).toMatchObject({fileId,available:true});expect(JSON.stringify(file.result)).not.toContain('workbench-exports');
- expect((await request('/agent/query',{method:'POST',role:'editor',actorPatch:{id:'other-user'},body:{capabilityId:'file',input:{fileId}}})).status).toBe(404);
+ expect((await request('/agent/query',{method:'POST',role:'editor',actorPatch:{id:'other-user'},body:{capabilityId:'file',input:{fileId}}})).status).toBe(200);
 
- expect((await request('/agent/prepare',{method:'POST',role:'editor',channel:'mcp',body:{...body,idempotencyKey:'denied'}})).status).toBe(403);
+ expect((await request('/agent/prepare',{method:'POST',role:'editor',channel:'mcp',body:{...body,idempotencyKey:'shared-editor'}})).status).toBe(200);
 });
 
 it('all exporter capabilities have closed Chinese schemas enforced by real HTTP',async()=>{

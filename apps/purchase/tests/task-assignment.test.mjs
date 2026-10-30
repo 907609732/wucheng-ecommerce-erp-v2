@@ -36,25 +36,22 @@ test('本机分工使用HttpOnly会话，员工ID有效且人员持久化；普�
  assert.throws(()=>f.board.act(employee,{month,taskId,action:'start',revision:f.board.overview(employee,month).revision}),e=>e.code==='PERSONNEL_REQUIRED');
 });
 
-test('可信工作台角色不能被表单升级，未绑定员工不能提交，viewer只能只读且看全量',t=>{
- const f=fixture(t),{personnel,board,a,admin,bossStaff}=f;
- assert.equal(personnel.current(admin).role,'boss');assert.equal(personnel.current(admin).staff.id,bossStaff.id);assert.equal(personnel.current(a).role,'employee');
- assert.throws(()=>personnel.select(a,{setHeader(){}},{role:'boss'}),e=>e.code==='PERSONNEL_ROLE_DENIED');
+test('真实登录成员同等访问全部任务，旧role不再授权且表单不能冒充他人',t=>{
+ const f=fixture(t),{personnel,board,a}=f,unmapped=remote('new@test'),viewer=remote('viewer@test','viewer');
+ assert.equal(personnel.current(a).role,'boss');assert.equal(personnel.current(viewer).readOnly,false);
+ assert.equal(personnel.current(unmapped).selected,true);assert.equal(personnel.current(unmapped).staff,null);
+ for(const req of [a,unmapped,viewer])assert.equal(board.overview(req,month).tasks.length,board.overview(f.boss,month).tasks.length);
  assert.throws(()=>personnel.select(a,{setHeader(){}},{role:'employee',staffId:f.bob.id}),e=>e.code==='PERSONNEL_ROLE_DENIED');
- const unmapped=remote('new@test'),identity=personnel.current(unmapped);assert.equal(identity.selected,true);assert.equal(identity.staff,null);assert.equal(identity.canSubmit,false);assert.deepEqual(board.overview(unmapped,month).tasks,[]);
- const viewer=remote('viewer@test','viewer');assert.equal(board.overview(viewer,month).tasks.length,19);assert.equal(personnel.current(viewer).readOnly,true);
- assert.throws(()=>f.act(viewer,'assign',{assigneeId:f.alice.id}),e=>e.code==='PERSONNEL_READ_ONLY');
- assert.throws(()=>personnel.save(viewer,{name:'非法',role:'employee'}),e=>e.code==='PERSONNEL_BOSS_REQUIRED');
+ f.act(viewer,'assign',{assigneeId:f.alice.id});assert.equal(board.overview(viewer,month).tasks.find(t=>t.id===taskId).assignment.assigneeId,f.alice.id);
 });
 
-test('老板分派到员工，仅本人能开始和提交；老板验收才写旧任务记录且不锁月',t=>{
+test('登录成员可操作共享任务，提交和验收保留真实操作者且不锁月',t=>{
  const f=fixture(t),{store,board,boss,a,b,act}=f;store.insert(order(),null);
- f.assigned();const employee=board.overview(a,month),other=board.overview(b,month);assert.equal(employee.tasks.length,1);assert.equal(employee.summary.total,1);assert.equal(other.tasks.length,0);assert.equal(other.summary.total,0);
- assert.equal(employee.tasks[0].permissions.canStart,true);assert.equal(employee.tasks[0].permissions.canAssign,false);
- assert.throws(()=>act(a,'assign',{assigneeId:f.bob.id}),e=>e.code==='ASSIGNMENT_BOSS_REQUIRED');assert.throws(()=>act(b,'start'),e=>e.code==='ASSIGNMENT_NOT_OWNER');
- act(a,'start');assert.throws(()=>act(a,'submit',{note:'已完成',ack:false}),e=>e.code==='ASSIGNMENT_SUBMISSION_REQUIRED');
- const submitted=act(a,'submit',{note:'已核查全部采购账号及原始订单',ack:true});assert.equal(submitted.tasks[0].assignment.state,'submitted');assert.equal(store.db.prepare('SELECT count(*) n FROM monthly_tasks').get().n,0);
- assert.throws(()=>act(a,'accept'),e=>e.code==='ASSIGNMENT_BOSS_REQUIRED');
+ f.assigned();const employee=board.overview(a,month),other=board.overview(b,month);assert.equal(employee.tasks.length,board.overview(boss,month).tasks.length);assert.equal(other.tasks.length,employee.tasks.length);
+ assert.equal(employee.tasks.find(t=>t.id===taskId).permissions.canStart,true);assert.equal(employee.tasks.find(t=>t.id===taskId).permissions.canAssign,true);
+ act(b,'start');assert.throws(()=>act(a,'submit',{note:'已完成',ack:false}),e=>e.code==='ASSIGNMENT_SUBMISSION_REQUIRED');
+ const submitted=act(a,'submit',{note:'已核查全部采购账号及原始订单',ack:true});assert.equal(submitted.tasks.find(t=>t.id===taskId).assignment.state,'submitted');assert.equal(store.db.prepare('SELECT count(*) n FROM monthly_tasks').get().n,0);
+ assert.equal(board.overview(a,month).tasks.find(t=>t.id===taskId).permissions.canReview,true);
  const accepted=act(boss,'accept',{note:'抽查原单一致'}),task=accepted.tasks.find(t=>t.id===taskId);assert.equal(task.assignment.state,'accepted');assert.equal(task.completed,true);assert.equal(store.db.prepare('SELECT status FROM monthly_tasks WHERE month=? AND task_id=?').get(month,taskId).status,'done');assert.equal(store.monthLocks.confirmations().length,0);
  assert.deepEqual(store.db.prepare('SELECT action FROM purchase_task_assignment_events ORDER BY id').all().map(r=>r.action),['assign','start','submit','accept']);
  const reopened=openStore(f.dir);try{const p=openPurchasePersonnel(reopened),d=openTaskAssignment(reopened,openTaskCenter(reopened),p);assert.equal(d.overview(f.admin,month).tasks.find(t=>t.id===taskId).assignment.state,'accepted');}finally{reopened.close();}
@@ -66,17 +63,17 @@ test('退回必填原因，员工补充重提；重新分派清空旧提交且�
  f.assigned();act(a,'start');act(a,'submit',{note:'已查账号',ack:true});assert.throws(()=>act(boss,'return'),e=>e.code==='ASSIGNMENT_RETURN_REASON_REQUIRED');
  const returned=act(boss,'return',{note:'请补充账号核对范围'}).tasks.find(t=>t.id===taskId);assert.equal(returned.assignment.state,'returned');assert.equal(returned.assignment.reviewNote,'请补充账号核对范围');
  act(a,'submit',{note:'已补全部账号核对说明',ack:true});act(boss,'accept');
- const reassigned=act(boss,'assign',{assigneeId:f.bob.id}).tasks.find(t=>t.id===taskId);assert.equal(reassigned.assignment.state,'assigned');assert.equal(reassigned.assignment.submittedAt,null);assert.equal(reassigned.assignment.submissionNote,'');assert.equal(reassigned.completed,false);assert.equal(board.overview(a,month).tasks.length,0);assert.equal(board.overview(b,month).tasks.length,1);
- assert.throws(()=>act(a,'submit',{note:'越权',ack:true}),e=>e.code==='ASSIGNMENT_NOT_OWNER');
+ const reassigned=act(boss,'assign',{assigneeId:f.bob.id}).tasks.find(t=>t.id===taskId);assert.equal(reassigned.assignment.state,'assigned');assert.equal(reassigned.assignment.submittedAt,null);assert.equal(reassigned.assignment.submissionNote,'');assert.equal(reassigned.completed,false);assert.equal(board.overview(a,month).tasks.length,board.overview(b,month).tasks.length);
+ assert.throws(()=>act(a,'submit',{note:'任务尚未开始',ack:true}),e=>e.code==='ASSIGNMENT_NOT_OWNER');
 });
 
 test('数据变化使提交和已验收失效，旧revision拒绝并发，停用和真实月锁阻止操作',async t=>{
  const f=fixture(t),{store,personnel,board,boss,a,act}=f;const original=store.insert(order(),null);f.assigned();const old=board.overview(boss,month).revision;
  act(a,'start');assert.throws(()=>act(boss,'assign',{assigneeId:f.bob.id,revision:old}),e=>e.code==='ASSIGNMENT_REVISION_CHANGED');
  act(a,'submit',{note:'数据完整',ack:true});const submitted=board.overview(boss,month).revision,edited=store.update(original.id,{...original,note:'新增核对依据'});
- assert.equal(board.overview(a,month).tasks[0].assignment.state,'stale');assert.throws(()=>act(boss,'accept',{revision:submitted}),e=>e.code==='ASSIGNMENT_REVISION_CHANGED');assert.throws(()=>act(boss,'accept'),e=>e.code==='ASSIGNMENT_SUBMISSION_STALE');
- act(a,'submit',{note:'已核对新增依据',ack:true});act(boss,'accept');store.update(edited.id,{...edited,note:'验收后补资料'});assert.equal(board.overview(a,month).tasks[0].assignment.state,'stale');assert.equal(board.overview(a,month).tasks[0].completed,false);
- const staff=personnel.list(boss).find(s=>s.id===f.alice.id);personnel.save(boss,{...staff,active:false});assert.throws(()=>act(a,'submit',{note:'停用后提交',ack:true}),e=>e.code==='PERSONNEL_REQUIRED');
+ assert.equal(board.overview(a,month).tasks.find(t=>t.id===taskId).assignment.state,'stale');assert.throws(()=>act(boss,'accept',{revision:submitted}),e=>e.code==='ASSIGNMENT_REVISION_CHANGED');assert.throws(()=>act(boss,'accept'),e=>e.code==='ASSIGNMENT_SUBMISSION_STALE');
+ act(a,'submit',{note:'已核对新增依据',ack:true});act(boss,'accept');store.update(edited.id,{...edited,note:'验收后补资料'});assert.equal(board.overview(a,month).tasks.find(t=>t.id===taskId).assignment.state,'stale');assert.equal(board.overview(a,month).tasks.find(t=>t.id===taskId).completed,false);
+ const staff=personnel.list(boss).find(s=>s.id===f.alice.id);personnel.save(boss,{...staff,active:false});act(a,'submit',{note:'历史人员停用不再剥夺真实登录访问',ack:true});
  assert.throws(()=>act(boss,'assign',{assigneeId:f.alice.id}),e=>e.code==='ASSIGNMENT_STAFF_INVALID');act(boss,'assign',{assigneeId:f.bob.id});
  await store.monthLocks.setPassword({password:'Assignment-month-lock-842761',confirmation:'Assignment-month-lock-842761'});store.monthLocks.confirm(store.monthLocks.preview(month,'微信'));
  const lockedBoard=board.overview(boss,month),locked=lockedBoard.tasks.find(t=>t.id===taskId);assert.equal(locked.status,'locked');assert.equal(locked.assignment.state,'assigned');assert.equal(Object.values(locked.permissions).every(v=>!v),true);assert.equal(lockedBoard.workflowSummary.assigned,0);assert.equal(lockedBoard.workflowSummary.unassigned,11);assert.equal(board.overview(f.b,month).workflowSummary.mine,0);assert.throws(()=>act(f.b,'start'),e=>e.code==='ASSIGNMENT_MONTH_LOCKED');

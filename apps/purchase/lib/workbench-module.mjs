@@ -31,9 +31,9 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
    q.workbench={module,uiPrefix:ui,apiBase:api};
    if(q.path.startsWith('/api/')){
     const found=patterns.find(p=>p.operation.method===(q.method==='HEAD'?'GET':q.method)&&p.re.test(q.path));
-    const coordinator=q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.role==='admin'&&actor.channel==='ui';
+    const coordinator=q.path.startsWith('/api/integration/v1/workbench/migration/')&&actor.channel==='ui';
     if(!found||!found.operation.remote&&!coordinator)throw Object.assign(Error('此接口仅允许主机本地管理'),{status:403});
-    if(found.operation.uiOnly&&(actor.channel!=='ui'||actor.role==='viewer')||!safe.has(q.method)&&(actor.role==='viewer'||task.test(q.path)&&!actor.canRunTasks))throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
+    if(found.operation.uiOnly&&actor.channel!=='ui')throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
    }else if(!safe.has(q.method))throw Object.assign(Error('不允许此页面操作'),{status:403});
    const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api}));
    const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(path.extname(file)==='.html'){

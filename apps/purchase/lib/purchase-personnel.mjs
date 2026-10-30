@@ -8,8 +8,8 @@ const cookie=q=>String(q.headers?.cookie||'').split(';').map(part=>part.trim()).
 const brief=row=>row?{id:row.id,name:row.name,role:row.role,active:!!row.active}:null;
 const full=row=>({...brief(row),workbenchActorId:row.workbench_actor_id||'',owner:row.id===OWNER,updatedAt:row.updated_at,revision:hash([row.id,row.name,row.role,row.active,row.workbench_actor_id,row.updated_at])});
 
-// Local role selection is a work mode, matching the existing sales desk. Remote
-// authority always comes from the gateway's verified actor, never the role form.
+// Local legacy work modes remain for standalone compatibility. All verified
+// gateway members have equal business access; historical roles are metadata.
 export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
  const {db}=store,sessions=new Map();
  db.exec(`CREATE TABLE IF NOT EXISTS purchase_staff(id TEXT PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('boss','employee')),active INTEGER NOT NULL CHECK(active IN (0,1)),workbench_actor_id TEXT UNIQUE,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -22,11 +22,9 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
   let role=null,staff=null,selected=false,readOnly=false,source=actor?'workbench':'local';
   if(actor){
    staff=db.prepare('SELECT * FROM purchase_staff WHERE workbench_actor_id=?').get(actor.id)||null;
-   role=actor.role==='admin'?'boss':['editor','viewer'].includes(actor.role)?'employee':null;
-   selected=!!role&&(!staff||!!staff.active);
-   readOnly=actor.role==='viewer'||!role||!!staff&&!staff.active||Array.isArray(actor.modules)&&!actor.modules.includes('purchase');
-   if(readOnly&&actor.role!=='viewer')selected=false;
-   if(actor.channel==='mcp'&&!staff)selected=false;
+   // Gateway signature establishes the real login. Legacy roles/active flags
+   // describe historical records and no longer grant or revoke business access.
+   role='boss';selected=!!actor.id;readOnly=false;
   }else{
    const entry=sessions.get(cookie(req));
    if(entry&&entry.expiresAt>Date.now()){
@@ -35,7 +33,7 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
    }
   }
   const writable=selected&&!readOnly;
-  return {selected,role:selected?role:null,source,readOnly,staff:brief(staff),canAssign:writable&&role==='boss',canManagePersonnel:writable&&role==='boss',canSubmit:writable&&!!staff?.active,canReview:writable&&role==='boss'};
+  return {selected,role:selected?role:null,source,readOnly,staff:brief(staff),canAssign:writable&&role==='boss',canManagePersonnel:writable&&role==='boss',canSubmit:writable&&(!!actor||!!staff?.active),canReview:writable&&role==='boss'};
  }
  function select(req,res,input={}){
   const role=input.role;
@@ -81,12 +79,12 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
  }
  function mapping(req){
   const a=req.workbenchActor;if(!a?.id||!a.modules?.includes('purchase'))throw fail('需要可信工作台身份','PERSONNEL_ACTOR_REQUIRED');
-  const identity=current(req),rows=a.role==='admin'?db.prepare('SELECT * FROM purchase_staff ORDER BY name,id').all().map(full):[];
+  const identity=current(req),rows=db.prepare('SELECT * FROM purchase_staff ORDER BY name,id').all().map(full);
   return {identity,actorId:a.id,mapped:!!identity.staff,staff:rows,selectionRequired:!identity.staff,notice:'人员主数据在主页管理。此处只连接历史采购人员与真实工作台ID；禁止按姓名自动绑定。重名须请用户明确选择staffId及主页人员ID。'};
  }
  function previewBinding(req,input){
-  const a=req.workbenchActor;if(a?.role!=='admin'||!a.modules?.includes('purchase'))throw fail('历史人员归属须管理员复核','PERSONNEL_BOSS_REQUIRED');
-  const before=get(input.staffId);if(!before?.active)throw fail('请选择启用的历史采购人员','PERSONNEL_STAFF_INVALID',400);
+  const a=req.workbenchActor;if(!a?.id||!a.modules?.includes('purchase'))throw fail('历史人员归属须真实登录后复核','PERSONNEL_ACTOR_REQUIRED');
+  const before=get(input.staffId);if(!before)throw fail('请选择存在的历史采购人员','PERSONNEL_STAFF_INVALID',400);
   if(full(before).revision!==input.revision)throw fail('人员映射已变化，请重新查询','PERSONNEL_REVISION_CHANGED',409);
   if(typeof input.actorId!=='string'||!(/^(?:tailscale:[^\s,]+|windows:S-1-5-(?:\d+-)*\d+)$/.test(input.actorId)))throw fail('须选择主页目录返回的真实人员ID，不可填写姓名','PERSONNEL_ACTOR_INVALID',400);
   const conflict=db.prepare('SELECT id FROM purchase_staff WHERE workbench_actor_id=? AND id<>?').get(input.actorId,before.id);

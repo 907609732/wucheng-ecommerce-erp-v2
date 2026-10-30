@@ -46,7 +46,7 @@ export function registerReviewedEdits(integration,{db,transaction,backup,types})
   };
   const commit=(id,revision,session,actor)=>{if(!session)throw fail('请在页面查看差异并确认',403);return commitReviewed(id,revision,{session,actor});};
   const previewAgent=(id,revision)=>{const d=get(id);if(d.state!=='draft'||d.revision!==revision||hash(types[d.type].read(d.target))!==hash(d.before))throw fail('记录或草稿已变化，请重新核对',409,'EDIT_CHANGED');return d;};
-  const commitAgent=(id,revision,ctx)=>{const proof=ctx?.verifiedApproval;if(!proof||ctx.actor?.role==='viewer'||!ctx.actor?.modules?.includes('purchase')||proof.actorId!==ctx.actor?.id||proof.module!=='purchase'||proof.capabilityId!=='edit.commit'||proof.taskId!==ctx.taskId)throw fail('缺少本次修改的中央复核授权',403,'AGENT_APPROVAL_REQUIRED');return commitReviewed(id,revision,{actor:ctx.actor,approvalId:proof.approvalId});};
+  const commitAgent=(id,revision,ctx)=>{const proof=ctx?.verifiedApproval;if(!proof||!ctx.actor?.modules?.includes('purchase')||proof.actorId!==ctx.actor?.id||proof.module!=='purchase'||proof.capabilityId!=='edit.commit'||proof.taskId!==ctx.taskId)throw fail('缺少本次修改的中央复核授权',403,'AGENT_APPROVAL_REQUIRED');return commitReviewed(id,revision,{actor:ctx.actor,approvalId:proof.approvalId});};
   const list=()=>db.prepare('SELECT id,type,target,reason,state,revision,created_at FROM integration_edit_drafts ORDER BY created_at DESC').all();
   const {router:r,requireReview:ui}=integration;
   r.get('/edits',(q,s)=>s.json({drafts:db.prepare(`SELECT id,type,target,reason,state,created_at FROM integration_edit_drafts ${q.query.state==='draft'?"WHERE state='draft'":''} ORDER BY created_at DESC LIMIT 100`).all()}));

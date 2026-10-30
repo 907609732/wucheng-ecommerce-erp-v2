@@ -8,7 +8,7 @@ export function createPurchaseAgentService({store,key,binding,operations}){
  db.exec(`CREATE TABLE IF NOT EXISTS agent_prepared(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,task_id TEXT NOT NULL,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS agent_receipts(actor_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(actor_id,idempotency_key));`);
  const actor=ctx=>{if(!ctx?.actor?.id||!ctx.actor.modules?.includes('purchase'))throw fail('AGENT_ACTOR_REQUIRED','需要可信采购身份',403);return ctx.actor;};
- function operation(id,kind,ctx){const a=actor(ctx),cap=purchaseAgentCapabilities.find(c=>c.id===id&&c.kind===kind);if(!cap||!operations[id])throw fail('CAPABILITY_UNAVAILABLE','此能力尚未开通',404);if(kind==='prepare'&&a.role==='viewer')throw fail('READ_ONLY','只读身份不能修改',403);return operations[id];}
+ function operation(id,kind,ctx){const a=actor(ctx),cap=purchaseAgentCapabilities.find(c=>c.id===id&&c.kind===kind);if(!cap||!operations[id])throw fail('CAPABILITY_UNAVAILABLE','此能力尚未开通',404);return operations[id];}
  const receipt=(id,ctx)=>{
   const a=actor(ctx),row=db.prepare('SELECT * FROM agent_receipts WHERE actor_id=? AND idempotency_key=?').get(a.id,id);if(!row)return null;const prior=JSON.parse(row.body);
   if(!['unknown','processing'].includes(prior.state)||!prior.preparedId)return prior;

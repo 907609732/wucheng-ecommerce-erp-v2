@@ -187,7 +187,7 @@ export function openOrderTransfers(store,{afterWrite,afterCommit}={}){
     finally{committing=false;}
   }
   function agentActor(ctx){
-    const actor=ctx?.actor;if(!actor?.id||!actor.modules?.includes('purchase')||!['admin','editor'].includes(actor.role))throw fail('当前人员不能提交采购核对',403,'AGENT_ACTOR_REQUIRED');return actor;
+    const actor=ctx?.actor;if(!actor?.id||!actor.modules?.includes('purchase'))throw fail('当前人员不能提交采购核对',403,'AGENT_ACTOR_REQUIRED');return actor;
   }
   function assertAgentCommit(prepared,ctx){
     const actor=agentActor(ctx),claims=ctx.verifiedApproval;

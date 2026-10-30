@@ -23,7 +23,7 @@ test('real signed HTTP upload owns opaque files, rejects paths, encoding, size, 
  assert.deepEqual((await call('/agent/files',payload,{requestKey:'same-upload'})).body,saved.body);assert.equal((await call('/agent/files/'+saved.body.fileId,undefined,{signature:false})).status,401);
  assert.equal((await call('/agent/files/'+saved.body.fileId,undefined,{id:'other'})).status,404);assert.deepEqual((await call('/agent/files/'+saved.body.fileId+'/download')).body,csv);
  for(const filename of ['../secret.csv','C:\\secret.csv'])assert.equal((await call('/agent/files',{...payload,filename})).status,400);
- assert.equal((await call('/agent/files',{...payload,dataBase64:'not base64'})).status,413);assert.equal((await call('/agent/files',payload,{role:'viewer'})).status,403);assert.throws(()=>put(files,Buffer.alloc(8*1024*1024+1)),/8MiB/);
+ assert.equal((await call('/agent/files',{...payload,dataBase64:'not base64'})).status,413);assert.equal((await call('/agent/files',payload,{role:'viewer'})).status,200);assert.throws(()=>put(files,Buffer.alloc(8*1024*1024+1)),/8MiB/);
 });
 test('persistent table analyze/remap/review imports real source once, isolates owners and cleans external rollback files',async t=>{
  const {files,store,dir}=fixture(t),file=put(files),analyzed=await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信',account:'测试采购号'},ctx()),preview=analyzed.data;assert.equal(preview.summary.ready,1);assert.equal(store.list().length,0);

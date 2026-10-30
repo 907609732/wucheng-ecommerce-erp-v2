@@ -18,16 +18,16 @@ export function openTaskAssignment(store,taskCenter,personnel){
  function overview(req,month,{all=false}={}){
   const base=taskCenter.overview(month),identity=personnel.current(req),staff=allStaff(),rows=assignmentRows(month);
   const tasks=base.tasks.map(task=>{
-   const row=rows.find(r=>r.task_id===task.id),assignee=row&&staff.find(s=>s.id===row.assignee_id),validAssignee=!!assignee?.active;
+   const row=rows.find(r=>r.task_id===task.id),assignee=row&&staff.find(s=>s.id===row.assignee_id),validAssignee=req.workbenchActor?!!assignee:!!assignee?.active;
    const changed=row&&['submitted','accepted'].includes(row.state)&&row.scope_revision!==scopeHash(scope(month,task));
    const state=changed?'stale':row?.state;
    const assignment=row?{assigneeId:row.assignee_id,assigneeName:assignee?.name||'已移除人员',assigneeActive:validAssignee,dueOn:row.due_on,instructions:row.instructions,state,submittedAt:row.submitted_at,submittedBy:row.submitted_by,submissionNote:row.submission_note,result:row.submission_result,reviewNote:row.review_note,reviewedAt:row.reviewed_at,reviewedBy:row.reviewed_by,updatedAt:row.updated_at,revision:hash([row.version,row.updated_at,row.scope_revision,state,assignee?.active,assignee?.name])}:null;
-   const writable=identity.selected&&!identity.readOnly&&task.status!=='locked'&&task.kind!=='confirm',own=writable&&validAssignee&&identity.staff?.id===row?.assignee_id;
+   const writable=identity.selected&&!identity.readOnly&&task.status!=='locked'&&task.kind!=='confirm',own=writable&&validAssignee&&(!!req.workbenchActor||identity.staff?.id===row?.assignee_id);
    return {...task,completed:task.status==='locked'||state==='accepted',assignment,permissions:{canAssign:writable&&identity.canAssign,canStart:own&&['assigned','returned','stale'].includes(state),canSubmit:own&&identity.canSubmit&&['in_progress','returned','stale'].includes(state),canReview:writable&&identity.canReview&&validAssignee&&state==='submitted'}};
   });
   const eventVersion=db.prepare('SELECT MAX(id) AS version FROM purchase_task_assignment_events WHERE month=?').get(month).version||0;
   const revision=hash({base:base.revision,eventVersion,assignments:rows,staff:staff.map(s=>[s.id,s.name,s.role,s.active,s.workbench_actor_id,s.updated_at])});
-  const visible=!all&&identity.role==='employee'&&!identity.readOnly?tasks.filter(t=>identity.staff&&t.assignment?.assigneeId===identity.staff.id):tasks;
+  const visible=!req.workbenchActor&&!all&&identity.role==='employee'&&!identity.readOnly?tasks.filter(t=>identity.staff&&t.assignment?.assigneeId===identity.staff.id):tasks;
   const work=visible.filter(t=>t.kind!=='confirm'&&t.status!=='locked'),count=state=>work.filter(t=>t.assignment?.state===state).length,visibleOrders=new Set();
   for(const task of visible)for(const order of scope(month,task))visibleOrders.add(order.id);
   const completed=visible.filter(t=>t.completed).length;
@@ -53,26 +53,26 @@ export function openTaskAssignment(store,taskCenter,personnel){
    const now=new Date(Math.max(Date.now(),before?Date.parse(before.updated_at)+1:0)).toISOString(),who=actorId(req,identity),currentScope=scopeHash(scope(month,task));
    let after;
    if(action==='assign'){
-    if(!task.permissions.canAssign)throw fail('只有老板可以分派采购任务','ASSIGNMENT_BOSS_REQUIRED');
+    if(!task.permissions.canAssign)throw fail('请先登录再分派采购任务','ASSIGNMENT_BOSS_REQUIRED');
     const target=db.prepare('SELECT * FROM purchase_staff WHERE id=?').get(clean(input.assigneeId));
-    if(!target?.active||target.role!=='employee'&&target.id!==identity.staff?.id)throw fail('请选择启用的员工，或分派给老板本人','ASSIGNMENT_STAFF_INVALID',400);
+    if(!target||!req.workbenchActor&&(!target.active||target.role!=='employee'&&target.id!==identity.staff?.id))throw fail('请选择启用的员工，或分派给老板本人','ASSIGNMENT_STAFF_INVALID',400);
     after={month,task_id:taskId,assignee_id:target.id,due_on:dueOn,instructions,state:'assigned',assigned_by:who,submitted_by:null,submitted_at:null,submission_note:'',submission_result:'done',reviewed_by:null,reviewed_at:null,review_note:'',scope_revision:currentScope,updated_at:now,version:(before?.version||0)+1};
    }else{
     if(!before)throw fail('此任务尚未分派','ASSIGNMENT_REQUIRED',409);
     const target=db.prepare('SELECT * FROM purchase_staff WHERE id=?').get(before.assignee_id);
-    if(!target?.active)throw fail('负责人员已停用，请由老板重新分派','ASSIGNMENT_STAFF_INACTIVE');
+    if(!target||!req.workbenchActor&&!target.active)throw fail('负责人员已停用，请由老板重新分派','ASSIGNMENT_STAFF_INACTIVE');
     after={...before,updated_at:now,version:before.version+1};
     if(action==='start'){
-     if(!task.permissions.canStart)throw fail('只有任务本人可以开始待处理或退回的任务','ASSIGNMENT_NOT_OWNER');
+     if(!task.permissions.canStart)throw fail('请确认任务处于可开始状态','ASSIGNMENT_NOT_OWNER');
      Object.assign(after,{state:'in_progress',submitted_by:null,submitted_at:null,submission_note:'',reviewed_by:null,reviewed_at:null,scope_revision:currentScope});
     }else if(action==='submit'){
-     if(!task.permissions.canSubmit)throw fail('只能提交本人正在处理或需要补充的任务','ASSIGNMENT_NOT_OWNER');
+     if(!task.permissions.canSubmit)throw fail('请确认任务处于可提交状态','ASSIGNMENT_NOT_OWNER');
      if(input.ack!==true||!note)throw fail('请核对任务范围并填写提交说明','ASSIGNMENT_SUBMISSION_REQUIRED',400);
      const result=input.result||'done';
      if(!['done','no_activity'].includes(result)||result==='no_activity'&&(task.kind!=='collect'||task.evidence.count!==0))throw fail('仅无订单的平台任务可以提交无采购结果','ASSIGNMENT_RESULT_INVALID',400);
      Object.assign(after,{state:'submitted',submitted_by:who,submitted_at:now,submission_note:note,submission_result:result,reviewed_by:null,reviewed_at:null,review_note:'',scope_revision:currentScope});
     }else{
-     if(!identity.canReview)throw fail('只有老板可以验收或退回任务','ASSIGNMENT_BOSS_REQUIRED');
+     if(!identity.canReview)throw fail('请先登录再验收或退回任务','ASSIGNMENT_BOSS_REQUIRED');
      if(task.assignment.state!=='submitted'||before.scope_revision!==currentScope)throw fail('提交资料已变化或尚未提交，请员工重新提交','ASSIGNMENT_SUBMISSION_STALE',409);
      if(action==='return'){
       if(!note)throw fail('请填写退回补充的原因','ASSIGNMENT_RETURN_REASON_REQUIRED',400);

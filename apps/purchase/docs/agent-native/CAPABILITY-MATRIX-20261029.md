@@ -67,3 +67,8 @@
 4. 结果更正协议由主UI/runtime处理：corrections:{resultId,resultVersion,edits:[{blockId,rowKey,field,before,after}]}。本组只输出草稿元数据；id/updatedAt、历史订单查询、统计及已入账表不标可改。商品数组等复杂结构继续补充目标重生成，而不开放任意JSON写账。
 5. 新测试已保留但未执行：agent-ocr-cancel、agent-personnel-mapping、agent-legacy-edit、job-completion/schema及exporter workbench增量；真实OCR进程取消、中央审批、包内附件/产物打开、真实平台及公司AI均待统一验收。旧192/192等记录只适用于旧sourceCommit。
 6. 本组不进行正式迁移、安装或发布。用户要求后续只打安装器，不生成便携版本。
+
+
+### 最新决策覆盖以上角色措辞
+
+本日用户取消人员角色/模块权限限制。以上“管理员”“仅本人”“可用模块”等授权措辞不再是新Agent行为：所有签名登录成员同等访问全部采购/导出数据和功能；分派归属只是业务记录，非操作权限。历史归属绑定及实际操作者审计仍保留，中央复核也保留。旧local无签名工作模式及独立手机443接入不作为新Agent权限策略。详见同日handoff最新访问增量。

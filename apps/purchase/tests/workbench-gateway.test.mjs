@@ -19,7 +19,7 @@ test('delegated gateway identity remains signed, scoped and bound to UI confirma
  const manifest=await(await request('/api/integration/v1/workbench/operations')).json();assert.ok(manifest.operations.some(x=>x.path==='/api/admin/password'&&!x.remote));assert.ok(manifest.operations.some(x=>x.path==='/api/orders'&&x.remote&&x.method==='POST'));
  assert.equal((await request('/api/backup','POST',{})).status,403);
  const data={platform:'手工',account:'test',orderNo:'123456789012345678901',date:'2026-10-01',supplier:'test',status:'已完成',amountCents:100,refundCents:0,items:[{title:'test',qty:1,unitPriceCents:100}]};
- assert.equal((await request('/api/orders','POST',data,{role:'viewer'})).status,403);
+ assert.equal((await request('/api/orders','POST',{...data,orderNo:'viewer-member-order'},{role:'viewer'})).status,200);
  const saved=await request('/api/orders','POST',data);assert.equal(saved.status,200,await saved.clone().text());
  assert.equal(integration.state.dataSetId,capabilities.dataSetId);assert.ok(Number(integration.state.revision)>Number(capabilities.revision));
  assert.equal((await(await request('/api/integration/v1/workbench/migration/export','GET',null,{role:'admin'})).json()).sourceInstance,capabilities.dataSetId);

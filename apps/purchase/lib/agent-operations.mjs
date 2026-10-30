@@ -17,7 +17,7 @@ export function purchaseAgentOperations({store,taskBoard,taskCenter,supplierMana
  const orderMutation=(read,commit)=>{const op=mutation(read,commit);return {...op,prepare:(i,c)=>({...op.prepare(i,c),blocks:[orderDraftBlock(validateOrder(i))]})};};
  const selected=input=>{const rows=input.orders.map(ref=>{const o=store.get(ref.id);if(!o||o.updatedAt!==ref.updatedAt)throw Error('订单不存在或版本已变化');return o;});store.monthLocks.assertWritable(rows);return rows;};
  const assignmentInput=(i,c)=>{if(i.action!=='assign')return i;const staff=personnel.mapping(request(c)).staff;
-  if(i.assigneeActorId){const match=staff.filter(s=>s.active&&s.workbenchActorId===i.assigneeActorId);if(match.length!==1)throw Object.assign(Error('该真实工作台人员尚未明确绑定历史采购身份；请管理员查询people.mapping并复核people.bind，不能按姓名猜测'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});return {...i,assigneeId:match[0].id};}
+  if(i.assigneeActorId){const match=staff.filter(s=>s.workbenchActorId===i.assigneeActorId);if(match.length!==1)throw Object.assign(Error('该真实工作台人员尚未明确绑定历史采购身份；请查询people.mapping并复核people.bind，不能按姓名猜测'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});return {...i,assigneeId:match[0].id};}
   const target=staff.find(s=>s.id===i.assigneeId);if(!target?.workbenchActorId)throw Object.assign(Error('所选历史采购人员未绑定主页真实账号，先完成明确映射再分派'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});return i;
  };
  return {
@@ -47,9 +47,9 @@ export function purchaseAgentOperations({store,taskBoard,taskCenter,supplierMana
   'address.save':mutation(i=>{normalizeAddress(i);return i.id?addresses.list().find(a=>a.id===i.id):null;},i=>i.id?addresses.update(i.id,i):addresses.create(i)),
   'address.remove':mutation(()=>addresses.list(),i=>addresses.remove(i.id,i)),
   'task.action':mutation((i,c)=>{assignmentInput(i,c);const view=taskBoard.overview(request(c),i.month);if(!view.personnel.selected)throw Object.assign(Error('当前人员未绑定历史采购身份，请管理员明确选择对应人员后绑定'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});return view;},(i,_d,c)=>taskBoard.act(request(c),assignmentInput(i,c))),
-  'task.mark':mutation((i,c)=>{if(c.actor.role!=='admin')throw Object.assign(Error('员工请通过本人分派任务提交核对结果'),{status:403});const identity=personnel.current(request(c));if(!identity.staff||!identity.selected)throw Object.assign(Error('请先明确管理员对应的历史采购身份'),{code:'PERSONNEL_MAPPING_REQUIRED',status:409});if(i.operator&&i.operator!==identity.staff.name)throw Object.assign(Error('不能代替其他经办人确认任务'),{code:'TASK_OPERATOR_MISMATCH',status:403});return taskCenter.overview(i.month);},(i,_d,c)=>taskCenter.update({...i,operator:personnel.current(request(c)).staff.name})),
+  'task.mark':mutation((i,c)=>{const identity=personnel.current(request(c)),operator=identity.staff?.name||c.actor.login||c.actor.id;if(i.operator&&i.operator!==operator)throw Object.assign(Error('经办人须使用当前真实登录身份，不能冒充他人'),{code:'TASK_OPERATOR_MISMATCH',status:403});return taskCenter.overview(i.month);},(i,_d,c)=>taskCenter.update({...i,operator:personnel.current(request(c)).staff?.name||c.actor.login||c.actor.id})),
   'month.confirm':mutation(i=>store.monthLocks.preview(i.month,i.platform),i=>store.monthLocks.confirm(i)),
-  'month.cancel':mutation(i=>({preview:store.monthLocks.preview(i.month,i.platform),confirmation:store.monthLocks.confirmations().find(c=>c.month===i.month&&c.platform===i.platform)}),(i,_d,c)=>{if(c.actor.role!=='admin')throw Object.assign(Error('仅管理员可以解除月锁'),{status:403});return store.monthLocks.cancelWithAgentReview(i,{actorId:c.actor.id,approvalId:c.verifiedApproval.approvalId});}),
+  'month.cancel':mutation(i=>({preview:store.monthLocks.preview(i.month,i.platform),confirmation:store.monthLocks.confirmations().find(c=>c.month===i.month&&c.platform===i.platform)}),(i,_d,c)=>{return store.monthLocks.cancelWithAgentReview(i,{actorId:c.actor.id,approvalId:c.verifiedApproval.approvalId});}),
   'audit.rollback':mutation(i=>store.auditLog.preview(i),i=>store.auditLog.rollback(i)),
   'attachment.remove':mutation(i=>({id:i.id}),i=>attachments.remove(i.id))
  };
