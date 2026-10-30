@@ -18,7 +18,7 @@ export const moduleLabels = Object.freeze({warehouse:'云仓',exporter:'订单�
 
 export function betaServerUrl(value) {
   let url;try{url=new URL(String(value).trim());}catch{throw new Error('请填写有效的公司主机地址');}
-  if(url.protocol!=='https:' || url.port!=='9443')throw new Error('测试版公司主机地址必须使用 HTTPS 和 9443 端口，请向管理员获取测试版地址。');
+  if(url.protocol!=='https:' || url.port!=='9443')throw new Error('测试版公司主机地址必须使用 HTTPS 和 9443 端口，请核对公司主机地址。');
   if(url.username || url.password || url.search || url.hash || url.pathname!=='/')throw new Error('请填写完整的公司主机地址，不包含账号、路径或查询参数。');
   return url.origin;
 }

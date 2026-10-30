@@ -22,10 +22,9 @@ function notice(text) {$('notice').textContent=text;$('notice').hidden=!text;}
 function loading(target, text, variant = 'inline') {
   target.innerHTML=loadingMarkup({variant,status:text,logo:'../assets/lingtu-icon.png',brand:'五成 ERP'});
 }
-function readyForTasks() {return state.connected && state.status?.canCreateTasks !== false && state.status?.actor?.canCreateTasks !== false && state.status?.actor?.enabled !== false;}
-function readyForSchedules() {return readyForTasks() && state.status?.actor?.role!=='viewer' && state.status?.actor?.canRunTasks===true;}
+function readyForTasks() {return state.connected && typeof state.status?.actor?.id==='string' && !!state.status.actor.id && state.status.actor.enabled !== false;}
+function readyForSchedules() {return readyForTasks();}
 function canSupplement() {return readyForTasks() && state.taskId && !['queued','running','committing','unknown','cancelled'].includes(state.detail?.task?.status);}
-function canManage() {const actor=state.status?.actor;return actor?.canManageSettings === true || actor?.role === 'admin';}
 async function run(key, fn, buttons = []) {
   if(state.busy.has(key))return;
   state.busy.add(key);buttons.forEach(b=>b.disabled=true);
@@ -54,12 +53,12 @@ function showStatus(value) {
   state.status=value;state.connected=true;
   const actor=value.actor || {}, environment=value.environment || {};
   $('actor').textContent=actor.label || actor.name || actor.login || '身份已连接';
-  $('actor').title=actor.role ? ({admin:'管理员',editor:'员工',viewer:'只读成员'}[actor.role] || actor.role) : '';
+  $('actor').title='已登录';
   $('environment').textContent=environment.label || (['test','beta'].includes(environment.mode) ? '测试账本' : '账本信息待确认');
   $('environment').dataset.mode=environment.mode || 'unknown';
   $('connection').textContent=value.connection?.label || '已连接公司主机';
   $('connection').dataset.state='connected';
-  $('settings-access').textContent=canManage() ? '公司统一提供模型额度。密钥保存于主机，不向员工显示。' : '公司 AI 服务由管理员维护。你可以查看引擎状态和自己的定时任务。';
+  $('settings-access').textContent='公司统一提供模型额度。密钥保存于主机，不回显。';
   syncActions();
 }
 async function refreshStatus() {
@@ -221,7 +220,7 @@ function renderResultHistory(detail) {
 }
 function renderResult(detail) {
   renderResultHistory(detail);
-  const target=$('result-content'),result=detail.result,key=JSON.stringify({result,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{role:state.status?.actor?.role,canRunTasks:state.status?.actor?.canRunTasks,modules:state.status?.actor?.modules},capabilities:state.status?.capabilities});
+  const target=$('result-content'),result=detail.result,key=JSON.stringify({result,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{id:state.status?.actor?.id,enabled:state.status?.actor?.enabled},capabilities:state.status?.capabilities});
   if(state.resultRenderKey===key){renderReview(detail);return;}
   resultTools.renderStart(detail);state.resultRenderKey=key;target.replaceChildren();$('result-version').textContent=result?.version!=null?'版本 '+result.version:'';
   if(!result){target.append(make('p','结果准备好后，会在这里展示明细、来源和变更。','empty'));renderReview(detail);return;}
@@ -257,7 +256,7 @@ function renderReview(detail) {
   if(changed)notice('结果或账本版本已变化，请重新核对当前结果。');
   state.reviewKey=key;state.displayedBinding=binding;
   $('review-panel').hidden=!detail.review || !binding || detail.task.status!=='waiting_review';
-  $('review-description').textContent=detail.review?.canApprove===true ? (detail.review.description || `确认后，将按结果版本 ${detail.review.resultVersion} 提交列出的变更，并核对实际回执。`) : (detail.review?.reason || '此结果需要具备相应权限的人员复核。');
+  $('review-description').textContent=detail.review?.canApprove===true ? (detail.review.description || `确认后，将按结果版本 ${detail.review.resultVersion} 提交列出的变更，并核对实际回执。`) : (detail.review?.reason || '此结果暂不能提交，请核对异常或刷新结果。');
   $('review-check').disabled=!readyForTasks() || detail.review?.canApprove!==true;
   syncActions();
 }
@@ -303,7 +302,7 @@ function renderModelChoice(value=$('company-model').value) {
     if(value && !array(models).includes(value))field.append(Object.assign(make('option',value+'（当前引擎不兼容）'),{value,disabled:true}));
     $('company-model-hint').textContent=!array(models).length?'尚未取得该引擎的兼容模型清单，请刷新设置后再保存。':value&&!models.includes(value)?'当前公司模型不兼容此引擎，请明确选择替代模型。已有配置不会自动更换。':'这里只列出当前引擎支持的模型；还需确认公司 API 已开通所选模型。';
   }else{field.autocomplete='off';field.maxLength=200;field.placeholder='公司 API 提供的模型名称';$('company-model-hint').textContent='Hermes 使用公司 API 提供的模型名称。此配置由两个引擎共用，切换到 Codex 时需要重新核对兼容清单。';}
-  field.value=value;field.disabled=!canManage();$('company-model').replaceWith(field);
+  field.value=value;field.disabled=!readyForTasks();$('company-model').replaceWith(field);
 }
 function validateEngineModel(engine,model) {
   const models=engineCatalog()[engine]?.supportedModels;
@@ -315,10 +314,10 @@ function renderSettings(settings) {
   $('company-key-state').textContent=company.hasKey?'公司密钥已配置。留空可保留现有密钥。':'尚未配置公司密钥。个人 AI 工具的登录资料不会自动复制到这里。';
   const engines=engineCatalog();
   $('engine-status').replaceChildren(...Object.entries(engines).map(([id,engine])=>{const configured=company.hasKey===true;const item=make('span',`${id==='hermes'?'Hermes':'Codex'} · ${engine.available?(configured?'已配置':'待配置公司服务'):'未就绪'}${engine.version?' · '+engine.version:''}`,'engine-item');item.dataset.ready=String(engine.available===true&&configured);return item;}));
-  setFormEnabled($('model-form'),canManage());
+  setFormEnabled($('model-form'),readyForTasks());
 }
 async function saveModel(event) {
-  event.preventDefault();if(!canManage())return;
+  event.preventDefault();if(!readyForTasks())return;
   const company={baseUrl:$('company-base-url').value.trim(),model:$('company-model').value.trim(),budgetLimit:$('company-budget').value===''?0:Number($('company-budget').value)};
   const key=$('company-api-key').value.trim();if(key)company.apiKey=key;
   try{await run('settings',async()=>{validateEngineModel($('default-engine').value,company.model);const response=await api.request('settings.save',{defaultEngine:$('default-engine').value,company,...(state.settings?.version!=null?{version:state.settings.version}:{})});renderSettings(response.settings || response);notice('公司 AI 配置已保存。');},[$('save-model')]);}
@@ -327,7 +326,7 @@ async function saveModel(event) {
 function renderConnection(response) {
   const connection=response.connection || response;$('connection-mode').value=connection.mode || 'standalone';$('connection-provider').value=connection.networkProvider || 'embedded';$('connection-url').value=connection.serverUrl || '';
   $('connection-detail').textContent=connection.detail || connection.label || '员工连接公司主机后，使用同一任务服务。';
-  state.connectionCanConfigure=canManage() || connection.canConfigure===true;clearConnectionPlan();connectionVisibility();syncConnectionControls();
+  state.connectionCanConfigure=readyForTasks();clearConnectionPlan();connectionVisibility();syncConnectionControls();
 }
 function clearConnectionPlan() {state.connectionPlan=null;$('connection-review').hidden=true;}
 function syncConnectionControls() {const enabled=state.connectionCanConfigure && !state.busy.has('connection');setFormEnabled($('connection-form'),enabled);$('confirm-connection').disabled=!enabled || !state.connectionPlan;}
@@ -365,7 +364,7 @@ async function confirmConnection() {
   });
 }
 function showNetworkStatus(result) {
-  const labels={'needs-login':'需要登录私网','needs-approval':'设备正在等待管理员批准','logged-out':'已退出私网',starting:'正在连接私网',stopped:'私网已停止',running:'私网已运行',error:'连接未完成',unavailable:'私网组件尚未就绪'};
+  const labels={'needs-login':'需要登录私网','needs-approval':'设备正在等待私网批准','logged-out':'已退出私网',starting:'正在连接私网',stopped:'私网已停止',running:'私网已运行',error:'连接未完成',unavailable:'私网组件尚未就绪'};
   $('private-network-state').textContent=result.loginOpened?'已打开官方登录页。完成验证后，点击“登录后重新连接”。':result.connected?'公司私网已连接':result.message || labels[result.state] || '暂未返回连接状态';
 }
 async function networkAction(action) {
@@ -385,7 +384,7 @@ function renderSchedules() {
   $('schedule-list').replaceChildren(...state.schedules.map(schedule=>{
     const row=make('article','','schedule-row');row.append(make('h3',schedule.goal || '定时任务'),make('p',`${schedule.enabled===false?'已暂停':'已启用'} · ${schedule.timezone || '时区待确认'} · ${readableSchedule(schedule.cron).label}`));
     if(schedule.nextRunAt)row.append(make('p','下次执行：'+when(schedule.nextRunAt)));
-    if(schedule.blockedReason)row.append(make('p',({permission_revoked:'创建者权限已撤销，已保留计划',previous_run_pending:'上一次任务尚未结束，等待处理',run_failed:'运行未完成，请查看任务记录'}[schedule.blockedReason]||'计划暂未执行，请检查任务记录')));
+    if(schedule.blockedReason)row.append(make('p',({permission_revoked:'创建者登录状态已失效，已保留计划',previous_run_pending:'上一次任务尚未结束，等待处理',run_failed:'运行未完成，请查看任务记录'}[schedule.blockedReason]||'计划暂未执行，请检查任务记录')));
     if(schedule.lastRun?.taskId || schedule.lastTaskId || schedule.runs?.[0]?.taskId)row.append(actionButton('查看最近结果',()=>void openTask(schedule.lastRun?.taskId || schedule.lastTaskId || schedule.runs[0].taskId)));
     if(array(schedule.runs).length){const history=make('details','','record-details');history.append(make('summary','运行记录（'+schedule.runs.length+'）'));for(const run of schedule.runs){const entry=make('p',when(run.occurrence)+' · '+(taskStates[run.state] || {skipped:'已跳过'}[run.state] || run.state));if(run.taskId)entry.append(actionButton('查看任务',()=>void openTask(run.taskId)));history.append(entry);}row.append(history);}
     const actions=make('div','','actions'),disabled=!readyForSchedules();actions.append(actionButton('修改',()=>editSchedule(schedule),{disabled}),actionButton(schedule.enabled===false?'启用':'暂停',()=>void updateSchedule(schedule),{disabled}),actionButton('删除',()=>void deleteSchedule(schedule),{disabled}));row.append(actions);return row;
