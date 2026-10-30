@@ -221,7 +221,7 @@ function renderResultHistory(detail) {
 }
 function renderResult(detail) {
   renderResultHistory(detail);
-  const target=$('result-content'),result=detail.result,key=JSON.stringify(result);
+  const target=$('result-content'),result=detail.result,key=JSON.stringify({result,status:detail.task?.status,completedStages:detail.task?.completedStages,selection:state.resultSelection,actor:{role:state.status?.actor?.role,canRunTasks:state.status?.actor?.canRunTasks,modules:state.status?.actor?.modules},capabilities:state.status?.capabilities});
   if(state.resultRenderKey===key){renderReview(detail);return;}
   resultTools.renderStart(detail);state.resultRenderKey=key;target.replaceChildren();$('result-version').textContent=result?.version!=null?'版本 '+result.version:'';
   if(!result){target.append(make('p','结果准备好后，会在这里展示明细、来源和变更。','empty'));renderReview(detail);return;}

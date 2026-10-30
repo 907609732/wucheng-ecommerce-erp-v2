@@ -20,9 +20,9 @@ export function createResultTools({api,getDetail,getStatus,isHistorical,makeTabl
   function leave({ask=true}={}){if(ask&&hasChanges()&&!window.confirm('有尚未提交的草稿更正。离开会放弃这些更正，是否继续？'))return false;drafts.clear();closePreview();disposeCharts();return true;}
   function renderStart(detail){
     const key=fingerprint(detail?.result);
-    if(resultKey!==key&&hasChanges()){
+    if(hasChanges()){
       const summary=[...drafts.values()].flatMap(draft=>[...draft.edits.values()].map(edit=>`${edit.field}：${printable(edit.before)} → ${printable(edit.after)}`)).join('；');
-      notice('结果已更新，未提交的更正未应用。请核对新版本后重新更正。原更正：'+summary);
+      notice((resultKey!==key?'结果已更新':'任务或权限状态已变化')+'，未提交的更正未应用。请核对当前结果后重新更正。原更正：'+summary);
     }
     drafts.clear();resultKey=key;closePreview();disposeCharts();
   }
@@ -56,15 +56,16 @@ export function createResultTools({api,getDetail,getStatus,isHistorical,makeTabl
     return list(block.editableFields).filter(field=>field!==block.rowKey&&list(cap?.resultEditFields).includes(field));
   }
   function enhanceTable(wrap,block,{rows,columns}){
-    const fields=eligible(block),keys=rows.map(row=>row[block.rowKey]);
+    const fields=eligible(block),keys=rows.map(row=>row[block.rowKey]),tableResultKey=fingerprint(getDetail()?.result);
     if(!fields.length||!rows.length||keys.some(key=>!scalar(key)||key===null)||new Set(keys.map(key=>JSON.stringify(key))).size!==rows.length)return;
     const toolbar=node('div','','draft-toolbar'),editButton=button('更正草稿',start);toolbar.append(editButton);wrap.prepend(toolbar);
     function start(){
-      const detail=getDetail(),base={resultId:detail.result.id,resultVersion:detail.result.version},draft={...base,edits:new Map()};drafts.set(block.id,draft);editButton.hidden=true;
+      const freshFields=eligible(block);if(!freshFields.length||fingerprint(getDetail()?.result)!==tableResultKey){showError(new Error('任务、权限或结果版本已变化，请刷新后重新更正。'));void onRefresh();return;}
+      const detail=getDetail(),taskId=detail.task.id,base={resultId:detail.result.id,resultVersion:detail.result.version},draft={...base,edits:new Map()};drafts.set(block.id,draft);editButton.hidden=true;
       const differences=node('ul','','correction-differences'),message=node('p','更正后将重新生成结果，需重新复核。','fine-print'),save=button('提交更正',()=>void submit()),cancel=button('取消',()=>{drafts.delete(block.id);restore();onDraftChange();});save.disabled=true;
       const inputs=[];let submitting=false;
       rows.forEach((row,rowIndex)=>columns.forEach((column,columnIndex)=>{
-        const before=row[column.key];if(!fields.includes(column.key)||!Object.hasOwn(row,column.key)||!scalar(before))return;
+        const before=row[column.key];if(!freshFields.includes(column.key)||!Object.hasOwn(row,column.key)||!scalar(before))return;
         const cell=wrap.querySelectorAll('tbody tr')[rowIndex]?.children[columnIndex];if(!cell)return;
         const editor=node('input');editor.value=before===null?'':String(before);editor.setAttribute('aria-label',`${column.label||column.key}，行 ${printable(row[block.rowKey])}`);editor.dataset.field=column.key;
         if(typeof before==='number'){editor.inputMode=Number.isInteger(before)?'numeric':'decimal';editor.placeholder='按来源单位填写，不自动换算';}else if(typeof before==='boolean')editor.placeholder='true 或 false';
@@ -82,9 +83,9 @@ export function createResultTools({api,getDetail,getStatus,isHistorical,makeTabl
       function restore(){for(const item of inputs)item.cell.textContent=printable(item.before);toolbar.replaceChildren(editButton);editButton.hidden=false;editButton.focus();}
       async function submit(){
         if(submitting||!draft.edits.size)return;
-        if(isHistorical()||fingerprint(getDetail()?.result)!==JSON.stringify([base.resultId,base.resultVersion])){showError(new Error('结果已更新，请核对新版本后重新更正。'));return;}
+        if(isHistorical()||getDetail()?.task?.id!==taskId||fingerprint(getDetail()?.result)!==JSON.stringify([base.resultId,base.resultVersion])||[...draft.edits.values()].some(edit=>!eligible(block).includes(edit.field))){showError(new Error('任务、权限或结果版本已变化，请刷新后重新更正。'));void onRefresh();return;}
         submitting=true;save.disabled=true;cancel.disabled=true;inputs.forEach(item=>item.editor.disabled=true);
-        try{await api.request('tasks.input',{taskId:getDetail().task.id,corrections:{...base,edits:[...draft.edits.values()]}});drafts.delete(block.id);onDraftChange();notice('更正已提交，正在重新生成结果。新结果仍需复核。');await onRefresh();}
+        try{await api.request('tasks.input',{taskId,corrections:{...base,edits:[...draft.edits.values()]}});drafts.delete(block.id);onDraftChange();notice('更正已提交，正在重新生成结果。新结果仍需复核。');await onRefresh();}
         catch(error){showError(error);submitting=false;save.disabled=false;cancel.disabled=false;inputs.forEach(item=>item.editor.disabled=false);}
       }
     }
