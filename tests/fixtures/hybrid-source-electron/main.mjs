@@ -38,9 +38,13 @@ runtime=createAgentRuntime({storeDir:path.join(fixtureRoot,'agent-runtime'),reso
 });
 const report=(type,value={})=>fs.appendFileSync(path.join(manifest.output,'native-events.jsonl'),JSON.stringify({type,at:new Date().toISOString(),...value})+'\n');
 report('fixture.created',{sourceFixture:true,packagedBeta:false,identityType:'windows',identitySha256:createHash('sha256').update(actors().id).digest('hex'),companyCredentialsLoaded:false});
-await app.whenReady();
+// Let Electron finish evaluating its ESM entry point before waiting for app readiness.
+// A top-level readiness await can prevent ready from firing, leaving no window or error.
+app.whenReady().then(async()=>{
+report('fixture.ready');
 const title='五成 ERP · 三合一隔离验收',page=path.join(root,'desktop','launcher','agent-index.html');
 win=new BrowserWindow({title,width:1480,height:940,minWidth:900,minHeight:650,show:true,webPreferences:{preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+report('window.created',{webContentsId:win.webContents.id});
 win.setMenu(null);win.webContents.on('page-title-updated',event=>{event.preventDefault();win.setTitle(title);});
 const trusted=event=>assertLauncherSender(event,win,[page]);
 const signed=createDesktopUiSessions({services:manager,resolveActor:actors,assertRequestAllowed:()=>{if(closing)throw Error('Fixture is closing');},onError:error=>report('signature.failed',{code:error.code||'DESKTOP_UI_FAILED'})});
@@ -58,5 +62,13 @@ ipcMain.handle('agent:request',async(event,value)=>{
 win.webContents.on('will-navigate',event=>event.preventDefault());win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 win.on('resize',()=>report('window.resized',{bounds:win.getContentBounds(),zoom:win.webContents.getZoomFactor()}));
 await win.loadFile(page);
+report('launcher.loaded',{url:win.webContents.getURL()});
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',event=>{if(closing)return;event.preventDefault();closing=true;void(async()=>{try{await runtime.close();}catch(error){report('fixture.close-failed',{code:error.code||'SOURCE_FIXTURE_CLOSE_FAILED'});}finally{report('fixture.closed',{acceptancePassed:false});app.quit();}})();});
+}).catch(async error=>{
+  const failure={code:error.code||'SOURCE_FIXTURE_STARTUP_FAILED',message:error.message,stack:error.stack};
+  try{report('fixture.startup-error',failure);}catch{}
+  process.stderr.write('[hybrid-source-fixture] '+JSON.stringify(failure)+'\n');
+  try{await runtime.close();}catch{}
+  app.exit(1);
+});
