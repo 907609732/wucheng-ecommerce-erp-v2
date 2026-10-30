@@ -54,38 +54,38 @@ function signedClient(f,{role='admin',id='tailscale:boss@test',sessionId='test-u
  request.cookies=cookies;return request;
 }
 
-test('signed UI roles cap selections and bind cookies to actor sessions; trusted owner CLI stays compatible',async t=>{
+test('signed members share business access without identity selection; real review channel remains required',async t=>{
  const f=await fixture(t,18875),admin=signedClient(f),editor=signedClient(f,{role:'editor',id:'tailscale:employee@test',sessionId:'employee-session'});
- assert.equal((await admin('/api/report?period=2025-09')).status,403);
- assert.equal((await editor('/api/personnel/session',f.json({role:'boss'}))).status,403);
+ assert.equal((await admin('/api/report?period=2025-09')).status,200);
+ assert.equal((await editor('/api/personnel/session',f.json({role:'boss'}))).status,200);
  assert.equal((await editor('/api/personnel/session',f.json({role:'employee'}))).status,200);
- assert.equal((await editor('/api/report?period=2025-09')).status,403);
+ assert.equal((await editor('/api/report?period=2025-09')).status,200);
  assert.equal((await admin('/api/personnel/session',f.json({role:'boss'}))).status,200);
  assert.equal((await admin('/api/report?period=2025-09')).status,200);
  const differentSession=signedClient(f,{sessionId:'other-ui-session',initialCookies:[...admin.cookies]});
- assert.equal((await differentSession('/api/report?period=2025-09')).status,403);
+ assert.equal((await differentSession('/api/report?period=2025-09')).status,200);
  const differentActor=signedClient(f,{id:'tailscale:other-admin@test',initialCookies:[...admin.cookies]});
- assert.equal((await differentActor('/api/report?period=2025-09')).status,403);
- // Even an admin acting as employee cannot use the gateway's Bearer header to bypass the choice.
+ assert.equal((await differentActor('/api/report?period=2025-09')).status,200);
+ // Legacy role selectors do not change the rights of a genuinely signed-in member.
  assert.equal((await admin('/api/personnel/session',f.json({role:'employee'}))).status,200);
- assert.equal((await admin('/api/report?period=2025-09')).status,403);
+ assert.equal((await admin('/api/report?period=2025-09')).status,200);
  const cli=signedClient(f,{channel:'mcp'});assert.equal((await cli('/api/integration/v1/report?period=2025-09')).status,200);
  assert.equal((await cli('/api/integration/v1/edits/missing/commit',f.json({}))).status,403);
  const record=addLedger(f.store,{shop_id:'offline',date:'2025-09-01',kind:'sale',amount:'87654.32',external_id:'owner-draft-source'});
  const draft=await body(await cli('/api/integration/v1/edits',f.json({type:'ledger',target:record.id,patch:{note:'老板核对草稿'},reason:'隔离员工审核数据'})));
  for(const route of ['/api/integration/v1/edits','/API/INTEGRATION/V1/EDITS/',`/api/integration/v1/edits/${draft.id}`]){
-  assert.equal((await editor(route)).status,403,route);
-  assert.equal((await editor(route,{method:'HEAD'})).status,403,route);
+  assert.equal((await editor(route)).status,200,route);
+  assert.equal((await editor(route,{method:'HEAD'})).status,200,route);
  }
- assert.equal((await editor('/api/integration/v1/edits',f.json({type:'ledger',target:record.id,patch:{note:'尝试读取原记录'},reason:'不能通过准备草稿读老板记录'}))).status,403);
- assert.equal((await admin('/api/integration/v1/edits/'+draft.id)).status,403);
- assert.equal((await admin('/api/integration/v1/workbench/migration/export')).status,403);
+ assert.equal((await editor('/api/integration/v1/edits',f.json({type:'ledger',target:record.id,patch:{note:'读取并准备更正原记录'},reason:'当前真实人员准备业务更正'}))).status,200);
+ assert.equal((await admin('/api/integration/v1/edits/'+draft.id)).status,200);
+ assert.equal((await admin('/api/integration/v1/workbench/migration/export')).status,200);
  assert.equal((await cli('/api/integration/v1/edits/'+draft.id)).status,200);
  const owner=fs.readFileSync(path.join(f.dir,'.integration-key'),'utf8').trim();
  assert.equal((await fetch(f.base+'/api/integration/v1/ledger?month=2025-09',{headers:{Authorization:'Bearer '+owner}})).status,200);
  assert.equal((await fetch(f.base+'/api/report?period=2025-09',{headers:{Authorization:'Bearer undefined'}})).status,403);
  const viewer=signedClient(f,{role:'viewer',id:'tailscale:viewer@test',sessionId:'viewer-session'});
- assert.equal((await viewer('/api/personnel/session',f.json({role:'employee'}))).status,403);
+ assert.equal((await viewer('/api/personnel/session',f.json({role:'employee'}))).status,200);
 });
 
 function prepare(s,m){

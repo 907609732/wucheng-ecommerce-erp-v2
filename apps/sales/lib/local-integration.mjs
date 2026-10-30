@@ -42,7 +42,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
   });
   router.get('/capabilities',(_q,r)=>r.json({...state,busy:busy()||writes>0,stopping,maintenance}));
   router.get('/review-session',(q,r)=>{
-    if(q.workbenchActor?(q.workbenchActor.channel!=='ui'||q.workbenchActor.role==='viewer'):(q.headers['sec-fetch-site']!=='same-origin'||(q.headers.referer&&!String(q.headers.referer).startsWith(`http://${q.headers.host}/`))))throw integrationError('请从核对页面打开',403);
+    if(q.workbenchActor?(q.workbenchActor.channel!=='ui'):(q.headers['sec-fetch-site']!=='same-origin'||(q.headers.referer&&!String(q.headers.referer).startsWith(`http://${q.headers.host}/`))))throw integrationError('请从核对页面打开',403);
     for(const[k,s]of sessions)if(s.expires<Date.now())sessions.delete(k);
     if(sessions.size>100)throw integrationError('核对页面过多，请关闭后重试',429);
     const sid=randomBytes(24).toString('hex'),nonce=randomBytes(32).toString('hex');
@@ -59,7 +59,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
     r.status(401).json({error:'本机连接已过期，请重新打开核对页面',code:'INTEGRATION_AUTH'});
   });
   router.use(express.json({limit:'160mb'}));
-  const requireReview=(q,_r,next)=>{if(q.integration.role!=='ui'||q.workbenchActor&&(q.workbenchActor.channel!=='ui'||q.workbenchActor.role==='viewer'))throw integrationError('此操作必须在核对页面由你确认',403,'UI_CONFIRMATION_REQUIRED');next();};
+  const requireReview=(q,_r,next)=>{if(q.integration.role!=='ui'||q.workbenchActor&&(q.workbenchActor.channel!=='ui'))throw integrationError('此操作必须在核对页面由你确认',403,'UI_CONFIRMATION_REQUIRED');next();};
   router.post('/maintenance/activate',async(q,r)=>{
     if(q.integration.role!=='agent'||q.body.confirm!==true)throw integrationError('仅允许启动台完成模块激活',403);
     if(maintenanceOwner?.migrationId)throw integrationError('迁移维护窗口仍由协调器持有，不能通过模块激活解除',409,'MAINTENANCE_OWNED');
@@ -79,7 +79,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
   const api={router,requireReview,state,workbench,maintenance:refreshMaintenance,maintenanceOwner:()=>{refreshMaintenance();return maintenanceOwner;},setMaintenance(value,{actor,migrationId}={}){
     refreshMaintenance();if(maintenanceOwner?.corrupt)throw integrationError('维护所有者标记损坏，需要在主机核对',409,'MAINTENANCE_OWNED');
     if(maintenanceOwner?.migrationId&&maintenanceOwner.migrationId!==migrationId)throw integrationError('维护窗口由其他迁移批次持有，不能抢占或解除',409,'MAINTENANCE_OWNED');
-    if(maintenanceOwner?.migrationId&&(!actor||actor.role!=='admin'))throw integrationError('解除迁移维护需要签名管理员身份',403,'MAINTENANCE_OWNED');
+    if(maintenanceOwner?.migrationId&&(!actor||actor.channel!=='ui'))throw integrationError('解除迁移维护需要签名主机协调界面身份',403,'MAINTENANCE_OWNED');
     if(actor&&(!migrationId||typeof migrationId!=='string'||migrationId.length>200||!/^[-\w]+$/.test(migrationId)))throw integrationError('维护操作缺少有效迁移批次',400,'MIGRATION_ID_REQUIRED');
     if(value&&(busy()||writes>1))throw integrationError('有任务或保存正在执行，请稍后维护',409,'SERVICE_BUSY');maintenance=!!value;
     if(maintenance){maintenanceOwner={maintenance:true,actor:maintenanceOwner?.actor||actor?.id||null,lastActor:actor?.id||null,migrationId:migrationId||null,createdAt:maintenanceOwner?.createdAt||new Date().toISOString()};fs.writeFileSync(maintenanceFile,JSON.stringify(maintenanceOwner));}

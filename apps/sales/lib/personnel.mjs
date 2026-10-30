@@ -20,6 +20,7 @@ export function createPersonnel(s,{sessionTtlMs=12*60*60*1000}={}){
    month TEXT PRIMARY KEY,submitted_by TEXT NOT NULL,submitted_at TEXT NOT NULL,staff_revision TEXT NOT NULL);`);
  const owner=q=>!!integrationKey&&!q.workbenchActor&&same(q.headers.authorization,'Bearer '+integrationKey);
  function current(q){
+  if(q.workbenchActor?.id)return {required:false,protocolVersion:1,role:'member',selected:true,readOnly:false,canPrepare:true,canSubmit:true,canReconcile:true,canReviewReport:true,canCloseMonth:true,canExportReport:true,automation:q.workbenchActor.channel!=='ui',actor:{id:q.workbenchActor.id}};
   if(owner(q)||q.workbenchActor?.channel!=='ui'&&q.workbenchActor?.role==='admin')return {required:true,protocolVersion:1,role:'boss',selected:true,readOnly:false,canPrepare:true,canSubmit:false,canReconcile:true,canReviewReport:true,canCloseMonth:true,canExportReport:true,automation:true};
   const entry=sessions.get(cookieValue(q));
   const actor=q.workbenchActor;
@@ -31,6 +32,7 @@ export function createPersonnel(s,{sessionTtlMs=12*60*60*1000}={}){
    ...(actor?{actor:{id:actor.id,role:actor.role}}:{})};
  }
  function select(q,r,role){
+  if(q.workbenchActor?.id)return current(q);
   if(!['boss','employee'].includes(role))throw fail('请选择老板或员工身份',400,'PERSONNEL_ROLE_INVALID');
   const actor=q.workbenchActor;
   if(actor&&(actor.channel!=='ui'||actor.role==='viewer'||role==='boss'&&actor.role!=='admin'))throw fail('当前账号不能选择老板身份或修改人员会话',403,'PERSONNEL_ROLE_DENIED');
@@ -107,7 +109,7 @@ export function createPersonnel(s,{sessionTtlMs=12*60*60*1000}={}){
    staffRevision,employeeReady,submission:submission(m,staffRevision)};
  }
  function handoff(q,input){
-  const personnel=current(q);if(personnel.role!=='employee'||!personnel.canSubmit)throw fail('请由员工提交准备资料',403,'EMPLOYEE_REQUIRED');
+  const personnel=current(q);if(!personnel.canSubmit||(!q.workbenchActor?.id&&personnel.role!=='employee'))throw fail('请使用当前人员身份提交准备资料',403,'PERSONNEL_REQUIRED');
   const m=month(input.month);
   return s.transaction(()=>{
    if(s.get('SELECT 1 FROM month_locks WHERE month=?',m))throw fail('本月已锁定，不能重新提交资料',423,'MONTH_LOCKED');

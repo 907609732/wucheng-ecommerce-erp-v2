@@ -12,7 +12,7 @@ export function createSalesDomainPeople(store){
   const claimed=new Set(store.all('SELECT domain_person_id FROM sales_actor_people WHERE actor_id<>?',actor.id).map(row=>row.domain_person_id));
   const rows=candidates().filter(row=>!claimed.has(row.id)).map(row=>({...row,requiresExplicitSelection:true}));
   const names=new Map();for(const row of rows)names.set(row.name,(names.get(row.name)||0)+1);
-  return {actorId:actor.id,login:actor.login||actor.id,effectiveBusinessRole:actor.role==='admin'?'boss':'employee',mapping:mapping||null,revision:revision(),newPersonId:'person:'+hash(actor.id).slice(0,32),candidates:rows.map(row=>({...row,ambiguousName:names.get(row.name)>1})),requiresSelection:!mapping,
+  return {actorId:actor.id,login:actor.login||actor.id,effectiveBusinessRole:'member',mapping:mapping||null,revision:revision(),newPersonId:'person:'+hash(actor.id).slice(0,32),candidates:rows.map(row=>({...row,ambiguousName:names.get(row.name)>1})),requiresSelection:!mapping,
    summary:mapping?'当前登录人员已有销售领域映射':'请本人选择历史人员ID或明确新建领域人员；不能按姓名猜测',
    blocks:[{type:'table',id:'sales-person-candidates',title:'可明确选择的销售领域人员',rowKey:'id',rows}],
    issues:mapping?[]:[{code:'DOMAIN_PERSON_SELECTION_REQUIRED',blocking:true,message:'历史记录只保存提交人标识，姓名或老板/员工角色不能替代本人身份确认',actorId:actor.id,selectionCapability:'sales.personnel-link'}]};

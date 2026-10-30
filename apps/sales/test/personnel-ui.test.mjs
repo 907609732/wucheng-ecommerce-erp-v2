@@ -5,6 +5,9 @@ import {monthlyTaskModel,taskFlowStages,personnelTaskFlow,createTaskCenter} from
 
 const month='2026-09',shops=[{id:'pdd',name:'隔离拼多多',platform:'拼多多',manual:false},{id:'offline',name:'隔离线下',platform:'线下',manual:true}];
 const employee={selected:true,role:'employee'},boss={selected:true,role:'boss'};
+test('authenticated members can open every business view without choosing a boss or employee role',()=>{
+ const member={selected:true,role:'member'};assert.equal(selectedSalesRole(member),'member');for(const view of ['tasks','freight','manual','sources','imports','overview','reconciliation','close','settings','pdd-details','tb-details'])assert.equal(canOpenSalesView(member,view),true);
+});
 const emptyModel=monthlyTaskModel({month,shops,closeInfo:{month,coverage:[]}});
 const baseSummary={month,closeInfo:{month,locked:false,coverage:[],freight:{count:0}},sources:[],pending:[],jobs:[],statements:[],submission:{state:'draft'},staffRevision:'fixture-revision',employeeReady:false};
 

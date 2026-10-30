@@ -12,7 +12,7 @@ const settingsViews=new Set(settingsItems.map(([view])=>view));
 $('#settings-nav').innerHTML=settingsItems.map(([view,label])=>`<a href="${view==='settings'?'#settings':'#settings?section='+view}" data-settings-view="${view}">${label}</a>`).join('');
 let boot,state={view:'tasks',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI,taskCenter;
 let personnelRefresh,choosingPersonnel=false;
-const isBoss=()=>selectedSalesRole(boot?.personnel)==='boss';
+const isBoss=()=>['member','boss'].includes(selectedSalesRole(boot?.personnel));
 const shopName=id=>boot.shops.find(s=>s.id===id)?.name||id;
 const month=()=>state.period.slice(0,7).length===7?state.period.slice(0,7):state.period+'-12';
 const formObject=f=>Object.fromEntries(new FormData(f));

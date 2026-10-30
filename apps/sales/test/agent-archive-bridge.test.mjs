@@ -52,8 +52,8 @@ async function fixture(t){
   ctx.resolveTaskArtifact=async id=>{
    await Promise.resolve();const item=artifacts.get(id);
    // Models do not construct this runtime metadata. The real resolver enforces
-   // current ownership, task scope, module permission and actual-byte digest.
-   if(!item||item.ownerId!==ctx.actor.id||item.taskId!==ctx.taskId||!ctx.actor.modules.includes(item.sourceModule))throw Object.assign(Error('产物不属于当前人员、任务或模块权限范围'),{code:'TASK_ARTIFACT_SCOPE',status:403});
+   // current ownership, task scope, trusted source and actual-byte digest.
+   if(!item||item.ownerId!==ctx.actor.id||item.taskId!==ctx.taskId)throw Object.assign(Error('产物不属于当前人员或任务'),{code:'TASK_ARTIFACT_SCOPE',status:403});
    if(hash(fs.readFileSync(item.path))!==item.sha256)throw Object.assign(Error('中央原件内容发生变化'),{code:'TASK_ARTIFACT_CHANGED',status:409});
    const {ownerId,...resolved}=item;return {...resolved};
   };
@@ -67,7 +67,7 @@ async function fixture(t){
  const transport=async(module,route,options={})=>{
   calls.push({module,route,method:options.method||'GET',body:options.body,taskId:options.ctx?.taskId,actorId:options.ctx?.actor?.id});
   if(module==='overview'){
-   assert.ok(options.ctx.actor.modules.includes('overview'),'mock overview transport also checks actual module permission');
+   assert.ok(options.ctx.actor.id,'mock overview transport checks the authenticated real identity');
    const parsed=new URL('http://mock-overview'+route);assert.equal(parsed.pathname,'/api/integration/v1/agent/query');assert.equal(parsed.searchParams.get('capabilityId'),'overview.cainiao-handoff');assert.equal(parsed.searchParams.get('taskId'),options.ctx.taskId);
    return clone(manifest);
   }
@@ -105,13 +105,13 @@ test('source mock + real sales HTTP: chunk stage→adopt→preview→central rev
  const again=await f.preparation(staged.handoffId,ctx);assert.ok(again.issues.some(issue=>issue.blocking));await assert.rejects(f.adapter.commit(again,f.approved(again,ctx,'archive-duplicate')),{code:'AGENT_PREPARATION_BLOCKED'});assert.equal(f.app.store.get('SELECT COUNT(*) n FROM freight_records').n,1);
 });
 
-test('source mock: missing provenance, old artifacts, cross-task/actor and missing overview permission fail before adoption',async t=>{
+test('source mock: missing provenance, old artifacts, cross-task/actor and missing authenticated identity fail before adoption',async t=>{
  const f=await fixture(t),ids=f.input.artifactIds;
  await t.test('legacy artifact without runtime source stamp',async()=>{const ctx=f.context(),resolver=ctx.resolveTaskArtifact;ctx.resolveTaskArtifact=async id=>{const artifact=await resolver(id);if(id===ids[0]){delete artifact.sourceModule;delete artifact.sourceCapabilityId;}return artifact;};await assert.rejects(f.stage(ctx),{code:'ARTIFACT_SOURCE_REQUIRED'});});
  await t.test('cross task metadata',async()=>{const ctx=f.context(),resolver=ctx.resolveTaskArtifact;ctx.resolveTaskArtifact=async id=>({...await resolver(id),taskId:'another-task'});await assert.rejects(f.stage(ctx),{code:'ARTIFACT_SOURCE_REQUIRED'});});
  await t.test('trusted resolver rejects another owner',async()=>{await assert.rejects(f.stage(f.context({actor:{id:'other-owner',login:'other-owner'}})),{code:'TASK_ARTIFACT_SCOPE'});});
  for(const field of ['actorId','ownerId'])await t.test('optional contradictory '+field+' is also rejected',async()=>{const ctx=f.context(),resolver=ctx.resolveTaskArtifact;ctx.resolveTaskArtifact=async id=>({...await resolver(id),[field]:'other-owner'});await assert.rejects(f.stage(ctx),{code:'ARTIFACT_SOURCE_REQUIRED'});});
- await t.test('actual actor lacks overview module',async()=>{await assert.rejects(f.stage(f.context({actor:{modules:['sales']}})),{code:'CROSS_MODULE_PERMISSION_REQUIRED'});});
+ await t.test('missing authenticated identity',async()=>{await assert.rejects(f.stage(f.context({actor:{id:''}})),{code:'AGENT_ACTOR_REQUIRED'});});
  await t.test('overview domain ID is not a central artifact ID',async()=>{await assert.rejects(f.stage(f.context(),{...f.input,artifactIds:f.originalManifest.files.map(file=>file.fileId)}),{code:'TASK_ARTIFACT_SCOPE'});});
  assert.equal(f.app.store.get('SELECT COUNT(*) n FROM agent_cainiao_handoffs').n,0);assert.equal(f.app.store.get('SELECT COUNT(*) n FROM freight_records').n,0);
 });

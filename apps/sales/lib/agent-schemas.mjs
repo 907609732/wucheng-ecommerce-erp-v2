@@ -72,8 +72,8 @@ query('task-center','查看月度任务','读取指定月份的角色化任务�
 query('manual-summary','查看手工渠道应收','读取线下与代发店铺的跨月应收及实际收款摘要。',object({month,shop:shopFilter},['month']));
 query('sources','查看店铺数据覆盖','读取指定月份各店原件来源及已核对状态，缺失数据不按零处理。',monthInput);
 query('history-coverage','查看历史覆盖进度','读取2025年起各月数据覆盖数量和锁定状态。');
-query('report','查看经营月报','读取按真实原币和数据覆盖生成的日/月/年经营与对账报告；仅老板。',periodInput({shop:shopFilter,empty_trend:enumeration(['skip'],'仅在无经营数据时跳过趋势计算')}));
-query('reconciliation','查看结算收款匹配','读取指定店铺截至月末的结算、到账、剩余未匹配及候选关系；仅老板。',object({month,shop:shopFilter},['month']));
+query('report','查看经营月报','读取按真实原币和数据覆盖生成的日/月/年经营与对账报告；所有已登录人员。',periodInput({shop:shopFilter,empty_trend:enumeration(['skip'],'仅在无经营数据时跳过趋势计算')}));
+query('reconciliation','查看结算收款匹配','读取指定店铺截至月末的结算、到账、剩余未匹配及候选关系；所有已登录人员。',object({month,shop:shopFilter},['month']));
 query('ledger','查询业务流水','读取指定月份范围的账本流水；员工只读取允许的手工与单店费用记录。',object({month,shop:shopFilter},['month']));
 query('imports','查看导入批次','读取最近200个实际导入批次、归属和原件摘要，不隐含翻页或自动采集。');
 query('original','下载导入原件','以真实导入批次ID下载对应原始文件，返回受控文件标识。',recordId);
@@ -93,11 +93,11 @@ query('freight-attachment','下载运费原件','按真实运费附件ID下载�
 query('freight-export','导出运费台账','导出全部符合期间、店铺及渠道筛选的运费明细，原件标识保留。',periodInput({...freightFilters,status:enumeration(['active','all'],'有效记录或包含作废记录，作废不计汇总')}));
 query('close-preview','检查月份锁定预览','读取本月现状、缺口与最新revision；锁定前必须重新核对。',monthInput);
 query('close-history','查看锁定修订历史','读取最近100条锁定与明确解锁记录，保留原始修订依据。');
-query('audit','查看业务审计','读取最近200条真实业务审计记录；仅老板可查看。');
+query('audit','查看业务审计','读取最近200条真实业务审计记录；所有已登录人员可查看。');
 query('jobs','查看月报生成任务','读取最近100个月报生成任务；生成草稿不表示已经取得完整数据。');
 query('job-report','下载已生成月报','以真实任务ID下载已生成月报；下载历史文件不证明当前资料完整。',recordId);
 query('report-history','查看历史月报状态','读取归属纠正等变更前保留的历史报表状态，供追溯使用。');
-query('export','导出经营与对账Excel','按期间及店铺导出经营与资金账本，缺失标记保留；仅老板。',periodInput({shop:shopFilter}));
+query('export','导出经营与对账Excel','按期间及店铺导出经营与资金账本，缺失标记保留；所有已登录人员。',periodInput({shop:shopFilter}));
 query('template','下载业务导入模板','下载运营或资金流水CSV列模板；仍需映射实际原件字段。',object({type:enumeration(['operations','ledger'],'运营或资金流水模板')},['type']));
 query('backups','查看一致性备份','读取已存在的本机备份名称、创建时间与用途，不提供任意路径访问。');
 query('backup-verify','验证备份完整性','核验已登记备份中数据库与原件摘要，不恢复、不覆盖正式账本。',object({name:backupName},['name']));
@@ -116,7 +116,7 @@ prepare('ledger-update','更正手工流水','准备更正非导入流水；店�
 prepare('ledger-delete','删除手工流水','准备删除允许删除的手工流水并保留原因；导入记录必须走批次撤销。',object({id,reason},['id','reason']));
 prepare('match-create','核对结算与实际收款','准备同店铺结算与实际到账的分配；分次、合并及跨币种必须有实际核对依据。',object({left_id:{...id,description:'平台净结算流水ID'},right_id:{...id,description:'实际收款流水ID'},left_amount:money('分配的结算金额，结算原币元字符串'),right_amount:money('分配的到账金额，收款原币元字符串'),reason},['left_id','right_id','left_amount','right_amount','reason']));
 prepare('match-delete','撤销资金匹配','准备撤销一条已登记的结算收款分配，必须保留实际修订依据。',object({id,reason},['id','reason']));
-prepare('coverage','登记数据核对结果','按店铺和月份准备完整度核对；只有真实整月证据才能标full，资金核对仅老板。',object({shop_id:shopId,month,dataset:enumeration(datasets,'经营、平台结算、实际收款或单店费用'),status:enumeration(['missing','partial','full'],'未取得、部分待核对或整月已核对；真实零也需要证据'),evidence:reason},['shop_id','month','dataset','status','evidence']));
+prepare('coverage','登记数据核对结果','按店铺和月份准备完整度核对；只有真实整月证据才能标full，资金核对所有已登录人员。',object({shop_id:shopId,month,dataset:enumeration(datasets,'经营、平台结算、实际收款或单店费用'),status:enumeration(['missing','partial','full'],'未取得、部分待核对或整月已核对；真实零也需要证据'),evidence:reason},['shop_id','month','dataset','status','evidence']));
 prepare('import','导入实际业务报表','以原件、目标月份及明确列映射预演通用导入，校验和去重通过后复核入账。',genericImport);
 const taobaoFile=inlineFile(['csv']);taobaoFile.properties.filename={...taobaoFile.properties.filename,pattern:'^交易货款_(20[0-9]{2})(0[1-9]|1[0-2])_\\1\\2\\.csv$',description:'必须保留官方同月文件名：交易货款_YYYYMM_YYYYMM.csv'};
 prepare('taobao-import','导入淘宝官方货款','预演淘宝单月官方交易货款CSV；保留账期、子订单、退款与原件，不当作支付销售额。',object({shop_id:shopId,file:{description:'同任务暂存原件{id}或保留官方中文文件名的完整CSV',oneOf:[fileRef,taobaoFile]}},['shop_id','file']));
@@ -141,12 +141,12 @@ prepare('cainiao-download-start','逐月下载菜鸟账单','按真实账户和�
 for(const [name,title,description]of [['cainiao-download-stop','停止菜鸟下载','停止指定真实账单下载任务，保留已经下载的官方原件。'],['cainiao-download-resume','继续菜鸟下载','继续指定可恢复的逐月账单下载任务，不重复确认资金结算。']])prepare(name,title,description,object({jobId:id},['jobId']),false);
 prepare('cainiao-posting','复核云仓运费入账','对指定任务月份的官方账单费用及赔付抵扣预演，中央复核后登记销售台运费。',object({jobId:id,month},['jobId','month']));
 
-query('personnel-state','核对本人销售领域身份','读取当前真实登录人员的领域绑定及可明确选择的历史人员；不按姓名推断或提升老板权限。',object());
+query('personnel-state','核对本人销售领域身份','读取当前真实登录人员的领域绑定及可明确选择的历史人员；不按姓名推断身份。',object());
 query('cainiao-archive-preview','检查总览交接原件','按本任务销售交接标识重新校验原件、范围、分类、重复及锁定状态，不创建采集任务。',object({handoffId:revision},['handoffId']));
 prepare('cainiao-archive-posting','复核总览原件运费入账','仅对已重新暂存并验证的本任务总览原件准备运费入账，保留原件关系并由实际人员复核。',object({handoffId:revision},['handoffId']));
 const archivedSource=object({fileId:id,report:enumeration(['transactions','fees','warehouse'],'归档文件的已核实导出角色'),filename:text('原件名',255),sha256:revision,bytes:{type:'integer',minimum:1,maximum:52428800},from:date,cutoff:date,expected:object({count:{type:['integer','null'],minimum:0},amountCents:{type:['integer','null']}},['count','amountCents']),verification:object({verified:{const:true}},['verified'])},['fileId','report','filename','sha256','bytes','from','cutoff','expected','verification']);
 prepare('cainiao-archive-adopt','内部可信原件接收','仅供主机可信桥重新暂存总览产物；不对模型暴露来源清单或原件传输协议。',object({manifestDigest:revision,manifest:object({version:{const:1},jobId:id,month,account:text('来源账户',200),basis:{const:'业务时间'},from:date,cutoff:date,files:{type:'array',minItems:2,maxItems:20,items:archivedSource}},['version','jobId','month','account','basis','from','cutoff','files']),files:{type:'array',minItems:2,maxItems:20,items:object({id,artifactId:id,filename:text('原件名',255),sha256:revision,sourceModule:{const:'overview'},sourceCapabilityId:{const:'overview.cainiao-file'},report:enumeration(['transactions','fees','warehouse'],'实际来源角色')},['id','artifactId','filename','sha256','sourceModule','sourceCapabilityId','report'])}},['manifestDigest','manifest','files']),false);
-prepare('personnel-link','本人确认销售领域身份','仅由当前真实人员确认选中的领域人员ID或新建稳定身份；重名必须明确选择，中央复核后保存，不改变账号权限。',object({domainPersonId:{...id,description:'personnel-state返回的候选ID或newPersonId，不接受姓名代替'},displayName:text('本人明确确认的姓名；历史姓名不明时不能由模型猜测',80),reason,revision},['domainPersonId','displayName','reason','revision']));
+prepare('personnel-link','本人确认销售领域身份','仅由当前真实人员确认选中的领域人员ID或新建稳定身份；重名必须明确选择，中央复核后保存，只记录业务身份归属。',object({domainPersonId:{...id,description:'personnel-state返回的候选ID或newPersonId，不接受姓名代替'},displayName:text('本人明确确认的姓名；历史姓名不明时不能由模型猜测',80),reason,revision},['domainPersonId','displayName','reason','revision']));
 export const salesCapabilityDefinitions=Object.freeze(definitions.map(definition=>Object.freeze(definition)));
 const schemas=new Map(salesCapabilityDefinitions.map(definition=>['sales.'+definition.name,definition.inputSchema]));
 export function schemaFor(capabilityId){const schema=schemas.get(capabilityId.startsWith('sales.')?capabilityId:'sales.'+capabilityId);if(!schema)throw Error('销售能力缺少明确输入Schema：'+capabilityId);return schema;}

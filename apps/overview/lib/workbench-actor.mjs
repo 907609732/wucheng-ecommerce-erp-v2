@@ -41,7 +41,7 @@ export function verifyWorkbenchActor(headers, key, {module,method,path:requestPa
   if(actor?.v !== 1 || typeof actor.id !== 'string' || !actor.id || typeof actor.login !== 'string' || !actor.login ||
       !roles.has(actor.role) || !channels.has(actor.channel) || !Array.isArray(actor.modules) ||
       actor.modules.some(id=>!WORKBENCH_MODULES.includes(id)) || !WORKBENCH_MODULES.includes(actor.module) ||
-      !actor.modules.includes(actor.module) || typeof actor.canRunTasks !== 'boolean' ||
+      typeof actor.canRunTasks !== 'boolean' ||
       typeof actor.sessionId !== 'string' || !actor.sessionId || typeof actor.requestId !== 'string' || !actor.requestId ||
       !Number.isSafeInteger(actor.issuedAt) || !Number.isSafeInteger(actor.expiresAt) ||
       actor.issuedAt > now + 5000 || actor.expiresAt <= now || actor.expiresAt-actor.issuedAt > 60000 ||

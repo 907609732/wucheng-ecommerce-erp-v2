@@ -13,7 +13,7 @@ export function normalizedOverviewManifest(value){
 export const overviewManifestDigest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 export async function stageOverviewArtifacts({input,ctx,request}){
- if(!ctx?.actor?.modules?.includes('sales')||!ctx.actor.modules.includes('overview'))throw fail('复用总览原件需要当前人员具有总览及销售权限',403,'CROSS_MODULE_PERMISSION_REQUIRED');
+ if(!ctx?.actor?.id)throw fail('复用归档原件需要当前真实登录人员',403,'AGENT_ACTOR_REQUIRED');
  if(typeof ctx.resolveTaskArtifact!=='function')throw fail('主机尚未接通本任务可信产物解析',503,'TASK_ARTIFACT_RESOLVER_REQUIRED');
  const raw=await request('overview','/api/integration/v1/agent/query?'+new URLSearchParams({capabilityId:'overview.cainiao-handoff',input:JSON.stringify({jobId:input.sourceJobId,month:input.month}),taskId:ctx.taskId}),{method:'GET',ctx,signal:ctx.signal});
  if(raw.ready!==true)return {blocked:{summary:'总览原件仍有未解决缺口，未开始销售采集或入账',scope:{module:'sales',month:input.month},blocks:raw.blocks||[],evidence:raw.evidence||[],changes:[],issues:raw.issues?.length?raw.issues:[{code:'OVERVIEW_ARCHIVE_NOT_READY',blocking:true,message:'请先完成原归档任务的范围与文件核验',module:'overview',jobId:input.sourceJobId}]}};
@@ -42,7 +42,7 @@ export function createArchiveHandoffs(store){
   return prepareArchivedFreight({store,month:manifest.month,files,scope:{account:manifest.account,from:manifest.from,to:manifest.cutoff,expected,files:manifest.files}});
  }
  async function adopt(input,ctx){
-  if(!ctx.actor.modules?.includes('overview'))throw fail('缺少总览来源权限',403);
+  if(!ctx.actor?.id)throw fail('缺少真实登录人员',403);
   const manifest=normalizedOverviewManifest({...input.manifest,ready:true});if(overviewManifestDigest(manifest)!==input.manifestDigest)throw fail('总览来源摘要不一致',409,'ARCHIVE_MANIFEST_CHANGED');
   const payload={manifest,manifestDigest:input.manifestDigest,files:input.files};
   for(const file of payload.files){const source=manifest.files.filter(row=>row.filename===file.filename&&row.sha256===file.sha256&&row.report===file.report);if(source.length!==1||file.sourceModule!=='overview'||file.sourceCapabilityId!=='overview.cainiao-file'||file.id===source[0].fileId)throw fail('交接原件来源不一致',409,'ARCHIVE_MANIFEST_CHANGED');}

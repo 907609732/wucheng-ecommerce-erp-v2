@@ -21,10 +21,10 @@ test('signed central review books once, rejects forgery/stale source/crossactor 
   response=await committing;app.store.agentTransaction=nativeTransaction;assert.equal(response.status,200,await response.clone().text());const first=await response.json();assert.equal(app.store.bills().length,1);
   response=await call('commit',options);assert.deepEqual(await response.json(),first);assert.equal(app.store.bills().length,1);
   response=await call('receipts/key-1',{actor:'other'});assert.equal((await response.json()).state,'unknown');
-  response=await call('query?'+new URLSearchParams({capabilityId:'overview.report',input:JSON.stringify({month:'2026-09'})}),{role:'viewer'});assert.equal(response.status,403);
+  response=await call('query?'+new URLSearchParams({capabilityId:'overview.report',input:JSON.stringify({month:'2026-09'})}),{role:'viewer'});assert.equal(response.status,200);
   const pending=await prepare(bill({billNo:'STALE-SOURCE'}));const {DatabaseSync}=await import('node:sqlite');const source=new DatabaseSync(f.paths.sales);source.exec("UPDATE ledger SET amount=amount+1 WHERE id='sale'");source.close();
   response=await call('commit',{method:'POST',body:{prepared:pending},headers:{'Idempotency-Key':'stale',...approvalHeaders(proof(pending,'stale'))}});assert.equal(response.status,409);assert.equal(app.store.bills().length,1);
-  response=await call('prepare',{method:'POST',role:'editor',body:{taskId:'employee',capabilityId:'overview.bill-create',input:bill()}});assert.equal(response.status,403);
+  response=await call('prepare',{method:'POST',role:'editor',body:{taskId:'employee',capabilityId:'overview.bill-create',input:bill()}});assert.equal(response.status,200);
   await new Promise(r=>server.close(r));await app.cainiao.close();app.store.close();app=createApp({dataDir:f.s.dir,sources:f.paths});server=app.app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
   response=await call('receipts/key-1');assert.equal((await response.json()).receipt.id,first.receipt.id);assert.equal(app.store.bills().length,1);
   response=await call('prepare',{method:'POST',body:{taskId:'task-1',capabilityId:'overview.bill-create',input:{...bill(),amountCents:0.1}}});assert.equal(response.status,400);assert.equal((await response.json()).code,'AGENT_INPUT_SCHEMA');
@@ -36,7 +36,7 @@ test('signed central review books once, rejects forgery/stale source/crossactor 
   const binding=await(await call('binding')).json();response=await call('prepare',{method:'POST',body:{taskId:'task-1',capabilityId:'overview.import',input:fileInput}});assert.equal(response.status,200,await response.clone().text());const importPrepared={binding,capabilityId:'overview.import',input:fileInput,...await response.json()};
   response=await call('commit',{method:'POST',body:{prepared:importPrepared},headers:{'Idempotency-Key':'import-1',...approvalHeaders(proof(importPrepared,'import-1'))}});assert.equal(response.status,200,await response.clone().text());const imported=await response.json();assert.equal(imported.state,'completed');assert.equal(imported.idempotencyKey,'import-1');assert.equal(imported.receipt.verification.ok,true);assert.equal(app.store.bills().length,2);assert.equal(app.store.bills().find(b=>b.billNo==='HTTP-IMPORT').amountCents,987);
   response=await call('prepare',{method:'POST',body:{taskId:'backup-task',capabilityId:'overview.backup',input:{}}});assert.equal(response.status,200,await response.clone().text());const backup=await response.json();assert.equal(backup.commitData,undefined);const artifact=backup.blocks[0];response=await call('files/'+artifact.id);assert.equal(response.status,200);assert.equal(hash(Buffer.from(await response.arrayBuffer())),artifact.sha256);
-  response=await call('files/'+artifact.id,{role:'editor'});assert.equal(response.status,403);response=await call('files/'+artifact.id,{actor:'other'});assert.equal(response.status,404);
+  response=await call('files/'+artifact.id,{role:'editor'});assert.equal(response.status,200);response=await call('files/'+artifact.id,{actor:'other'});assert.equal(response.status,404);
  }finally{await new Promise(r=>server.close(r));await app.cainiao.close();app.store.close();f.close();}
 });
 

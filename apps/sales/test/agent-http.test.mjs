@@ -30,14 +30,14 @@ test('central review books real compensated freight exactly once, persists recei
  const artifacts=await f.call('query?'+new URLSearchParams({capabilityId:'sales.freight-attachment',input:JSON.stringify({id:booked.receipt.result.attachments[0].id})}));assert.equal(artifacts.status,200);const {artifact}=await artifacts.json();assert.equal(artifact.sha256,file.sha256);const downloaded=await f.call('files/'+artifact.id);assert.ok(Buffer.from(await downloaded.arrayBuffer()).equals(csv));
 });
 
-test('employee expense/manual receivables operate with actual permissions; financial review and privilege injection fail',async t=>{
+test('authenticated employees use all business functions while input identity injection remains forbidden',async t=>{
  const f=await setup(t),employee={actor:'employee',role:'editor'};
- let r=await f.call('prepare',{...employee,method:'POST',body:{taskId:'task-sales',capabilityId:'sales.match-create',input:{}}});assert.equal(r.status,403);
+ let r=await f.call('prepare',{...employee,method:'POST',body:{taskId:'task-sales',capabilityId:'sales.match-create',input:{}}});assert.equal(r.status,400);
  r=await f.call('prepare',{method:'POST',body:{taskId:'task-sales',capabilityId:'sales.freight-create',input:{...freight,confirmed:true}}});assert.equal(r.status,400);
  const input={shop_id:'offline',date:'2026-06-01',kind:'sale',amount:'100',currency:'CNY',external_id:'SYNTHETIC-ORDER',source:'合成业务'},p=await f.prepare('sales.ledger-create',input,employee);
  r=await f.call('commit',{...employee,method:'POST',body:{prepared:p},headers:{'Idempotency-Key':'employee-sale',...approvalHeaders(f.proof(p,'employee-sale',{actorId:'employee'}))}});assert.equal(r.status,200,await r.clone().text());assert.equal(f.app.store.get('SELECT amount FROM ledger WHERE external_id=?',input.external_id).amount,10000);
  const refund=await f.prepare('sales.ledger-create',{...input,kind:'refund',external_id:'SYNTHETIC-REFUND',order_ref:'SYNTHETIC-ORDER',amount:'30'},employee);r=await f.call('commit',{...employee,method:'POST',body:{prepared:refund},headers:{'Idempotency-Key':'employee-refund',...approvalHeaders(f.proof(refund,'employee-refund',{actorId:'employee'}))}});assert.equal(r.status,200);
- r=await f.call('query?'+new URLSearchParams({capabilityId:'sales.report',input:JSON.stringify({period:'2026-06'})}),employee);assert.equal(r.status,403);
+ r=await f.call('query?'+new URLSearchParams({capabilityId:'sales.report',input:JSON.stringify({period:'2026-06'})}),employee);assert.equal(r.status,200);
 });
 
 test('real file mapping preview commits operations with source retained; duplicate skips and month-lock guards remain',async t=>{
@@ -57,7 +57,7 @@ test('managed sources and nonreview backup expose owned hash-checked downloads w
  r=await f.call('query?'+new URLSearchParams({capabilityId:'sales.file-inspect',taskId:'wrong-task',input:JSON.stringify({file:{id:artifact.id}})}));assert.equal(r.status,403);
  r=await f.call('files/'+artifact.id,{actor:'other'});assert.equal(r.status,404);
  const backed=await f.prepare('sales.backup',{});assert.equal(backed.commitData,undefined);const download=backed.blocks[0];r=await f.call('files/'+download.id);assert.equal(r.status,200);assert.equal(createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex'),download.sha256);
- r=await f.call('files/'+download.id,{role:'editor'});assert.equal(r.status,403);
+ r=await f.call('files/'+download.id,{role:'editor'});assert.equal(r.status,200);
  assert.equal(f.app.store.get('SELECT COUNT(*) n FROM freight_records').n,0);
 });
 

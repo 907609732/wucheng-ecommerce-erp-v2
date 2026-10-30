@@ -5,7 +5,7 @@ import {createHmac,randomUUID,timingSafeEqual,createHash} from 'node:crypto';
 import {digest,migrationError} from './workbench-migration-core.mjs';
 export function installWorkbenchMigration(integration,store,createAdapter,options={}){
  const {router:r,workbench}=integration;
- const authorize=(q,_s,next)=>{if(!q.workbenchActor||q.workbenchActor.role!=='admin'||q.workbenchActor.channel!=='ui'||q.integration?.role!=='agent')throw migrationError('只允许主机迁移协调器操作');next();};
+ const authorize=(q,_s,next)=>{if(!q.workbenchActor||q.workbenchActor.channel!=='ui'||q.integration?.role!=='agent')throw migrationError('只允许主机迁移协调器操作');next();};
  const validPermit=(actor,plan,permit)=>{
   if(!integration.maintenance()||!plan?.migrationId||integration.maintenanceOwner?.()?.migrationId!==plan.migrationId||!permit||permit.digest!==digest(plan)||!Number.isSafeInteger(permit.expiresAt)||permit.expiresAt<=Date.now()||permit.expiresAt>Date.now()+60000||typeof permit.signature!=='string'||!/^\w{64}$/.test(permit.signature))return false;
   const expected=createHmac('sha256',workbench.key).update('workbench-migration/v1:'+permit.digest+':'+permit.expiresAt+':'+actor.sessionId).digest('hex');return timingSafeEqual(Buffer.from(expected),Buffer.from(permit.signature));
