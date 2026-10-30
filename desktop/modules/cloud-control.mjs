@@ -74,7 +74,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
         }
         const route=WAREHOUSE_AGENT_ROUTES.find(r=>r.path===url.pathname&&r.method===req.method);if(!route)return send(404,{error:'未知云仓Agent接口'});
         if(route.action==='commit'&&(!ctx.approval||!ctx.idempotencyKey))return send(403,{error:'提交需要中央结果确认凭据',code:'WAREHOUSE_APPROVAL_REQUIRED'});
-        if(['prepare','commit'].includes(route.action)){if(isBusy())return send(409,{error:'其他云仓任务正在运行',code:'SERVICE_BUSY'});activeBusinessWrites++;}
+        if(['prepare','commit'].includes(route.action)){if(isBusy()&&!(route.action==='prepare'&&body.capabilityId==='collection.cancel'))return send(409,{error:'其他云仓任务正在运行',code:'SERVICE_BUSY'});activeBusinessWrites++;}
         try{const value=await createWarehouseAgentRequestHandler(adapter)(route.action,body,ctx);audit(actor,'agent.'+route.action,value?.receipt?.status||'completed');return send(200,value);}finally{if(['prepare','commit'].includes(route.action))activeBusinessWrites--;}
       }
       if(req.url.startsWith('/api/integration/v1/workbench/')){

@@ -244,7 +244,8 @@ export async function clickCainiaoControl(locator, { label = '控件', timeout =
   }
 }
 
-export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
+export async function exportFromCainiao({ startDate = '', endDate = '', signal } = {}) {
+  signal?.throwIfAborted();
   console.log('🚀 启动 Chrome 导出库存明细...');
 
   if (!fs.existsSync(authFile)) {
@@ -258,13 +259,17 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
     headless: false,
     args: ['--disable-blink-features=AutomationControlled', '--no-proxy-server'],
   });
-  const browser = await chrome.newContext({
+  let browser;
+  const abort=()=>{void chrome.close().catch(()=>{});};
+  signal?.addEventListener('abort',abort,{once:true});
+  try {
+  signal?.throwIfAborted();
+  browser = await chrome.newContext({
     storageState: authFile,
     viewport: { width: 1440, height: 900 },
     acceptDownloads: true,
   });
 
-  try {
   const pages = browser.pages();
   const page = pages.length > 0 ? pages[0] : await browser.newPage();
 
@@ -525,8 +530,9 @@ export async function exportFromCainiao({ startDate = '', endDate = '' } = {}) {
 
   await page.waitForTimeout(2000);
   return downloadPath;
-  } finally {
-    await browser.close().catch(() => {});
+  } catch(error){if(signal?.aborted)throw signal.reason||error;throw error;} finally {
+    signal?.removeEventListener('abort',abort);
+    await browser?.close().catch(() => {});
     await chrome.close().catch(() => {});
   }
 }
@@ -545,19 +551,20 @@ function refreshCainiaoLogin() {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error('菜鸟自动续登失败，已停止；如页面要求验证码、滑块或短信验证，请人工完成');
+    throw authRequired('菜鸟自动续登失败，已停止；如页面要求验证码、滑块或短信验证，请人工完成');
   }
   console.log('✅ 登录态已刷新，继续本次库存采集');
 }
 
-export async function exportWithSingleAuthRecovery() {
+export async function exportWithSingleAuthRecovery(options={}) {
   try {
-    return await exportFromCainiao();
+    return await exportFromCainiao(options);
   } catch (error) {
     if (error.code !== authErrorCode) throw error;
     if (process.env.CAINIAO_AUTO_LOGIN_RECOVERY === '0') throw error;
+    options.signal?.throwIfAborted();
     refreshCainiaoLogin();
-    return exportFromCainiao();
+    return exportFromCainiao(options);
   }
 }
 

@@ -1302,7 +1302,7 @@ app.whenReady().then(async () => {
       business: {
         agentManaged,
         getAgentAdapter: agentManaged?async key=>{
-          if(!warehouseAgent){const {verifyAgentApproval}=await import('./agent-runtime/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});}
+          if(!warehouseAgent){const {verifyAgentApproval}=await import('./agent-runtime/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),collectDiagnostics,searchDebugLogs,exportDebugBundle,getConfiguration:publicSettings,senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});}
           return warehouseAgent;
         }:undefined,
         getDailyStatus: actor => dailyStatus(actor),
