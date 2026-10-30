@@ -10,13 +10,14 @@ import {createSystemAgentAdapter} from './system-adapter.mjs';
 import {reconcileJobIssues} from './job-issues.mjs';
 import {prepareResultCorrections} from './result-corrections.mjs';
 import {discoverAgentCapabilities} from './capability-discovery.mjs';
+import {createAgentSkills} from './skills.mjs';
 
 const live=new Set(['queued','running','committing']);
 const plain=v=>v&&typeof v==='object'&&!Array.isArray(v);
 const modules=['warehouse','purchase','sales','overview','exporter','system'];
 const forbidden=new Set(['actor','approval','confirmed','trustedUi','role','commitData']);
 function safeInput(value){if(!plain(value)||Buffer.byteLength(JSON.stringify(value))>1024*1024)throw agentError('INPUT_INVALID','业务参数必须是小于 1 MiB 的对象');for(const key of Object.keys(value))if(forbidden.has(key))throw agentError('IDENTITY_INPUT_DENIED','调用参数不能指定身份或确认凭据',403);return structuredClone(value);}
-const publicTask=t=>{const {prepared,engineSession,review,dataAccessRequirements,...rest}=t;return {...rest,review:review?{...review,canApprove:false}:null};};
+const publicTask=t=>{const {prepared,engineSession,review,dataAccessRequirements,skillSnapshot,...rest}=t;return {...rest,...(skillSnapshot?{skill:{id:skillSnapshot.id,name:typeof skillSnapshot.definition?.name==='string'?skillSnapshot.definition.name:'技能内容不可读',revision:skillSnapshot.revision,sha256:skillSnapshot.sha256}}:{}),review:review?{...review,canApprove:false}:null};};
 const publicResult=r=>{if(!r)return null;const {prepared,...rest}=r;return rest;};
 const tokenCount=usage=>{if(!usage)return null;const n=usage.totalTokens??usage.total_tokens??(typeof usage.inputTokens==='number'&&typeof usage.outputTokens==='number'?usage.inputTokens+usage.outputTokens:null)??(typeof usage.input_tokens==='number'&&typeof usage.output_tokens==='number'?usage.input_tokens+usage.output_tokens:null);return Number.isSafeInteger(n)&&n>=0?n:null;};
 const verifiedReceipt=(response,key)=>['completed','confirmed'].includes(response?.state)&&response?.ok!==false&&plain(response?.receipt)&&!['pending','processing','partial','unknown','failed'].includes(response.receipt.state)&&(response.idempotencyKey||response.receipt.idempotencyKey)===key;
@@ -38,6 +39,14 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   function checkAttachments(ids,actor){if(!Array.isArray(ids)||ids.length>20)throw agentError('ATTACHMENT_LIMIT','一次最多附加 20 个文件');return ids.map(id=>attachment(id,actor).id);}
   function attachmentMetadata(ids){return ids.map(id=>{const item=store.get('attachment',id);return item?{id:item.id,name:item.name,size:item.size,mimeType:item.mimeType,sha256:item.sha256}:null;}).filter(Boolean);}
   async function capabilities(actor){return [...adapterMap.values()].filter(a=>allowedModule(actor,a.id)).flatMap(a=>(a.capabilities||[]).filter(c=>canUse(actor,a.id,c)).map(({roles,requiresTaskPermission,dataAccessModules,...cap})=>({...cap,module:a.id})));}
+  const skills=createAgentSkills({store,now,getCapability:(module,id)=>{const matching=(adapterMap.get(module)?.capabilities||[]).filter(cap=>cap.id===id);return matching.length===1?matching[0]:null;}});
+  function assertTaskSkill(task){
+    if(!task.skillSnapshot)return;
+    try{skills.assertSnapshot(task.skillSnapshot,task.scope.modules);}catch(error){
+      if(['queued','running','waiting_review'].includes(task.status)){store.update('task',task.id,{status:'paused',pauseReason:error.code||'SKILL_REVISION_CHANGED',error:error.message});emit(task.id,'task.paused',{code:error.code||'SKILL_REVISION_CHANGED',message:error.message});jobs.get(task.id)?.controller.abort();}
+      throw error;
+    }
+  }
   async function binding(adapter,ctx){const b=await adapter.binding(ctx);if(!b?.dataSetId||b.revision===undefined)throw agentError('DATASET_UNAVAILABLE','模块未返回可核验的账本版本',503);return {dataSetId:b.dataSetId,revision:b.revision};}
   function context(task,actor,signal){return {actor,taskId:task.id,signal,emit:(type,data)=>emit(task.id,type,data),resolveTaskArtifact:async id=>{
     const fresh=await identity(actor),current=taskFor(task.id,fresh),item=store.get('artifact',id);
@@ -73,6 +82,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   async function invokeTool(taskId,name,input){
     const original=store.get('task',taskId),actor=await identity({id:original?.executionActorId||original?.ownerId,channel:'mcp'}),task=taskFor(taskId,actor);
     if(!['running','waiting_review'].includes(task.status))throw agentError('TASK_NOT_RUNNING','该任务当前不接受工具调用',409);
+    assertTaskSkill(task);
     if(name==='erp_capabilities')return discoverAgentCapabilities((await capabilities(actor)).filter(c=>task.scope.modules.includes(c.module)),input,task.scope.modules);
     if(name==='erp_ask'){const question=String(input.question||'').trim();if(!question)throw agentError('QUESTION_INVALID','补充问题不能为空');store.update('task',taskId,{status:'waiting_input',question});emit(taskId,'input.required',{question});return {waitingForUser:true};}
     if(name==='erp_task_result')return {result:publicResult(resultState(taskId))};
@@ -107,11 +117,12 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     }
     const saved=appendResult(latest,output,null,{module:adapter.id,capabilityId:cap.id});emit(taskId,'step.completed',{module:adapter.id,capabilityId:cap.id});return {result:publicResult(saved)};
   }
-  function createTask(input,actor,{internalId}={}){
+  function createTask(input,actor,{internalId,skillPreparation}={}){
     const goal=String(input.goal||'').trim();if(!goal||goal.length>20000)throw agentError('GOAL_INVALID','请输入 1 至 20000 字的工作目标');
     const engine=input.engine||settings.get().defaultEngine;if(!['codex','hermes'].includes(engine))throw agentError('ENGINE_INVALID','未知执行引擎');
     const model=settings.get().company.model;if(model&&engines[engine]?.supportedModels&&!engines[engine].supportedModels.includes(model))throw agentError('ENGINE_MODEL_UNSUPPORTED','公司模型不在该引擎的兼容清单中，请管理员调整模型设置',409);
-    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope:scopeOf(input.scope,actor),engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),status:'queued',createdAt:now(),updatedAt:now(),resultId:null,review:null,environment,scheduleId:internalId?input.scheduleId:null,scheduledFor:internalId?input.scheduledFor:null});
+    const scope=scopeOf(input.scope,actor);skills.assertPrepared(skillPreparation,{...input,scope});
+    const task=store.insert('task',{id:internalId||randomUUID(),ownerId:actor.id,goal,scope,engine,attachmentIds:checkAttachments(input.attachmentIds||[],actor),...(skillPreparation?.skillSnapshot?{skillSnapshot:structuredClone(skillPreparation.skillSnapshot),skillInputs:structuredClone(skillPreparation.skillInputs)}:{}),status:'queued',createdAt:now(),updatedAt:now(),resultId:null,review:null,environment,scheduleId:internalId?input.scheduleId:null,scheduledFor:internalId?input.scheduledFor:null});
     fs.mkdirSync(path.join(storeDir,'tasks',task.id),{recursive:true,mode:0o700});emit(task.id,'task.created',{goal,engine});
     if(autoStart)queueMicrotask(()=>run(task.id).catch(()=>{}));return {task:publicTask(task)};
   }
@@ -121,6 +132,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     const controller=new AbortController();let resolveDone;const done=new Promise(resolve=>resolveDone=resolve);jobs.set(taskId,{controller,done});let usageId;
     try{
       const actor=await identity({id:task.executionActorId||task.ownerId});taskFor(taskId,actor);
+      assertTaskSkill(task);
       const engine=engines[task.engine];if(!engine?.run)throw agentError('ENGINE_UNAVAILABLE','公司主机尚未配置此执行引擎',409);
       const credentials=await settings.credentials(),month=new Date(now()).toISOString().slice(0,7);
       usageId=randomUUID();store.transaction(()=>{
@@ -129,9 +141,9 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
         if(credentials.budgetLimit>0&&(used>=credentials.budgetLimit||records.some(u=>u.state==='pending')))throw agentError('COMPANY_BUDGET_RESERVED','公司 token 额度已用完或正由另一任务预留，进度已保存',409);
         store.insert('usage',{id:usageId,ownerId:task.ownerId,taskId,engine:task.engine,month,totalTokens:0,state:'pending',reservedTokens:credentials.budgetLimit>0?credentials.budgetLimit-used:null,budgetMode:'admission_control',startedAt:now()});
       });
-      store.update('task',taskId,{status:'running',pauseReason:null});emit(taskId,'task.running',{engine:task.engine});
+      store.update('task',taskId,{status:'running',pauseReason:null,executionStartedAt:now(),executionEngine:task.engine,executionModel:credentials.model});emit(taskId,'task.running',{engine:task.engine,model:credentials.model});
       const onUsage=value=>{const count=tokenCount(value);if(count!==null){const current=store.get('usage',usageId);store.update('usage',usageId,{totalTokens:Math.max(current.totalTokens,count),details:value});if(current.reservedTokens!==null&&count>=current.reservedTokens)controller.abort();}};
-      const result=await engine.run({task:{...publicTask(task),attachments:attachmentMetadata(task.attachmentIds)},session:task.engineSession,credentials,workingDirectory:path.join(storeDir,'tasks',taskId),profileDirectory:path.join(storeDir,'engines',task.engine),signal:controller.signal,invoke:(name,input)=>invokeTool(taskId,name,input),emit:(type,value)=>emit(taskId,type,value),onUsage,checkpoint:session=>store.update('task',taskId,{engineSession:session}),onSession:session=>sessions.set(taskId,session)});
+      const result=await engine.run({task:{...publicTask(task),...(task.skillSnapshot?{skillSnapshot:structuredClone(task.skillSnapshot),skillInputs:structuredClone(task.skillInputs)}:{}),attachments:attachmentMetadata(task.attachmentIds)},session:task.engineSession,credentials,workingDirectory:path.join(storeDir,'tasks',taskId),profileDirectory:path.join(storeDir,'engines',task.engine),signal:controller.signal,invoke:(name,input)=>invokeTool(taskId,name,input),emit:(type,value)=>emit(taskId,type,value),onUsage,checkpoint:session=>store.update('task',taskId,{engineSession:session}),onSession:session=>sessions.set(taskId,session)});
       onUsage(result?.usage);store.update('usage',usageId,{state:tokenCount(result?.usage)!==null?'known':'unknown',finishedAt:now()});
       const current=store.get('task',taskId);
       if(current.status==='running'){
@@ -161,6 +173,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   async function approve(input,actor,trustedUi){
     if(!trustedUi||actor.channel&&actor.channel!=='ui')throw agentError('HUMAN_REVIEW_REQUIRED','请在结果页由有权限的人员确认',403);
     const task=taskFor(input.taskId,actor),result=resultState(task.id),review=task.review;
+    assertTaskSkill(task);
     if(task.status!=='waiting_review'||!review||review.id!==input.reviewId||review.resultVersion!==input.resultVersion||review.revision!==input.revision||result.version!==input.resultVersion)throw agentError('REVIEW_STALE','结果已变化，请重新查看后确认',409);
     if(result.prepared.some(step=>step.module==='system'&&(step.capabilityId?.startsWith('permissions.')||step.commitData?.operation?.startsWith('permissions.'))))throw agentError('FEATURE_REMOVED','权限管理已移除，旧修改草稿不可再提交',410);
     if(!review.canApprove)throw agentError('BLOCKING_ISSUES','结果仍有待处理异常，不能正式提交',409);
@@ -173,6 +186,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   }
   async function commitSteps(taskId,result,actor){
     const task=store.get('task',taskId),receipts=[];
+    assertTaskSkill(task);
     for(const step of result.prepared){
       const key=agentDigest({taskId,resultId:result.id,version:result.version,stepId:step.id}),old=store.effect(key);
       if(old?.state==='completed'){receipts.push(old.receipt);continue;}
@@ -208,7 +222,7 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
     if(!unknown){updateResult(result.id,{receipt:{state:'verified',receipts,verifiedAt:now()}});store.update('task',task.id,{status:'completed',review:null});emit(task.id,'task.completed',{reconciled:true});}
     return {task:publicTask(store.get('task',task.id)),result:publicResult(resultState(task.id))};
   }
-  const scheduler=createAgentScheduler({store,createTask:(input,actor)=>createTask(input,actor,{internalId:input.id}),resolveActor:async id=>{try{return await identity({id});}catch{return null;}},now,next:scheduleNext});
+  const scheduler=createAgentScheduler({store,prepareTask:input=>skills.prepareTask(input),assertPrepared:(prepared,input)=>skills.assertPrepared(prepared,input),createTask:(input,actor,skillPreparation)=>createTask(input,actor,{internalId:input.id,skillPreparation}),resolveActor:async id=>{try{return await identity({id});}catch{return null;}},now,next:scheduleNext});
   const systemAdapter=createSystemAgentAdapter({store,getScheduler:()=>scheduler,resolveActor:async id=>{try{return await identity({id});}catch{return null;}},taskFor,extensions,now});adapterMap.set('system',systemAdapter);
   let importingSchedules=Promise.resolve();
   function importSchedules(input){
@@ -251,8 +265,9 @@ export function createAgentRuntime({storeDir,adapters=[],engines={},resolveActor
   async function request(operation,payload={},meta={}){
     const actor=await identity(meta.actor);if(!plain(payload))throw agentError('INPUT_INVALID','请求参数无效');
     if(operation.startsWith('permissions.'))throw agentError('FEATURE_REMOVED','权限管理已移除',410);
+    if(operation.startsWith('skills.'))return skills.request(operation,payload,actor,{trustedUi:meta.trustedUi===true});
     if(operation==='status')return {actor:{...actor,label:actor.label||actor.login||actor.id,canCreateTasks:true,canManageSettings:true},environment,engines:await Promise.all(['codex','hermes'].map(async id=>({id,...await engines[id]?.check?.(),configured:settings.get().company.hasKey}))),capabilities:await capabilities(actor)};
-    if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');return createTask(payload,actor);}
+    if(operation==='tasks.create'){if(payload.id!==undefined||payload.scheduleId!==undefined)throw agentError('TASK_ID_FORBIDDEN','任务编号由服务端生成');const scope=scopeOf(payload.scope,actor),skillPreparation=await skills.prepareTask({...payload,scope}),fresh=await identity(actor);return store.transaction(()=>createTask({...payload,scope},fresh,{skillPreparation}));}
     if(operation==='tasks.list')return {tasks:store.list('task').map(publicTask)};
     if(operation==='tasks.get'){const task=taskFor(payload.taskId,actor);const versions=store.list('result_version').filter(r=>r.taskId===task.id);let result=publicResult(resultState(task.id));const historical=payload.resultVersion!==undefined;if(historical){result=versions.find(r=>r.resultVersion===payload.resultVersion&&(!payload.resultId||r.resultId===payload.resultId));if(!result)throw agentError('RESULT_NOT_FOUND','此结果版本不存在',404);result={...result,id:result.resultId,version:result.resultVersion};}const review=!historical&&task.review?{...task.review,canApprove:task.review.canApprove&&canReview(task,actor)}:null;return {task:{...publicTask(task),review},events:store.events(task.id,payload.afterSequence),result,review,resultVersions:versions.map(r=>({id:r.resultId,version:r.resultVersion,createdAt:r.createdAt,summary:r.summary}))};}
     if(operation==='tasks.control')return control(payload.taskId,payload.action,actor,payload);

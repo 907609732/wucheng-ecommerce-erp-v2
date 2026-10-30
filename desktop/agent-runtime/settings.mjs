@@ -16,6 +16,10 @@ export function createAgentSettings(store,{secretStore}={}){
       if(incoming.baseUrl!==undefined){let url;try{url=new URL(incoming.baseUrl);}catch{throw agentError('API_URL_INVALID','模型 API 地址无效');}if(url.username||url.password||url.search||url.hash||url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost'].includes(url.hostname)))throw agentError('API_URL_INVALID','模型 API 需要 HTTPS 或本机地址');company.baseUrl=url.href.replace(/\/$/,'');}
       if(incoming.model!==undefined)company.model=String(incoming.model).trim().slice(0,200);
       if(incoming.budgetLimit!==undefined){if(!Number.isSafeInteger(Number(incoming.budgetLimit))||Number(incoming.budgetLimit)<0)throw agentError('BUDGET_INVALID','额度必须是非负整数 token 数');company.budgetLimit=Number(incoming.budgetLimit);}
+      if(new URL(company.baseUrl).origin!==new URL(current.company.baseUrl).origin&&!incoming.apiKey&&incoming.clearApiKey!==true){
+        const hasKey=typeof secretStore?.has==='function'?secretStore.has('company-api-key'):!!await secretStore?.get?.('company-api-key');
+        if(hasKey)throw agentError('COMPANY_API_KEY_ORIGIN_CHANGED','API 服务已切换到另一地址，请填写目标服务的新密钥，或明确清除旧密钥后保存；现有配置与密钥未更改',409);
+      }
       const changingKey=!!incoming.apiKey||incoming.clearApiKey===true;
       const previousKey=changingKey?await secretStore?.get?.('company-api-key'):undefined;
       if(incoming.apiKey){if(typeof secretStore?.set!=='function')throw agentError('SECURE_STORAGE_UNAVAILABLE','系统安全凭据存储不可用，未保存密钥',503);await secretStore.set('company-api-key',String(incoming.apiKey));}

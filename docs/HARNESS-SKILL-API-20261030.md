@@ -1,6 +1,6 @@
 # Harness 与技能页最小接口契约
 
-状态：2026-10-30 产品/API 提案，供 UI 与 runtime 同批实施；未修改生产源、未执行模型或测试。字段以下列约定为准，避免前端仅保存内存表单。
+状态：2026-10-30 实施契约。UI 与 runtime 已按此接线，仍待本批集中验收；代码完成不代表真实包体或全业务已验证。字段以下列约定为准，避免前端仅保存内存表单。
 
 ## 复用现有 Harness
 
@@ -78,3 +78,15 @@
 - 错误：`SKILL_NOT_FOUND` / `SKILL_REVISION_NOT_FOUND` / `AGENT_REVISION_CHANGED` / `SKILL_DISABLED` / `SKILL_REVISION_CHANGED` / `SKILL_DEFINITION_INVALID` / `SKILL_BINDING_UNAVAILABLE` / `SKILL_INPUT_INVALID` / `SKILL_IMPORT_CHANGED`；保留编辑内容，提示重新加载或修正对应字段，不自建内存“成功”兜底。
 
 实施顺序：runtime 持久化/API + 前端白名单 → UI 技能页完整 CRUD 往返 → tasks.create 冻结与双引擎同提示 → 定时引用与实际记录。先完成实现，再做本范围集中验收；不触碰已存 DeepSeek 密钥，不新装环境。
+
+## 2026-10-30 运行时实施细化（待集中验收）
+
+- `skills.list` 默认仅返回启用项；管理页传 `includeDisabled:true`。内置来源值为 `builtin`，自定义为 `custom`；本轮不插入虚构内置项。版本内容只插入 `skill_revision`，配置变更另记 `skill_audit`，和实体变更共用现有事务。
+- `save` 会保留已有 `activeRevision` 与启用状态；导入包括显式更新目标，均默认停用。导入的并发 `version` 只能与 `targetId` 同时提供。旧版本及其作者、时间、内容摘要不覆盖。
+- v1 的根输入 Schema 必须为 `object`；支持嵌套对象/数组、基本类型、`enum/const/default`、`required/additionalProperties`、数值及长度边界和固定标准 `format`。每项需有明确 `type`，嵌套最多 8 层、500 个 Schema 节点、每对象最多 100 个属性；技能输入 JSON 最多 1 MiB。**不支持任何 `$ref`、自定义 `pattern` 或执行扩展**；不加载远程 Schema，不引入正则执行服务。复杂联合 Schema 留待明确扩展后再接入。
+- 创建任务先用现有 JSON Schema 组件校验 `skillInputs`，再在同一 SQLite 事务插入任务、固定内容及绑定参数摘要。引擎执行另显式接收私有 `skillSnapshot`，公开任务只带版本摘要和已校验输入。暂停恢复及补充要求保留原快照；每次运行、工具调用及正式复核前核对绑定的 `kind`、可用状态和 `inputSchemaSha256`。版本记录缺失、摘要不符或绑定变更会暂停并给出对应错误，不能自动换版本。
+- 定时计划仅存 `skill:{id,revision}` 和 `skillInputs`。异步校验在运行记录事务前完成；事务中再次核对计划版本、启用版本及冻结绑定，再原子创建任务和运行记录。技能停用或活动版本不匹配时不生成新业务任务，计划停用并保留 `blockedReason`；不会自动追随新版本。已有自由目标计划继续原逻辑。用户仍可停止引用旧技能的已有计划，或显式清除引用后改为自由目标。
+- `skill.actualRun` 为 `null` 或 `{state,label,taskId,revision,sha256,engine,model,at,status,resultId?,resultVersion?,receiptState?}`。`state` 为 `waiting_review/completed/incomplete`；标签对应“实际任务待复核/实际任务完成/上次未完成”。只取所展示内容版本的真实任务尝试及其实际结果；模型和引擎记录执行时配置，不借当前设置推测历史。保存、导入、校验和跨引擎记录都不生成 `verified` 标记。
+- 额外错误：`SKILL_READ_ONLY` 提示复制内置定义；`COMPANY_API_KEY_ORIGIN_CHANGED` 在公司 API 地址 origin 改变而未提供目标新密钥/明确清除旧密钥时拒绝保存，原配置和旧密钥保持不变。同 origin 的根路径或 `/v1` 调整可以保留原密钥。
+
+新增定向用例在 `tests/agent-runtime-skills.test.mjs` 和 `tests/agent-runtime-settings-origin.test.mjs`。本次实施未运行它们或额外模型调用；双引擎真实运行、UI 完整往返、定时、重启及包体仍以总控后续集中验收证据为准。
