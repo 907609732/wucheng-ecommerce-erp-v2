@@ -5,17 +5,68 @@ function checked(file,base=root){const p=path.resolve(base,file);if(!inside(base
 function copyTree(src,dest){fs.cpSync(src,dest,{recursive:true,filter:f=>{const rel=path.relative(src,f).replaceAll('\\','/');if(fs.lstatSync(f).isSymbolicLink())throw Error('Linked staging source');if(/(^|\/)(?:node_modules|data|private|originals|attachments|backups?|dist|release|out|\.git|\.env[^/]*)(\/|$)|\.(?:sqlite(?:-wal|-shm)?|db|pem|key|pfx|log)$/i.test(rel))return false;return true;}});}
 function copyRuntime(src,dest){fs.cpSync(src,dest,{recursive:true,filter:f=>{const rel=path.relative(src,f).replaceAll('\\','/');if(fs.lstatSync(f).isSymbolicLink())throw Error('Linked runtime resource forbidden');if(/(^|\/)(?:\.env[^/]*|Cookies|Partitions|secrets\.bin)(\/|$)|\.(?:sqlite(?:-wal|-shm)?|pfx|key)$/i.test(rel))throw Error('Private data in exporter runtime: '+rel);return true;}});}
 function copyDependencies(src,dest){fs.cpSync(src,dest,{recursive:true,filter:f=>{const rel=path.relative(src,f).replaceAll('\\','/');if(fs.lstatSync(f).isSymbolicLink())throw Error('Linked dependency forbidden');return !/(^|\/)\.bin(?:\/|$)/.test(rel);}});}
+// Reviewed public documentation/test bytes only. Runtime code and licenses are never cleanup targets.
+export const publicDependencyCleanupRules=Object.freeze([
+ ['dotenv','16.6.1','README.md','d445595efbfa0e290e495cbef75379e5cb16d881489d4873ecb0d0bd2e56227a'],
+ ['dotenv','16.6.1','README-es.md','a7021cf039feb04752c5cde82f07336dec6e17876e88677d7c5de4c2dbbbcff1'],
+ ['zod','4.6.5','src/v4/classic/tests/string.test.ts','04f902a3638ff3c33f78ee3dacba72a1a9e87034f00d8eded5f65acf2adc0f3a'],
+ ['zod','4.6.5','src/v4/mini/tests/string.test.ts','f4ebdab74387516508d0ce96a56979fe06af7e2425dccc13d34c0a229ba3a050'],
+ ['zod','4.6.7','src/v4/classic/tests/string.test.ts','04f902a3638ff3c33f78ee3dacba72a1a9e87034f00d8eded5f65acf2adc0f3a'],
+ ['zod','4.6.7','src/v4/mini/tests/string.test.ts','f4ebdab74387516508d0ce96a56979fe06af7e2425dccc13d34c0a229ba3a050'],
+ ['fastify','5.12.5','test/upgrade.test.js','e0cd80f32e2173918516d56ca83f9ae44c5eb0fbe2b80cebd7e26b74f03c904e'],
+ ['readable-stream','2.3.8','README.md','5a917d93a11215fbdfe7366e7466bc2ef3e3b9dee8291b0e1d48e6d4796f19cf'],
+ ['readable-stream','3.6.2','README.md','93e374225fa62e8b1423059092bd614b6fe837315f3c10688362f20dfe2c54a4'],
+ ['readable-stream','4.8.0','README.md','a08ab6b2c4e52f12c2b0b3d8838dcc65da0d7149297da22a657fd12c7d25d458']
+].map(tuple=>Object.freeze(tuple)));
+const replyFromFixtureHashes=Object.freeze({
+ 'fastify.cert':'d0ac544dda566ef44571ae6a540913d2f565e1dadd59ca185dbf82d772bdd0dd',
+ 'fastify.key':'6253917211cc9b8cf7768312318d9cac2688e36347f73024b648c750aa02a5e9',
+ 'file.txt':'e0ac3601005dfa1864f5392aabaf7d898b1b5bab854f1acb4491bcd806b76b0c',
+ 'localhost.cert':'fb5d6ebdfcb3049bba172f85e90f776396a3a8fe8b89a95e52f3b993a7df99e9',
+ 'localhost.key':'f236ddc49480e7cacc74423759e9d82397a7747aa3d967f1edc90377ffbb2316'
+});
 export function prunePublicDependencyFixtures(packageRoot){
- const base=checked(path.relative(stageBase,path.resolve(packageRoot)),stageBase),relative='node_modules/@fastify/reply-from/test/fixtures',target=checked(relative,base);
- if(!fs.existsSync(target))return [];
- const pkg=JSON.parse(fs.readFileSync(checked('node_modules/@fastify/reply-from/package.json',base),'utf8'));
- if(pkg.name!=='@fastify/reply-from'||pkg.version!=='12.8.0'||!fs.lstatSync(target).isDirectory())throw Error('Public dependency fixture rule requires review');
- const entries=fs.readdirSync(target,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)),expected=['fastify.cert','fastify.key','file.txt','localhost.cert','localhost.key'];
- if(JSON.stringify(entries.map(e=>e.name))!==JSON.stringify(expected)||entries.some(e=>!e.isFile()||e.isSymbolicLink()))throw Error('Unexpected dependency fixture entries; refusing cleanup');
- const removed=entries.map(e=>({path:relative+'/'+e.name,sha256:createHash('sha256').update(fs.readFileSync(checked(relative+'/'+e.name,base))).digest('hex')}));
- // Only this reviewed, version-pinned test fixture directory inside an isolated stage is removable.
- fs.rmSync(target,{recursive:true});
- return removed;
+ const base=checked(path.relative(stageBase,path.resolve(packageRoot)),stageBase),planned=[],emptyDirectories=[];
+ const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+ function planFile(pkgDir,pkg,relative,expected){
+  const file=checked(relative,pkgDir);if(!fs.existsSync(file))return;
+  if(!fs.lstatSync(file).isFile()||sha(file)!==expected)throw Error('Public dependency cleanup bytes require review: '+pkg.name+'@'+pkg.version+'/'+relative);
+  planned.push({file,path:path.relative(base,file).replaceAll('\\','/'),package:pkg.name,version:pkg.version,sha256:expected});
+ }
+ function packageAt(pkgDir){
+  const pkgFile=checked('package.json',pkgDir);if(!fs.existsSync(pkgFile))return;
+  const pkg=JSON.parse(fs.readFileSync(pkgFile,'utf8'));
+  if(pkg.name==='@fastify/reply-from'){
+   const target=checked('test/fixtures',pkgDir);
+   if(fs.existsSync(target)){
+    if(pkg.version!=='12.8.0'||!fs.lstatSync(target).isDirectory())throw Error('Public dependency fixture rule requires review');
+    const entries=fs.readdirSync(target,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)),expected=Object.keys(replyFromFixtureHashes);
+    if(JSON.stringify(entries.map(e=>e.name))!==JSON.stringify(expected)||entries.some(e=>!e.isFile()||e.isSymbolicLink()))throw Error('Unexpected dependency fixture entries; refusing cleanup');
+    for(const name of expected)planFile(pkgDir,pkg,'test/fixtures/'+name,replyFromFixtureHashes[name]);emptyDirectories.push(target);
+   }
+  }
+  const rules=publicDependencyCleanupRules.filter(([name])=>name===pkg.name),versionRules=rules.filter(([,version])=>version===pkg.version);
+  if(rules.length&&!versionRules.length&&rules.some(([, ,relative])=>fs.existsSync(checked(relative,pkgDir))))throw Error('Public dependency cleanup version requires review: '+pkg.name+'@'+pkg.version);
+  for(const [, ,relative,expected]of versionRules)planFile(pkgDir,pkg,relative,expected);
+  modulesAt(checked('node_modules',pkgDir));
+ }
+ function modulesAt(directory){
+  if(!fs.existsSync(directory))return;
+  checked(path.relative(base,directory),base);
+  if(!fs.lstatSync(directory).isDirectory())throw Error('Dependency cleanup root is not a directory');
+  for(const entry of fs.readdirSync(directory,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
+   if(entry.name==='.bin')continue;
+   const file=checked(entry.name,directory);if(!entry.isDirectory())continue;
+   if(entry.name.startsWith('@')){for(const scoped of fs.readdirSync(file,{withFileTypes:true})){const pkgDir=checked(scoped.name,file);if(scoped.isDirectory())packageAt(pkgDir);}}
+   else packageAt(file);
+  }
+ }
+ modulesAt(checked('node_modules',base));
+ // Validate the complete plan before deleting any file; an unknown tuple cannot cause partial cleanup.
+ for(const item of planned)if(!fs.lstatSync(checked(path.relative(base,item.file),base)).isFile()||sha(item.file)!==item.sha256)throw Error('Public dependency cleanup input changed');
+ for(const item of planned)fs.unlinkSync(item.file);
+ for(const directory of emptyDirectories)fs.rmdirSync(directory);
+ return planned.map(({file,...item})=>item);
 }
 function run(cwd,args){const npm=path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js');const r=spawnSync(process.execPath,[npm,...args],{cwd,stdio:'inherit',windowsHide:true});if(r.status!==0)throw Error('Beta dependency/build step failed: '+args.join(' '));if(args[0]==='ci'||args[0]==='prune'){const removed=prunePublicDependencyFixtures(cwd);if(removed.length)console.log(JSON.stringify({action:'prune-public-dependency-test-fixtures',packageRoot:path.relative(stageBase,cwd).replaceAll('\\','/'),removed}));}}
 export function readPlan(){if(!fs.existsSync(planFile))throw Error('Beta staging plan missing; integrate actual host, adapters and engine paths before staging');const p=JSON.parse(fs.readFileSync(planFile));if(p.purchaseMobilePort!==27380)throw Error('Beta purchase mobile port must be 27380');if(p.format!=='agent-beta-stage-plan/v1'||!/^\d+\.\d+\.\d+$/.test(p.betaVersion||'')||!p.engines||!p.modules)throw Error('Invalid Beta staging plan');for(const id of ['codex','hermes'])if(typeof p.engines[id]!=='string'||!p.engines[id].startsWith('desktop/')||p.engines[id].split(/[\\/]/).includes('..'))throw Error('Missing engine protocol adapter: '+id);if(!Array.isArray(p.warehouseEntries)||!p.warehouseEntries.length||p.warehouseEntries.some(x=>typeof x!=='string'||!x.startsWith('desktop/workbench/')||x.split(/[\\/]/).includes('..')))throw Error('Missing warehouse adapter entries');if(Object.keys(p.modules).sort().join(',')!==['exporter','overview','purchase','sales'].join(','))throw Error('Unexpected module set');for(const id of ['purchase','sales','overview','exporter'])if(!Array.isArray(p.modules[id])||!p.modules[id].length||p.modules[id].some(x=>typeof x!=='string'||x.startsWith('/')||x.split(/[\\/]/).includes('..')))throw Error('Missing packaged adapter entries: '+id);return p;}
