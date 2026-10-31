@@ -2,6 +2,22 @@ import test from'node:test';import assert from'node:assert/strict';import fs fro
 function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'beta-package-'));fs.writeFileSync(path.join(root,'package.json'),'{}');return root;}
 test('relative imports resolve inside isolated package',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),"import './child.mjs';");fs.writeFileSync(path.join(r,'child.mjs'),'export const x=1');assert.equal(verifyImports(r,['entry.mjs']).checkedFiles,2);});
 test('imports that escape package are rejected',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),"import '../../../desktop/agent-runtime/approval.mjs';");assert.throws(()=>verifyImports(r,['entry.mjs']),/escapes/);});
+test('ordinary import and from strings, comments and templates are not dependencies',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),[
+ "const fields=['month','from','to'];",
+ "const names=['import','records']; const label=true?'import':'records';",
+ "const example=\"import 'missing-string-package'\";",
+ "const template=`require('missing-template-package')`;",
+ "// import 'missing-comment-package';",
+ "/* export * from 'missing-comment-package'; */",
+].join('\n'));assert.equal(verifyImports(r,['entry.mjs']).checkedFiles,1);});
+test('static imports, re-exports, dynamic imports and require traverse real literal dependencies',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),[
+ "import './side.mjs'; import {a} from './named.mjs';",
+ "export {b} from './named-export.mjs'; export * from './all-export.mjs';",
+ "const later=import('./dynamic.mjs'); const common=require('./common.cjs');",
+ "const interpolated=`${import('./template-expression.mjs')}`;",
+].join('\n'));for(const f of ['side.mjs','named.mjs','named-export.mjs','all-export.mjs','dynamic.mjs','common.cjs','template-expression.mjs'])fs.writeFileSync(path.join(r,f),'');assert.equal(verifyImports(r,['entry.mjs']).checkedFiles,8);});
+test('each supported dependency syntax still rejects a missing real package',()=>{for(const statement of ["import 'missing-audit-package';","import value from 'missing-audit-package';","export {value} from 'missing-audit-package';","export * from 'missing-audit-package';","import('missing-audit-package');","require('missing-audit-package');"]){const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),statement);assert.throws(()=>verifyImports(r,['entry.mjs']),{code:'MODULE_NOT_FOUND'});}});
+test('invalid JavaScript is rejected instead of silently skipping imports',()=>{const r=fixture();fs.writeFileSync(path.join(r,'entry.mjs'),"import 'node:fs'; const =;");assert.throws(()=>verifyImports(r,['entry.mjs']),SyntaxError);});
 test('missing payload manifest is reported before runtime directories are checked',()=>{const r=fixture();assert.throws(()=>auditStage(r),/agent-beta-resources\.json/);fs.writeFileSync(path.join(r,'agent-beta-resources.json'),JSON.stringify({format:'agent-beta-resources/v1'}));assert.throws(()=>auditStage(r),/manifest missing/);});
 
 test('pinned manifest digest still rejects a changed resource contract',()=>{const r=fixture();fs.mkdirSync(path.join(r,'desktop/agent-host'),{recursive:true});fs.writeFileSync(path.join(r,'agent-beta-resources.json'),JSON.stringify({format:'agent-beta-resources/v1',payloadHashes:payloadHashes(r)}));fs.writeFileSync(path.join(r,'desktop/agent-host/packaged-manifest.json'),JSON.stringify({sha256:'0'.repeat(64)}));assert.throws(()=>auditStage(r),/Pinned manifest digest mismatch/);});
