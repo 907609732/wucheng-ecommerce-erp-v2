@@ -48,8 +48,8 @@ test('initialization rejects Beta and unsafe paths before creating data; managed
  registry.sales.allowInitialize=true;fs.writeFileSync(paths.registryFile,JSON.stringify(registry));assert.throws(()=>assertAgentRegistry(paths),{code:'BETA_REGISTRY_UNSAFE'});
 });
 
-test('activation verifies external gateway bytes before first or reused initialization',t=>{
+test('activation verifies external gateway bytes before first or reused initialization',async t=>{
  const {local}=fixture(t),resources=path.join(local,'resources'),rel='workbench-gateway/apps/purchase/lib/store.mjs',file=path.join(resources,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'export const store=1;');const manifest={payloadHashes:{[rel]:hash(file)}};
- assert.doesNotThrow(()=>verifyActivationResources(resources,manifest));fs.writeFileSync(file,'export const store=2;');assert.throws(()=>verifyActivationResources(resources,manifest),/资源摘要不符/);
- assert.throws(()=>verifyActivationResources(resources,{payloadHashes:{'workbench-gateway/../../outside.mjs':'0'.repeat(64)}}),/资源路径无效/);
+ await assert.doesNotReject(verifyActivationResources(resources,manifest));fs.writeFileSync(file,'export const store=2;');await assert.rejects(verifyActivationResources(resources,manifest),/资源摘要不符/);
+ await assert.rejects(verifyActivationResources(resources,{payloadHashes:{'workbench-gateway/../../outside.mjs':'0'.repeat(64)}}),/资源路径无效/);
 });
