@@ -12,7 +12,7 @@ export async function runWorkbenchServer({storeDir=defaultWorkbenchStore(),publi
   assertAgentRegistry(agentPaths);
   const configFile=path.join(storeDir,'server-config.json');
   let config={};if(fs.existsSync(configFile))config=JSON.parse(fs.readFileSync(configFile,'utf8'));
-  const selectedPort=port??config.port??agentPaths.gatewayPort;if(selectedPort!==agentPaths.gatewayPort)throw Error('测试版网关端口必须为 27330');
+  const selectedPort=port??config.port??agentPaths.gatewayPort;if(selectedPort!==agentPaths.gatewayPort)throw Error('测试版网关端口必须为 '+agentPaths.gatewayPort);
   const services=guardAgentServices(new ServiceManager({registryFile:agentPaths.registryFile}),agentPaths);
   const gateway=await createWorkbenchGateway({services,storeDir,publicOrigin:publicOrigin||config.publicOrigin,port:selectedPort,registerRoutes,agentRuntime:agentRuntime||createAgentBridgeClient({storeDir:path.join(agentPaths.profile,'agent-host')}),...options});
   await gateway.start();return gateway;
