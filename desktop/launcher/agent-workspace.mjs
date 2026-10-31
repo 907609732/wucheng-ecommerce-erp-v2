@@ -55,7 +55,10 @@ async function navigate(view, {focus=true,desk}={}) {
   state.view=view;
   document.body.classList.toggle('business-mode',view==='business');
   for(const section of document.querySelectorAll('main>.view'))section.hidden=section.id!=='view-'+view;
-  for(const button of document.querySelectorAll('.main-nav [data-view]')){if(button.dataset.view===view)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
+  const inAiTasks=['home','history','skills','task'].includes(view);
+  $('ai-task-navigation').hidden=!inAiTasks;
+  for(const button of document.querySelectorAll('.main-nav [data-view]')){if(button.dataset.view===view||button.dataset.view==='home'&&inAiTasks)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
+  for(const button of document.querySelectorAll('#ai-task-navigation [data-view]')){if(button.dataset.view===view||view==='task'&&button.dataset.view==='history')button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
   if(focus)$('main').focus({preventScroll:true});
   window.scrollTo({top:0,behavior:'instant'});
   if(view==='home')void refreshTasks().catch(showError);
@@ -488,7 +491,15 @@ async function deleteSchedule(schedule) {
 }
 
 installProviderPresets();
+function setSidebarHidden(hidden){
+  document.body.classList.toggle('sidebar-hidden',hidden);
+  $('main-sidebar').hidden=hidden;
+  const toggle=$('toggle-sidebar');toggle.setAttribute('aria-expanded',String(!hidden));toggle.setAttribute('aria-label',hidden?'展开侧栏':'收起侧栏');toggle.title=hidden?'展开侧栏':'收起侧栏';toggle.textContent=hidden?'☰':'‹';
+}
+try{setSidebarHidden(localStorage.getItem('wucheng.sidebar.hidden')==='true');}catch{}
+$('toggle-sidebar').addEventListener('click',()=>{const hidden=!document.body.classList.contains('sidebar-hidden');setSidebarHidden(hidden);try{localStorage.setItem('wucheng.sidebar.hidden',String(hidden));}catch{}});
 for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>void navigate(button.dataset.view).catch(showError));
+$('nav-warehouse').addEventListener('click',()=>void navigate('business',{desk:{id:'warehouse'}}).catch(showError));
 document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();void navigate('business');});
 for(const button of document.querySelectorAll('[data-example]'))button.addEventListener('click',()=>{$('goal').value=button.dataset.example;$('goal').focus();});
 $('dismiss-error').addEventListener('click',()=>{$('error-banner').hidden=true;});

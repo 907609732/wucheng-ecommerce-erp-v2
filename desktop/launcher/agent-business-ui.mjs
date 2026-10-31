@@ -59,8 +59,8 @@ export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>
     const measurement=++measureEpoch,operation=epoch;
     updateLabels();const rect=surface.getBoundingClientRect(),covered=surface.hidden||document.hidden||$('business-more').open||rect.width<=0||rect.height<=0;
     if(covered){await hideNative();return;}
-    const header=document.querySelector('.app-header')?.getBoundingClientRect(),footer=document.querySelector('.development-preview')?.getBoundingClientRect();
-    document.documentElement.style.setProperty('--app-header-height',(header?.height||76)+'px');document.documentElement.style.setProperty('--preview-footer-height',(footer?.height||0)+'px');
+    const header=document.querySelector('body > .app-header')?.getBoundingClientRect(),footer=document.querySelector('.development-preview')?.getBoundingClientRect();
+    document.documentElement.style.setProperty('--app-header-height',(header?.height||0)+'px');document.documentElement.style.setProperty('--preview-footer-height',(footer?.height||0)+'px');
     const bounds={x:rect.x,y:rect.y,width:rect.width,height:rect.height},key=JSON.stringify(bounds);
     if(key!==lastBounds){await launcher?.bounds?.(bounds);if(measurement!==measureEpoch||operation!==epoch||!visible||opening)return;lastBounds=key;}
     if(measurement!==measureEpoch||operation!==epoch||!visible||opening)return;
@@ -128,6 +128,6 @@ export function createBusinessWorkspace({launcher=window.launcher,api,ready=()=>
   $('business-more').addEventListener('toggle',()=>{if($('business-more').open)void hideNative().catch(showError);else if(visible&&!opening)void measure().catch(showError);});
   $('task-business-back').addEventListener('click',()=>void onNavigate('business'));$('business-source-back').addEventListener('click',()=>void returnToSource().catch(showError));sourceRetry.addEventListener('click',()=>void locateSource());
   const unsubscribe=launcher?.onNavigate?.(value=>{if(!value?.id)return;if(Object.hasOwn(labels,value.id))void onNavigate('business',{desk:value});else if(value.id==='home')void onNavigate('business',{desk:{id:'overview'}});else if(['settings','logs'].includes(value.id))void onNavigate('settings');});
-  const observer=new ResizeObserver(()=>void measure().catch(showError));observer.observe(layout);observer.observe(document.querySelector('.app-header'));document.addEventListener('visibilitychange',()=>{if(visible)void measure().catch(showError);});
+  const observer=new ResizeObserver(()=>void measure().catch(showError));observer.observe(layout);const topHeader=document.querySelector('body > .app-header');if(topHeader)observer.observe(topHeader);document.addEventListener('visibilitychange',()=>{if(visible)void measure().catch(showError);});
   return {show,leave,measure,suspend:hideNative,hasReturn:()=>!!currentTask?.task,acceptTask(detail){if(detail?.task?.id===currentTask?.task?.id)summary(detail);},dispose(){disposed=true;observer.disconnect();clearInterval(taskTimer);unsubscribe?.();}};
 }

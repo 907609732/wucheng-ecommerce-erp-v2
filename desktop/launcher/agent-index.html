@@ -11,20 +11,26 @@
 <body>
   <aside class="development-preview" role="note">开发预览 · 功能未完成 · 未迁移正式账本</aside>
   <a class="skip-link" href="#main">跳到工作区</a>
-  <header class="app-header">
+
+  <div class="app-shell">
+    <button id="toggle-sidebar" class="sidebar-toggle" type="button" aria-label="收起侧栏" aria-expanded="true" aria-controls="main-sidebar" title="收起侧栏">‹</button>
+    <nav id="main-sidebar" class="main-nav" aria-label="工作台导航">
+      <button type="button" data-view="business" aria-current="page"><span aria-hidden="true">▦</span> 业务工作台</button>
+      <button type="button" id="nav-warehouse"><span aria-hidden="true">▤</span> 云仓业务</button>
+      <button type="button" data-view="home"><span aria-hidden="true">＋</span> AI 任务</button>
+      <button type="button" data-view="settings"><span aria-hidden="true">⚙</span> 设置</button>
+      <header class="app-header">
     <a class="brand" href="#business" aria-label="五成 ERP 首页"><img src="../assets/lingtu-icon.png" alt=""><span><strong>五成 ERP</strong><small>业务与 AI，在同一个工作台</small></span></a>
     <div class="identity"><span id="environment" class="environment">正在确认账本</span><span id="actor">正在确认身份</span><span id="connection" class="connection" role="status">连接中</span></div>
   </header>
-  <div class="app-shell">
-    <nav class="main-nav" aria-label="工作台导航">
-      <button type="button" data-view="business" aria-current="page"><span aria-hidden="true">▦</span> 业务工作台</button>
-      <button type="button" data-view="home"><span aria-hidden="true">＋</span> AI 任务</button>
-      <button type="button" data-view="history"><span aria-hidden="true">≡</span> 任务历史</button>
-      <button type="button" data-view="skills"><span aria-hidden="true">◇</span> 技能与提示词</button>
-      <button type="button" data-view="settings"><span aria-hidden="true">⚙</span> 设置</button>
       <p class="nav-note">执行过程可追溯<br>重要变更由你复核</p>
     </nav>
     <main id="main" tabindex="-1">
+      <nav id="ai-task-navigation" class="ai-task-navigation" aria-label="AI 任务功能" hidden>
+        <button type="button" data-view="home">新建任务</button>
+        <button type="button" data-view="history">任务历史</button>
+        <button type="button" data-view="skills">技能与提示词</button>
+      </nav>
       <div id="error-banner" class="error-banner" role="alert" hidden><span id="error-message"></span><button id="dismiss-error" type="button" aria-label="关闭错误提示">×</button></div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
       <section id="view-business" class="view business-view" aria-label="业务工作台">

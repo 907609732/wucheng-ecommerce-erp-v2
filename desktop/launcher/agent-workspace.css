@@ -18,3 +18,24 @@
 @media(max-width:800px){.skills-layout{grid-template-columns:1fr}.skills-list{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.business-toolbar{flex-wrap:wrap;gap:8px}.business-toolbar-actions{margin-left:auto}.skills-view>.section-heading{align-items:flex-start}.skills-filters{flex-wrap:wrap}}
 @media(max-width:640px){.main-nav{justify-content:flex-start;overflow-x:auto;white-space:nowrap}.main-nav button{flex-shrink:0;padding:8px 10px}.business-mode .app-shell{display:flex;flex-direction:column}.business-mode .main-nav{height:auto;padding:7px 10px;flex-shrink:0}.business-mode main{flex:1;width:100%;padding:12px 12px calc(12px + var(--preview-footer-height,40px))}.business-tabs{gap:2px}.business-tabs button{min-width:58px;padding:7px 12px}.business-toolbar-actions{gap:6px}.business-toolbar-actions button,.business-more summary{font-size:12px;min-height:34px;padding:6px 9px}.business-assistant{padding:15px}.skills-filters input,.skills-filters select{max-width:none}.skills-filters input{flex:1;min-width:150px}.skills-filters select{width:120px}.skills-editor{padding:16px}.goal-skill-choice{padding:10px 16px}.task-return-actions{flex-wrap:wrap;gap:5px 16px}.company-provider-row{align-items:stretch;flex-direction:column}.company-provider-row label{max-width:none}}
 @media(max-width:900px){#skills-workspace>.section-heading{align-items:flex-start;flex-direction:column}#skills-workspace>.section-heading .actions{margin-top:0}.skills-editor .actions{gap:7px}.skills-editor .actions button{font-size:12px}}
+
+/* Application identity lives below the navigation, leaving the workspace full height. */
+:root{--app-header-height:0px}
+.app-shell{min-height:100dvh}
+.main-nav{top:0;height:100dvh;overflow-y:auto}
+.main-nav .app-header{position:static;margin-top:auto;display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:16px 0 0;min-height:0;border-top:1px solid var(--border);border-bottom:0;background:transparent;backdrop-filter:none;flex-shrink:0}
+.main-nav .brand{gap:7px}.main-nav .brand img{width:28px;height:28px}.main-nav .brand strong{font-size:15px}.main-nav .brand small{display:block;font-size:10px;white-space:normal}
+.main-nav .identity{justify-content:flex-start;gap:6px;font-size:11px;overflow-wrap:anywhere}.main-nav .environment{max-width:100%;white-space:normal}
+.main-nav .nav-note{margin:0;padding-top:6px}
+.business-mode .app-shell{height:100dvh}
+@media(max-width:640px){.main-nav,.business-mode .main-nav{flex-wrap:wrap;height:auto}.main-nav .app-header{width:100%;margin-top:4px;flex-direction:row;align-items:center;justify-content:space-between;padding:8px 0}.main-nav .identity{width:auto;flex:1}.main-nav .brand small{display:none}}
+
+.ai-task-navigation{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px;padding-bottom:14px;border-bottom:1px solid var(--border)}.ai-task-navigation button[aria-current=page]{background:#e7f2fc;color:#116fae;border-color:#90b9d5;font-weight:600}
+.sidebar-toggle{position:fixed;top:8px;left:142px;z-index:40;width:28px;min-height:28px;padding:0;font-size:20px;line-height:26px;background:#fff}
+.main-nav{padding-top:46px}
+.sidebar-hidden .app-shell{grid-template-columns:minmax(0,1fr)}
+.sidebar-hidden .sidebar-toggle{left:8px}
+.sidebar-hidden main,.sidebar-hidden.business-mode main{padding-top:48px}
+@media(max-width:1100px){.sidebar-toggle{left:116px}}
+@media(max-width:900px){.sidebar-toggle{left:98px}}
+@media(max-width:640px){.sidebar-toggle{left:auto;right:8px}.main-nav,.business-mode .main-nav{padding-right:48px}.sidebar-hidden .sidebar-toggle{left:8px;right:auto}}
