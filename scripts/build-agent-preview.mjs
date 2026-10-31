@@ -106,11 +106,19 @@ export function thinHostPackage(pkg,{preview=false}={}){
  return host;
 }
 export function thinHostLock(pkg){return {name:pkg.name,version:pkg.version,lockfileVersion:3,requires:true,packages:{'':{name:pkg.name,version:pkg.version}}};}
-// The default NSIS 7z route extracts to a temporary tree, then copies every
-// file. Use the supported single-pass ZIP route for external Node resources.
-// Disable differential packaging as well, or electron-builder still creates
-// a 7z archive despite configuring the installer to extract ZIP.
-export function previewInstallerOptions(){return {oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,useZip:true,differentialPackage:false};}
+// The default 7z route makes a temporary file tree and then copies it. ZIP is
+// also unsuitable: this complete runtime exceeds the legacy unzip plugin's
+// ZIP32 entry limit once directory entries are counted. Use the upstream
+// installApplicationFiles APP_BUILD_DIR branch instead (native NSIS File /r).
+// It writes each file directly while retaining the normal upgrade/uninstaller.
+export function previewInstallerOptions(include){return {oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,useZip:false,differentialPackage:false,include};}
+export function createPreviewInstallerInclude(output,prepackaged){
+ if(!path.isAbsolute(output)||!path.isAbsolute(prepackaged)||/[\r\n"$]/.test(prepackaged))throw Error('Invalid direct installer path');
+ const upstream=fs.readFileSync(path.join(root,'node_modules/app-builder-lib/templates/nsis/include/installer.nsh'),'utf8');
+ if(!upstream.includes('!ifdef APP_BUILD_DIR')||!upstream.includes('File /r "${APP_BUILD_DIR}\\*.*"'))throw Error('Upstream direct NSIS installation branch requires review');
+ const file=path.join(output,'preview-direct-files.nsh');
+ fs.writeFileSync(file,'; Native NSIS file installation, without temporary archive extraction.\n!define APP_BUILD_DIR "'+prepackaged.replaceAll('\\','/')+'"\n',{flag:'wx'});return file;
+}
 function copyTree(source,dest){
  fs.cpSync(source,dest,{recursive:true,filter:file=>{
   const rel=slash(path.relative(source,file));if(fs.lstatSync(file).isSymbolicLink())throw Error('Linked preview payload forbidden');
@@ -152,11 +160,16 @@ export async function buildPreview(inputs){
  if(gitCommit()!==validated.sourceCommit||!same(validated.sourceDigests,{business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()}))throw Error('Source changed during preview preparation');
  if(digest(validated.scanSummary)!==validated.scanSummarySha256)throw Error('Strict public scan evidence changed during preview preparation');
  const configFile=path.join(output,'preview-builder.cjs'),artifactName=`WuchengAgentPreview-Setup-\${version}-preview-${validated.sourceCommit.slice(0,12)}-\${arch}.\${ext}`;
- const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions()};
+ const installerInclude=createPreviewInstallerInclude(output,prepackaged);
+ const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions(installerInclude)};
  fs.writeFileSync(configFile,'module.exports='+JSON.stringify(config),{flag:'wx'});
  fs.writeFileSync(path.join(output,'validated-inputs.json'),JSON.stringify({stage:validated.stage,sourceCommit:validated.sourceCommit,sourceDigests:validated.sourceDigests,stageManifestSha256:validated.manifestSha256,scanSummary:validated.scanSummary,scanSummarySha256:validated.scanSummarySha256,scannerSha256,rulesSha256,scanConfigSha256,classificationPolicySha256,audit:validated.audit,metadata},null,2),{flag:'wx'});
  const builder=path.join(root,'node_modules/electron-builder/cli.js'),logFile=path.join(output,'builder.log'),log=fs.openSync(logFile,'wx');let result;
- try{result=spawnSync(process.execPath,[builder,'--projectDir',appRoot,'--prepackaged',prepackaged,'--config',configFile,'--win','--publish','never'],{cwd:root,stdio:['ignore',log,log],windowsHide:true});}finally{fs.closeSync(log);}
+ // Upstream still prepares an app archive and uses its size as a truncation
+ // guard even with APP_BUILD_DIR. Keep that unused archive compressed, rather
+ // than storing it (a stored archive would falsely fail that guard). Level 5
+ // bounds wasted build CPU; native NSIS zlib compression is independent.
+ try{result=spawnSync(process.execPath,[builder,'--projectDir',appRoot,'--prepackaged',prepackaged,'--config',configFile,'--win','--publish','never'],{cwd:root,stdio:['ignore',log,log],windowsHide:true,env:{...process.env,ELECTRON_BUILDER_COMPRESSION_LEVEL:'5'}});}finally{fs.closeSync(log);}
  fs.writeFileSync(path.join(output,'builder-result.json'),JSON.stringify({exitCode:result.status,signal:result.signal,spawnErrorCode:result.error?.code||null},null,2));
  if(result.status!==0)throw Error('Preview installer build failed; private builder log: '+logFile);
  const file=path.join(output,'output',`WuchengAgentPreview-Setup-${validated.version}-preview-${validated.sourceCommit.slice(0,12)}-x64.exe`);
