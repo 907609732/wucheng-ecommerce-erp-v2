@@ -14,7 +14,7 @@ function fixture(t){
  fs.writeFileSync(path.join(pkg,'package.json'),JSON.stringify({name:'@fastify/reply-from',version:'12.8.0'}));
  fs.writeFileSync(path.join(pkg,'index.js'),'module.exports = {}');
  fs.writeFileSync(path.join(pkg,'LICENSE'),'preserve this license');
- for(const name of ['fastify.cert','fastify.key','file.txt','localhost.cert','localhost.key'])fs.writeFileSync(path.join(fixtures,name),'public test fixture');
+ for(const name of ['fastify.cert','fastify.key','file.txt','localhost.cert','localhost.key'])fs.writeFileSync(path.join(fixtures,name),fs.readFileSync(path.resolve('node_modules/@fastify/reply-from/test/fixtures',name)));
  return {stage,pkg,fixtures};
 }
 
