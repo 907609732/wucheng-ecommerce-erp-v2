@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {setImmediate as yieldToHost} from 'node:timers/promises';
+import {AGENT_RESOURCE_FORMAT_V2} from './resource-layout.mjs';
 
 export const activationCancelled=()=>Object.assign(Error('已取消准备工作台'),{name:'AbortError',code:'BETA_ACTIVATION_CANCELLED'});
 export function createActivationResourceOperation(resourcesDir,{signal,onProgress,batchSize=128}={}){
@@ -40,7 +41,7 @@ export function createActivationResourceOperation(resourcesDir,{signal,onProgres
 
 export async function verifyActivationResources(resourcesDir,manifest,options={}){
  const res=path.resolve(resourcesDir),operation=options.operation||createActivationResourceOperation(res,options);
- const entries=Object.entries(manifest.payloadHashes).filter(([rel])=>/^(?:apps\/|vendor\/|workbench-gateway\/)/.test(rel));
+ const entries=Object.entries(manifest.payloadHashes).filter(([rel])=>manifest.format===AGENT_RESOURCE_FORMAT_V2||/^(?:apps\/|vendor\/|workbench-gateway\/)/.test(rel));
  await operation.checkpoint({phase:'verify',processed:0,total:entries.length},{force:true});let processed=0;
  for(const [rel,digest]of entries){
   if(!/^[a-f0-9]{64}$/.test(digest)||rel.split('/').some(part=>!part||part==='.'||part==='..')||/[\\:\x00-\x1f]/.test(rel))throw Error('Beta 资源路径无效');

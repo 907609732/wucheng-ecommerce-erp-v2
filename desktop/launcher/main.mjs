@@ -36,12 +36,15 @@ import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent
 import {createDesktopUiSessions} from '../agent-host/desktop-ui-sessions.mjs';
 import {betaProcessesRunning} from '../agent-host/startup.mjs';
 import {createPreparationWindow,createPreparationShutdown,formatPreparationProgress} from './preparation-window.mjs';
+import {packagedAgentResources} from '../agent-host/resource-layout.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
-let location,agentPaths,agentHost,agentGateway,hostIdentity,agentHostStarting;
+let location,agentPaths,agentHost,agentGateway,hostIdentity,agentHostStarting,packagedResources;
 try{
+  packagedResources=app.isPackaged?packagedAgentResources({resourcesPath:process.resourcesPath,launcherDirectory:here}):null;
   agentPaths=agentBetaPaths();
+  if(packagedResources?.layout==='agent-beta-resources/v2')Object.assign(agentPaths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
   const registryArgument=process.argv.find(value=>value.startsWith('--registry-file='))?.slice('--registry-file='.length);
   if(registryArgument&&!path.isAbsolute(registryArgument))throw Error('注册表必须使用完整路径');
   if(registryArgument&&path.resolve(registryArgument)!==agentPaths.registryFile)throw Error('测试版不能使用正式账本注册表');
@@ -236,7 +239,7 @@ async function ensureGateway(){
 }
 async function getAgentHost(){
   if(agentHost)return agentHost;
-  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,...(app.isPackaged?{engineResourceDir:path.join(process.resourcesPath,'workbench-gateway','desktop','agent-runtime')}:{}),onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
+  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,...(packagedResources?{engineResourceDir:packagedResources.engineResourceDir}:{}),onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
   return agentHostStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};
@@ -273,7 +276,7 @@ if (acquired) app.whenReady().then(async () => {
       const pin=JSON.parse(fs.readFileSync(path.join(here,'../agent-host/packaged-manifest.json'),'utf8'));
       const {createAgentActivation}=await import('../agent-host/activation.mjs');
       activationAbort.signal.throwIfAborted();
-      const pending=createAgentActivation({paths:agentPaths,resourcesDir:process.resourcesPath,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths),signal:activationAbort.signal,onProgress:reportPreparation})();
+      const pending=createAgentActivation({paths:agentPaths,resourcesDir:packagedResources.resourcesDir,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths),signal:activationAbort.signal,onProgress:reportPreparation})();
       activationPromise=pending;
       try{activation=await pending;}finally{if(activationPromise===pending)activationPromise=undefined;}
       activationAbort.signal.throwIfAborted();
@@ -338,7 +341,7 @@ if (acquired) app.whenReady().then(async () => {
       if(!modules.state().packages.warehouse)throw Object.assign(Error('云仓程序文件缺失，请更新或修复工作台'),{code:'MODULE_NOT_INSTALLED'});
       verifyProfile('warehouse');
       const env={...process.env,LINGTU_MANAGED_MODULE:'1'};delete env.ELECTRON_RUN_AS_NODE;
-      const child=spawn(services.config('warehouse').exe,['--cli',...legacyCliArgs(request),'--user-data-dir='+services.config('warehouse').dataDir],{env,stdio:['ignore','pipe','pipe'],windowsHide:true});
+      const child=spawn(services.config('warehouse').exe,[...(services.componentArgs?.('warehouse')||[]),'--cli',...legacyCliArgs(request),'--user-data-dir='+services.config('warehouse').dataDir],{env,stdio:['ignore','pipe','pipe'],windowsHide:true});
       return readCliChildResult(child);
     };
     const dispatch=createWorkbenchDispatcher({executeLegacy,version:hostVersion});
@@ -543,7 +546,7 @@ if (acquired) app.whenReady().then(async () => {
       if(services.config(id).managed)return services.request(id,'/open',{method:'POST',body:{confirm:true}});
       if(cap?.running){
         const env={...process.env,LINGTU_REGISTRY_PATH:services.registryFile};delete env.ELECTRON_RUN_AS_NODE;
-        const child=spawn(services.config(id).exe,[],{env,detached:true,stdio:'ignore',windowsHide:true});
+        const child=spawn(services.config(id).exe,services.componentArgs?.(id)||[],{env,detached:true,stdio:'ignore',windowsHide:true});
         await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
       }
       return {opened:true};

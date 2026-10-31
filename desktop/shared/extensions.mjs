@@ -99,7 +99,10 @@ export async function invokeTrustedExtension(extension, actionName, params, cont
     throw new Error("该扩展操作会写入或发送数据，必须 confirmSideEffect=true");
   }
   const module = await import(`${pathToFileURL(extension.entry).href}?v=${encodeURIComponent(extension.version)}`);
-  const handler = module.actions?.[actionName];
+  const actions = extension.id === 'lingtu.desks' && context.services && typeof module.createActions === 'function'
+    ? module.createActions(context.services)
+    : module.actions;
+  const handler = actions?.[actionName];
   if (typeof handler !== "function") throw new Error("扩展入口未导出对应 action 函数");
   const result = await handler(params && typeof params === "object" ? params : {}, {
     apiVersion: EXTENSION_API_VERSION,

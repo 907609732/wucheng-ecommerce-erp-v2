@@ -12,10 +12,18 @@ function content(file){const stat=fs.statSync(file),old=cache.get(file);if(old&&
 function packageFile(file){const value=file.replaceAll('\\','/'),at=value.lastIndexOf('/node_modules/');if(at<0)return null;const rest=value.slice(at+14),parts=rest.split('/'),name=parts[0].startsWith('@')?parts.slice(0,2).join('/'):parts[0],directory=value.slice(0,at+14)+name;try{const pkg=JSON.parse(fs.readFileSync(path.join(directory,'package.json'),'utf8'));return {directory,pkgName:pkg.name,version:pkg.version,relativeFile:rest.slice(name.length+1)};}catch{return null;}}
 const keys=(value,expected)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...expected].sort().join('|');
 function resourceManifest(value){
- if(!keys(value,['format','engines','modules','vendor','purchaseMobilePort','warehouseEntries','sourceDigests','approvalSha256','payloadHashes'])||value.format!=='agent-beta-resources/v1'||value.purchaseMobilePort!==27380||!hex(value.approvalSha256))return false;
+ const v2=value?.format==='agent-beta-resources/v2',fields=['format','engines','modules','vendor','purchaseMobilePort','warehouseEntries','sourceDigests','approvalSha256','payloadHashes',...(v2?['sharedElectron']:[])];
+ if(!keys(value,fields)||!['agent-beta-resources/v1','agent-beta-resources/v2'].includes(value.format)||value.purchaseMobilePort!==27380||!hex(value.approvalSha256))return false;
+ if(v2&&(!keys(value.sharedElectron,['version','components'])||value.sharedElectron.version!=='44.7.0'||JSON.stringify(value.sharedElectron.components)!==JSON.stringify(['warehouse','exporter'])))return false;
  if(!keys(value.engines,['codex','hermes'])||Object.values(value.engines).some(e=>!keys(e,['entry','sha256'])||!hex(e.sha256)||typeof e.entry!=='string'))return false;
  if(!keys(value.modules,['warehouse','purchase','sales','overview','exporter']))return false;
- for(const [id,m]of Object.entries(value.modules)){if(!keys(m,id==='warehouse'?['root','version']:id==='exporter'?['root','version','entries','runtime']:['root','version','entries'])||m.root!=='apps/'+id||!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(m.version))return false;if(id!=='warehouse'&&(!Array.isArray(m.entries)||m.entries.some(p=>typeof p!=='string')))return false;if(id==='exporter'&&(!keys(m.runtime,['executable','sha256'])||!hex(m.runtime.sha256)))return false;}
+ for(const [id,m]of Object.entries(value.modules)){
+  const native=id==='warehouse'||id==='exporter',expected=['root','version',...(id!=='warehouse'?['entries']:[]),...(id==='exporter'||v2&&native?['runtime']:[])];
+  if(!keys(m,expected)||m.root!=='apps/'+id||!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(m.version))return false;
+  if(id!=='warehouse'&&(!Array.isArray(m.entries)||m.entries.some(p=>typeof p!=='string')))return false;
+  if(v2&&native&&(!keys(m.runtime,['kind','app','sha256'])||m.runtime.kind!=='shared-electron'||m.runtime.app!=='runtime/resources/app.asar'||!hex(m.runtime.sha256)))return false;
+  if(!v2&&id==='exporter'&&(!keys(m.runtime,['executable','sha256'])||!hex(m.runtime.sha256)))return false;
+ }
  if(!keys(value.vendor,['catalogSha256','components'])||!hex(value.vendor.catalogSha256)||!Array.isArray(value.vendor.components)||value.vendor.components.length!==2||value.vendor.components.some(c=>!keys(c,['id','version','hostRange','archive','bytes','sha256'])||!hex(c.sha256)))return false;
  if(!keys(value.sourceDigests,['business','desktop','global'])||!keys(value.sourceDigests.business,['warehouse','purchase','sales','overview','exporter'])||![value.sourceDigests.desktop,value.sourceDigests.global,...Object.values(value.sourceDigests.business)].every(hex)||!Array.isArray(value.warehouseEntries)||value.warehouseEntries.some(p=>typeof p!=='string'))return false;
  return value.payloadHashes&&typeof value.payloadHashes==='object'&&!Array.isArray(value.payloadHashes)&&Object.entries(value.payloadHashes).every(([p,d])=>p&&!/[\\:\x00-\x1f]/.test(p)&&p.split('/').every(s=>s&&s!=='.'&&s!=='..')&&hex(d));

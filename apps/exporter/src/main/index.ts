@@ -1,4 +1,5 @@
 import { app,BrowserWindow,dialog,ipcMain,Menu,shell,nativeImage } from 'electron'
+import {readComponentContext} from '../../../../desktop/shared/component-context.mjs'
 import {sendToProcurement,startOrderIntegration} from './procurement'
 import {DatabaseSync} from 'node:sqlite'
 import {transferSnapshot} from '../core/order-transfer'
@@ -23,6 +24,9 @@ import { checkLatest,compareVersions } from './updater'
 import { reportLaunch } from './analytics'
 import {chooseUserData} from './user-data'
 const root=dirname(fileURLToPath(import.meta.url))
+const componentContext=readComponentContext('exporter')
+const componentAppRoot=componentContext?.appRoot||app.getAppPath()
+const componentVersion=componentContext?.version||app.getVersion()
 app.setName('灵兔 AI 电商平台买家订单导出工具')
 if(process.env.LINGTU_EXPORTER_DATA_DIR)app.setPath('userData',resolve(process.env.LINGTU_EXPORTER_DATA_DIR))
 else if(process.env.ORDERDESK_TEST_DATA)app.setPath('userData',resolve(process.env.ORDERDESK_TEST_DATA))
@@ -81,24 +85,24 @@ app.whenReady().then(async()=>{
       else process.stdout.write(JSON.stringify({tasks:tasks.map(t=>({id:t.id,platform:t.platform,count:t.count,status:t.status,listOutcome:t.listOutcome||'pending',from:t.from,to:t.to}))})+'\n')
     }finally{db.close();app.quit()}return
   }
-  diagnostics=new Diagnostics(app.getPath('userData'),app.getVersion())
+  diagnostics=new Diagnostics(app.getPath('userData'),componentVersion)
   journal=new ExecutionLog(executionChanged);diagnostics.onEvent=journal.accept
   await mkdir(app.getPath('userData'),{recursive:true});store=new Store(join(app.getPath('userData'),'orders.sqlite'))
   if(store.setting('loggingEnabled')==='true')try{diagnostics.setEnabled(true)}catch{/* The settings screen exposes log storage failures. */}
-  diagnostics.event('app.start',{version:app.getVersion()})
+  diagnostics.event('app.start',{version:componentVersion})
   Menu.setApplicationMenu(null)
   win=new BrowserWindow({width:1320,height:870,minWidth:1120,minHeight:740,show:false,title:'灵兔 AI 电商平台买家订单导出工具',backgroundColor:'#f5f5f7',titleBarStyle:'hidden',...(process.platform==='win32'?{titleBarOverlay:{color:'#f5f5f7',symbolColor:'#52525b',height:44}}:{}),icon:nativeImage.createFromPath(join(root,'../../build/icon.png')),webPreferences:{preload:join(root,'../preload/index.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}})
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',e=>e.preventDefault())
   win.webContents.on('render-process-gone',(_e,d)=>diagnostics.event('renderer.gone',{reason:d.reason,exitCode:d.exitCode},undefined,'error'))
   win.webContents.on('preload-error',(_e,_path,error)=>diagnostics.event('renderer.preload_failed',{},error))
   collector=new Collector(win,store,change,diagnostics);proxy=new OrderProxy(join(app.getPath('userData'),'proxy-ca'),(p,b)=>collector.accept(p,b),diagnostics)
-  const integrationServer=startOrderIntegration(store,{root:app.getAppPath(),dataDir:app.getPath('userData'),version:app.getVersion(),busy:()=>!!collector.runs.size||exporting,stop:()=>app.quit(),activate:async()=>{moduleMaintenance=false},open:async()=>{win.show();win.focus()},workbench:{
+  const integrationServer=startOrderIntegration(store,{root:componentAppRoot,dataDir:app.getPath('userData'),version:componentVersion,busy:()=>!!collector.runs.size||exporting,stop:()=>app.quit(),activate:async()=>{moduleMaintenance=false},open:async()=>{win.show();win.focus()},workbench:{
     invoke:async(name,...args)=>{const handler=businessHandlers.get(name);if(!handler)throw new Error('业务接口尚未就绪');if(['resume','retry','enrichDetails'].includes(name)&&store.get(String(args[0])).historicalOnly)throw new Error('迁移历史仅作为来源证据，请创建新采集任务');if(['login','openOrder'].includes(name)){win.show();win.focus();}return handler(...args)},
     exportFile:generateExport,transfer:async(id,actor)=>{idle();collector.hide();return sendToProcurement(store,id,actor)},busy:()=>!!collector.runs.size||exporting,changed:change
   }})
   app.once('before-quit',()=>integrationServer.close())
   bind('sendToProcurement',async(id:string)=>{idle();collector.hide();return sendToProcurement(store,id)})
-  bind('state',()=>({platforms,tasks:store.tasks(),outputDir:store.setting('outputDir'),version:app.getVersion(),logging:diagnostics.state(),showExecutionLog:store.setting('showExecutionLog')!=='false',proxy:{running:proxy.running,port:proxy.port,certificate:proxy.certificate},update:latestUpdate}))
+  bind('state',()=>({platforms,tasks:store.tasks(),outputDir:store.setting('outputDir'),version:componentVersion,logging:diagnostics.state(),showExecutionLog:store.setting('showExecutionLog')!=='false',proxy:{running:proxy.running,port:proxy.port,certificate:proxy.certificate},update:latestUpdate}))
   bind('executionLogs',(platform:PlatformId)=>journal.snapshot(target(platform)))
   bind('setExecutionLogVisible',(visible:unknown)=>{if(typeof visible!=='boolean')throw new Error('执行日志开关参数无效');store.setting('showExecutionLog',String(visible));change()})
   bind('setLogging',(enabled:unknown)=>{
@@ -130,12 +134,12 @@ app.whenReady().then(async()=>{
   bind('proxyStop',()=>{proxy.stop();change()})
   bind('certificate',async()=>{if(!proxy.running)throw new Error('请先开启辅助采集');await shell.openPath(proxy.certificate)})
   bind('proxySettings',()=>shell.openExternal('ms-settings:network-proxy'))
-  bind('checkUpdate',async()=>{const latest=await checkLatest();if(latest&&compareVersions(latest.latest,app.getVersion())>0){latestUpdate={...latest,current:app.getVersion()};if(win&&!win.isDestroyed())win.webContents.send('desk:updateAvailable',latestUpdate)}return latestUpdate})
+  bind('checkUpdate',async()=>{const latest=await checkLatest();if(latest&&compareVersions(latest.latest,componentVersion)>0){latestUpdate={...latest,current:componentVersion};if(win&&!win.isDestroyed())win.webContents.send('desk:updateAvailable',latestUpdate)}return latestUpdate})
   bind('openUpdate',()=>{if(latestUpdate?.url)shell.openExternal(latestUpdate.url)})
   bind('openWebsite',()=>{if(WEBSITE_URL)shell.openExternal(WEBSITE_URL)})
   bind('openRepository',()=>shell.openExternal(REPOSITORY_URL))
   // 后台记录启动、上报日活、检查更新；均不影响正常使用，失败静默。
-  if(!process.env.ORDERDESK_TEST_DATA&&!process.env.LINGTU_MANAGED_MODULE)void (async()=>{const installId=store.installId();store.logLaunch(app.getVersion());await reportLaunch(installId,app.getVersion());const latest=await checkLatest();if(latest&&compareVersions(latest.latest,app.getVersion())>0){latestUpdate={...latest,current:app.getVersion()};if(win&&!win.isDestroyed())win.webContents.send('desk:updateAvailable',latestUpdate)}})()
+  if(!process.env.ORDERDESK_TEST_DATA&&!process.env.LINGTU_MANAGED_MODULE)void (async()=>{const installId=store.installId();store.logLaunch(componentVersion);await reportLaunch(installId,componentVersion);const latest=await checkLatest();if(latest&&compareVersions(latest.latest,componentVersion)>0){latestUpdate={...latest,current:componentVersion};if(win&&!win.isDestroyed())win.webContents.send('desk:updateAvailable',latestUpdate)}})()
   win.once('ready-to-show',()=>{if(!moduleMaintenance)win.show()})
   if(process.env.ELECTRON_RENDERER_URL)await win.loadURL(process.env.ELECTRON_RENDERER_URL);else await win.loadFile(join(root,'../renderer/index.html'))
   if(!moduleMaintenance)win.show()

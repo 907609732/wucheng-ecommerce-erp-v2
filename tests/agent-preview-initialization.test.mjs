@@ -10,6 +10,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {agentBetaPaths,assertPreviewPaths,assertPreviewLocalMode,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
 import {initializePreviewLedgers} from '../desktop/agent-host/preview-ledgers.mjs';
 import {verifyActivationResources} from '../desktop/agent-host/activation.mjs';
+import {AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2} from '../desktop/agent-host/resource-layout.mjs';
 const repo=path.resolve(import.meta.dirname,'..'),require=createRequire(path.join(repo,'apps/exporter/package.json'));
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function fixture(t){const local=fs.mkdtempSync(path.join(os.tmpdir(),'erp-preview-init-')),previous=process.env.LOCALAPPDATA;process.env.LOCALAPPDATA=local;t.after(()=>{if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(local,{recursive:true,force:true});});return {local,paths:agentBetaPaths({localAppData:local,preview:true,root:undefined})};}
@@ -23,18 +24,19 @@ test('preview identity, root and ports are fixed independently from Beta',t=>{
  assert.doesNotThrow(()=>assertPreviewLocalMode(paths,{mode:'standalone'}));for(const mode of ['server','client',undefined])assert.throws(()=>assertPreviewLocalMode(paths,{mode}),{code:'PREVIEW_LOCAL_ONLY'});assert.doesNotThrow(()=>assertPreviewLocalMode(beta,{mode:'server'}));
 });
 
-test('real domain stores create only new empty preview ledgers and preserve them on reuse',async t=>{
+for(const format of [AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2])test('real domain stores create only new empty preview ledgers and preserve them on reuse: '+format,async t=>{
  const {local,paths}=fixture(t),resources=path.join(local,'resources');prepareAgentProfile(paths);
  const registry=assertAgentRegistry(paths),node=path.join(paths.programs,'node-runtime','node.exe');fs.mkdirSync(path.dirname(node),{recursive:true});fs.copyFileSync(process.execPath,node);for(const value of Object.values(registry))value.nodePath=node;fs.writeFileSync(paths.registryFile,JSON.stringify(registry));
  const write=(rel,content)=>{const file=path.join(resources,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,content);};
  write('package.json','{"type":"module"}');
- for(const id of ['purchase','sales','overview']){const rel='apps/'+id+'/lib/'+(id==='sales'?'db.mjs':'store.mjs');write('workbench-gateway/'+rel,'export {openStore} from '+JSON.stringify(pathToFileURL(path.join(repo,rel)).href)+';');}
- write('workbench-gateway/core/erp/db.js','export {getDb,closeDb} from '+JSON.stringify(pathToFileURL(path.join(repo,'core/erp/db.js')).href)+';');
+ const prefix=format===AGENT_RESOURCE_FORMAT_V2?'':'workbench-gateway/';
+ for(const id of ['purchase','sales','overview']){const rel='apps/'+id+'/lib/'+(id==='sales'?'db.mjs':'store.mjs');write(prefix+rel,'export {openStore} from '+JSON.stringify(pathToFileURL(path.join(repo,rel)).href)+';');}
+ write(prefix+'core/erp/db.js','export {getDb,closeDb} from '+JSON.stringify(pathToFileURL(path.join(repo,'core/erp/db.js')).href)+';');
  await require('esbuild').build({entryPoints:[path.join(repo,'apps/exporter/src/main/preview-ledger.ts')],outfile:path.join(resources,'apps/exporter/out/main/preview-ledger.js'),bundle:true,platform:'node',format:'esm'});
- assert.deepEqual(initializePreviewLedgers({paths,resourcesDir:resources}).created,['warehouse','purchase','sales','overview','exporter']);
+ assert.deepEqual(initializePreviewLedgers({paths,resourcesDir:resources,manifest:{format}}).created,['warehouse','purchase','sales','overview','exporter']);
  const files={warehouse:['workspace/data/erp.sqlite','inventory_snapshots'],purchase:['purchases.sqlite','orders'],sales:['sales.sqlite','ledger'],overview:['overview.sqlite','bills'],exporter:['orders.sqlite','tasks']},before={};
  for(const [id,[name,table]] of Object.entries(files)){const file=path.join(paths.data,id,...name.split('/')),db=new DatabaseSync(file,{readOnly:true});assert.equal(Number(db.prepare('SELECT COUNT(*) n FROM '+table).get().n),0);db.close();before[id]=hash(file);}
- assert.deepEqual(initializePreviewLedgers({paths,resourcesDir:resources}).created,[]);
+ assert.deepEqual(initializePreviewLedgers({paths,resourcesDir:resources,manifest:{format}}).created,[]);
  for(const [id,[name]] of Object.entries(files))assert.equal(hash(path.join(paths.data,id,...name.split('/'))),before[id]);
  assert.equal(fs.existsSync(path.join(local,'WuchengAgentBeta')),false);
 });

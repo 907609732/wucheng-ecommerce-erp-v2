@@ -9,6 +9,15 @@ const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const portOpen=port=>new Promise(resolve=>{const socket=net.createConnection({host:'127.0.0.1',port});const done=value=>{socket.destroy();resolve(value);};socket.setTimeout(1000,()=>done(true));socket.once('connect',()=>done(true));socket.once('error',()=>done(false));});
 const processAlive=pid=>{if(!Number.isSafeInteger(pid)||pid<=0)return false;try{process.kill(pid,0);return true;}catch(e){return e.code==='EPERM';}};
 const startError=(message,code='SERVICE_START_FAILED')=>Object.assign(Error(message),{code});
+function sharedNative(id,config,trustedExecutable,trustedVersion){
+ if(config.sharedElectron!==true)return false;
+ if(!['warehouse','exporter'].includes(id)||config.managed!==true||trustedVersion!=='44.7.0'||typeof trustedExecutable!=='string'||!path.isAbsolute(trustedExecutable)||config.exe!==trustedExecutable)throw startError('共享 Electron 未绑定可信打包宿主','SHARED_ELECTRON_NOT_BOUND');
+ return true;
+}
+function nativeRuntimeIdentity(id,config,record){
+ if(record?.id!==config.id||record.apiVersion!==1||record.version!==config.version||typeof record.root!=='string'||path.resolve(record.root).toLowerCase()!==path.resolve(config.root,'resources','app.asar').toLowerCase()||typeof record.dataDir!=='string'||path.resolve(record.dataDir).toLowerCase()!==path.resolve(config.dataDir).toLowerCase()||!Number.isSafeInteger(record.pid)||record.pid<=0)throw startError('共享组件进程身份、版本或数据目录不符','SHARED_COMPONENT_IDENTITY_MISMATCH');
+ return record.pid;
+}
 const readStartLock=file=>{try{const text=fs.readFileSync(file,'utf8').trim();if(/^\d+$/.test(text))return {legacy:true,ownerPid:Number(text)};const value=JSON.parse(text);if(value.schemaVersion!==1||typeof value.token!=='string'||!Number.isSafeInteger(value.ownerPid)||value.childPid!==null&&!Number.isSafeInteger(value.childPid))throw Error();return value;}catch(e){if(e.code==='ENOENT')return null;throw startError('扩展启动记录损坏，已阻止重复启动；请检查运行日志和启动记录');}};
 const activeStart=record=>record&&(record.childPid?processAlive(record.childPid):processAlive(record.ownerPid));
 const writeStartLock=(file,record)=>{const temporary=file+'.'+randomUUID()+'.tmp';try{fs.writeFileSync(temporary,JSON.stringify(record),{flag:'wx'});fs.renameSync(temporary,file);}finally{try{fs.unlinkSync(temporary);}catch{}}};
@@ -37,9 +46,11 @@ const defaults=()=>{
   };
 };
 export class ServiceManager{
-  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false}={}){
+  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false,sharedElectronExecutable,sharedElectronVersion}={}){
     if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<50||startupTimeoutMs>300000||!Number.isInteger(startupPollMs)||startupPollMs<10||startupPollMs>1000)throw Error('扩展启动等待配置无效');
     this.startupTimeoutMs=startupTimeoutMs;this.startupPollMs=startupPollMs;this.agentManaged=agentManaged===true;
+    this.sharedElectronExecutable=sharedElectronExecutable;
+    this.sharedElectronVersion=sharedElectronVersion;
     const explicitRegistry=registryFile||process.env.LINGTU_REGISTRY_PATH,location=explicitRegistry?null:getWorkbenchLocation();
     this.registryFile=explicitRegistry||location.registryFile;this.pending=new Map();this.errors=new Map();
     this.policyFile=policyFile||(!explicitRegistry?path.join(location.profile,'workbench-server','access-policy.json'):undefined);
@@ -48,19 +59,24 @@ export class ServiceManager{
     const base=defaults();let custom={};if(fs.existsSync(this.registryFile))custom=JSON.parse(fs.readFileSync(this.registryFile,'utf8'));
     if(!base[id])throw Error('未登记的扩展');
     const c={...base[id],...custom[id]};
+    if(c.sharedElectron!==undefined&&typeof c.sharedElectron!=='boolean')throw startError('共享 Electron 标记无效','SHARED_ELECTRON_NOT_BOUND');
+    sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion);
     if(id==='sales'){try{const p=Number(fs.readFileSync(path.join(c.dataDir,'server.port'),'utf8'));if(p>=17869&&p<=17889)c.port=p;}catch{}}
     if(!Number.isInteger(c.port)&&!['exporter','warehouse'].includes(id))throw Error('扩展端口配置无效');return c;
   }
+  componentArgs(id){const c=this.config(id);return sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion)?['--agent-component='+id]:[];}
   async capabilities(id){
     const c=this.config(id);if(['exporter','warehouse'].includes(id)){
-      const installed={id:c.id,installed:fs.existsSync(c.exe),root:c.root,dataDir:c.dataDir,exe:c.exe};
-      let runtime;try{runtime=JSON.parse(fs.readFileSync(path.join(c.dataDir,c.runtimeFile||'.integration-runtime.json'),'utf8'));}catch{return installed;}
+      const shared=sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion),installed={id:c.id,installed:fs.existsSync(c.exe)&&(!shared||fs.existsSync(path.join(c.root,'resources','app.asar'))),root:c.root,dataDir:c.dataDir,exe:c.exe,...(shared?{sharedElectron:true,component:id}:{})};
+      let runtime;try{runtime=JSON.parse(fs.readFileSync(path.join(c.dataDir,c.runtimeFile||'.integration-runtime.json'),'utf8'));}catch(error){if(shared&&error.code!=='ENOENT')throw startError('共享组件运行记录损坏','SHARED_COMPONENT_IDENTITY_MISMATCH');return installed;}
+      if(shared)installed.pid=nativeRuntimeIdentity(id,c,runtime);
       if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.url||''))throw Error('导出台本机接口地址无效');
       let cap;try{const response=await fetch(runtime.url+'/api/integration/v1/capabilities',{signal:AbortSignal.timeout(1500),redirect:'error'});cap=await response.json();}catch{return installed;}
       if(cap.id!==c.id||cap.apiVersion!==1||path.resolve(cap.dataDir).toLowerCase()!==path.resolve(c.dataDir).toLowerCase())throw Error('扩展服务身份或数据目录不符');
       if(c.managed&&path.resolve(cap.root).toLowerCase()!==path.resolve(c.root,'resources','app.asar').toLowerCase())throw Error('扩展进程来自其他安装目录');
       const version=c.managed?c.version:JSON.parse(fs.readFileSync(path.join(c.root,'package.json'),'utf8')).version;
       if(cap.version!==version)throw Error('导出台运行版本与工作区不符，请退出后安装本次更新包');
+      if(shared&&nativeRuntimeIdentity(id,c,cap)!==runtime.pid)throw startError('共享组件运行记录与接口 PID 不符','SHARED_COMPONENT_IDENTITY_MISMATCH');
       return {...installed,...cap,running:true};
     }
     let response;try{response=await fetch(`http://127.0.0.1:${c.port}/api/integration/v1/capabilities`,{signal:AbortSignal.timeout(1500),redirect:'error'});}catch{return null;}
@@ -97,7 +113,8 @@ export class ServiceManager{
       if(id==='exporter'&&c.managed)env.LINGTU_EXPORTER_DATA_DIR=c.dataDir;
       if(id==='warehouse'&&c.browserPath)env.LINGTU_BROWSER_PATH=c.browserPath;
       delete env.ELECTRON_RUN_AS_NODE;
-      executable=c.exe;args=id==='warehouse'?[`--user-data-dir=${c.dataDir}`,...(c.maintenance?['--hidden']:[])]:[];
+      const shared=sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion);
+      executable=c.exe;args=shared?['--agent-component='+id,...(id==='warehouse'&&c.maintenance?['--hidden']:[])]:id==='warehouse'?[`--user-data-dir=${c.dataDir}`,...(c.maintenance?['--hidden']:[])]:[];
     }else{
       const live=await this.capabilities(id);if(live)return live;
       const manifest=JSON.parse(fs.readFileSync(path.join(c.root,'package.json'),'utf8'));

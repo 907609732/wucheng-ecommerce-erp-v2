@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
+import {readComponentContext} from "./shared/component-context.mjs";
+const componentContext = readComponentContext("warehouse");
 import { serveInventoryMcp,serveWorkbenchMcp } from "./mcp-server.mjs";
 import {randomUUID} from 'node:crypto';
 
 const appExe = process.env.CAINIAO_ASSISTANT_EXE || process.execPath;
 const appPath = process.env.CAINIAO_ASSISTANT_APP_PATH || "";
 const userDataDir = process.env.CAINIAO_ASSISTANT_USER_DATA || "";
-const version = process.env.CAINIAO_ASSISTANT_VERSION || "0.0.0";
+const version = componentContext?.version || process.env.CAINIAO_ASSISTANT_VERSION || "0.0.0";
 
 function cleanChildEnvironment() {
   const env = { ...process.env };
@@ -21,7 +23,7 @@ function cleanChildEnvironment() {
 function invokeCli(args) {
   return new Promise((resolve, reject) => {
     const executableArgs = [
-      ...(appPath ? [appPath] : []),
+      ...(componentContext?.launchArgs || (appPath ? [appPath] : [])),
       "--cli",
       ...args,
       ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : [])

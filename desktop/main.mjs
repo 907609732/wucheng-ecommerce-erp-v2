@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain, safeStorage, shell, dialog } from "electron";
+import {readComponentContext} from "./shared/component-context.mjs";
 import {installBundledDesks} from './shared/install-desks.mjs';
+import {ServiceManager} from './shared/service-manager.mjs';
+import {agentBetaPaths,guardAgentServices} from './agent-host/isolation.mjs';
 import {startCloudControl} from './modules/cloud-control.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -40,6 +43,11 @@ import brandingModule from "./shared/branding.cjs";
 import {createWarehouseAgentAdapter} from './workbench/warehouse-agent.mjs';
 
 const { buildBranding } = brandingModule;
+const componentContext = readComponentContext("warehouse");
+const componentAppRoot = componentContext?.appRoot || app.getAppPath();
+const componentResourcesDir = componentContext?.resourcesDir || process.resourcesPath;
+const componentVersion = componentContext?.version || app.getVersion();
+const componentLaunchArgs = componentContext?.launchArgs || [];
 // Explicit opt-in from the isolated Agent host. Existing production scheduling
 // remains unchanged until a separately approved migration switches ownership.
 const agentManaged=process.env.LINGTU_AGENT_MANAGED==='1';
@@ -156,11 +164,11 @@ function notifyRemoteConnection(connected, message, health = null) {
 }
 
 function bundledUpdateTokenPath() {
-  return path.join(process.resourcesPath, "update-token.txt");
+  return path.join(componentResourcesDir, "update-token.txt");
 }
 
 function buildInfoPath() {
-  return path.join(process.resourcesPath, "build-info.json");
+  return path.join(componentResourcesDir, "build-info.json");
 }
 
 function logDir() {
@@ -237,7 +245,7 @@ function ensureWorkspace() {
   ]) fs.mkdirSync(dir, { recursive: true });
   const targetConfig = path.join(root, "config.json");
   if (!fs.existsSync(targetConfig)) {
-    fs.copyFileSync(path.join(app.getAppPath(), "config.json"), targetConfig);
+    fs.copyFileSync(path.join(componentAppRoot, "config.json"), targetConfig);
   }
 }
 
@@ -456,7 +464,7 @@ async function startProcess(kind, trigger = "manual", options = {}, context = {}
     ? validateSettings(settings, flags)
     : validateCainiaoSettings(settings, flags);
   if (!validation.ok) throw new Error(validation.errors.join("；"));
-  const scriptPath = path.join(app.getAppPath(), "core", definition.scriptName);
+  const scriptPath = path.join(componentAppRoot, "core", definition.scriptName);
   if(kind==='sync'&&!fs.existsSync(inventoryDatabasePath())){
     process.env.ERP_DATA_DIR=path.dirname(inventoryDatabasePath());
     const {getDb}=await import('../core/erp/db.js');getDb();
@@ -677,7 +685,7 @@ async function collectDiagnostics() {
   const database = { ...fileDiagnostic(databasePath), latestValidation: await latestInventoryValidation(databasePath) };
   const desktopLock = lockDiagnostic(desktopTaskLockPath());
   const cloudLock = lockDiagnostic(path.join(root, "state", "cloud-sync.lock"));
-  const coreScripts = Object.fromEntries(["sync-cainiao-inventory.js", "playwright-login.js"].map((name) => [name, fs.existsSync(path.join(app.getAppPath(), "core", name))]));
+  const coreScripts = Object.fromEntries(["sync-cainiao-inventory.js", "playwright-login.js"].map((name) => [name, fs.existsSync(path.join(componentAppRoot, "core", name))]));
   const accountConfigured = Boolean(settings.cainiaoUsername && flags.cainiaoPassword);
   const robotConfigured = settings.deliveryMode === "app"
     ? Boolean(settings.dingtalkRobotCode && settings.dingtalkConversationId && flags.dingtalkClientId && flags.dingtalkClientSecret)
@@ -704,7 +712,7 @@ async function collectDiagnostics() {
   const recentIssues = await searchDebugLogs({ level: "error", limit: 20 });
   return {
     generatedAt: new Date().toISOString(),
-    version: app.getVersion(),
+    version: componentVersion,
     runtime: { platform: process.platform, arch: process.arch, electron: process.versions.electron, node: process.versions.node, packaged: app.isPackaged },
     health: diagnosticHealth(checks),
     checks,
@@ -738,16 +746,24 @@ function publicExtensions() {
 
 function runtimeCapabilities() {
   const branding = currentBranding();
-  return createRuntimeCapabilities({
-    version: app.getVersion(),
+  const capabilities = createRuntimeCapabilities({
+    version: componentVersion,
     packaged: app.isPackaged,
     executable: process.execPath,
     workspace: appDataDir(),
-    sourceRoot: app.isPackaged ? "" : app.getAppPath(),
+    sourceRoot: app.isPackaged ? "" : componentAppRoot,
     buildInfo: readBuildInfo(),
     displayName: branding.productName,
     extensions: publicExtensions()
   });
+  if (componentContext) {
+    capabilities.application.launchArgs = [...componentLaunchArgs];
+    for (const mode of capabilities.modes) {
+      if (mode.id === 'cli') mode.entry = `${JSON.stringify(process.execPath)} ${componentLaunchArgs.join(' ')} --cli <command>`;
+      if (mode.id === 'mcp-stdio') mode.entry = `${JSON.stringify(process.execPath)} ${componentLaunchArgs.join(' ')} --mcp-stdio`;
+    }
+  }
+  return capabilities;
 }
 
 async function exportDebugBundle() {
@@ -790,13 +806,27 @@ function trustExtension(id) {
   return { id, trusted: true, version: extension.version, actions: extension.actions };
 }
 
+let componentExtensionServices;
+function trustedComponentExtensionServices(){
+  if(!componentContext)return undefined;
+  if(!componentExtensionServices){
+    const preview=process.env.LINGTU_AGENT_PREVIEW==='1',localAppData=process.env.LOCALAPPDATA;
+    if(!localAppData)throw Error('组件缺少固定本机配置目录');
+    const paths=agentBetaPaths({localAppData,root:path.join(localAppData,preview?'WuchengAgentBeta-preview':'WuchengAgentBeta'),preview});
+    Object.assign(paths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
+    if(process.env.LINGTU_REGISTRY_PATH!==paths.registryFile)throw Error('组件注册表未绑定当前测试版');
+    componentExtensionServices=guardAgentServices(new ServiceManager({registryFile:paths.registryFile}),paths);
+  }
+  return componentExtensionServices;
+}
 async function callExtension({ id, action, params, confirmSideEffect = false }) {
   const extension = discoverExtensions(extensionRoot(), readSettings().trustedExtensionIds).find((item) => item.id === id);
   if (!extension) throw new Error("未找到该扩展");
   const response = await invokeTrustedExtension(extension, action, params, {
     confirmSideEffect,
-    appVersion: app.getVersion(),
-    workspace: appDataDir()
+    appVersion: componentVersion,
+    workspace: appDataDir(),
+    services: id==='lingtu.desks'?trustedComponentExtensionServices():undefined
   });
   return redactDiagnosticValue(response, await diagnosticSensitiveValues());
 }
@@ -811,7 +841,7 @@ async function interfaceStatus() {
     ? Boolean(settings.dingtalkRobotCode && settings.dingtalkConversationId && flags.dingtalkClientId && flags.dingtalkClientSecret)
     : Boolean(flags.dingtalkWebhook);
   return {
-    version: app.getVersion(),
+    version: componentVersion,
     state: runningChild || lockActive ? "busy" : "idle",
     runningKind: runningKind || (lockActive ? String(lock?.kind || "unknown") : ""),
     configured: { account: accountConfigured, robot: robotConfigured },
@@ -836,7 +866,7 @@ function configureLoginItem(settings) {
     enabled: openAtLogin,
     name: "云仓库存同步",
     path: process.execPath,
-    args: managedCloud ? ['--hidden','--managed-module=warehouse','--user-data-dir='+app.getPath('userData')] : ['--hidden']
+    args: [...componentLaunchArgs, ...(managedCloud ? ['--hidden','--managed-module=warehouse','--user-data-dir='+app.getPath('userData')] : ['--hidden'])]
   });
 }
 
@@ -973,7 +1003,7 @@ ipcMain.handle('warehouse-daily:reminder-settings', async (event,payload={}) => 
   return {ok:true};
 });
 ipcMain.handle("branding:get", () => currentBranding());
-ipcMain.handle("app:about", () => ({ version: app.getVersion(), build: readBuildInfo(), changelog: CHANGELOG }));
+ipcMain.handle("app:about", () => ({ version: componentVersion, build: readBuildInfo(), changelog: CHANGELOG }));
 ipcMain.handle("secrets:get-editable", async (event) => {
   if (event.sender !== mainWindow?.webContents) throw new Error("无权读取敏感设置");
   if (runtimeMode() === "client") return {};
@@ -1077,12 +1107,12 @@ ipcMain.handle("repository:open", async (event) => {
   return { opened: true, url };
 });
 ipcMain.handle("integration:get", () => ({
-  cli: { command: process.execPath, examples: ["--cli status", "--cli doctor", "--cli debug-bundle", "--cli capabilities", "--cli sync --confirm-send"] },
-  mcp: { command: process.execPath, args: ["--mcp-stdio"] },
+  cli: { command: process.execPath, args: [...componentLaunchArgs], examples: ["--cli status", "--cli doctor", "--cli debug-bundle", "--cli capabilities", "--cli sync --confirm-send"] },
+  mcp: { command: process.execPath, args: [...componentLaunchArgs, "--mcp-stdio"] },
   runtime: { apiVersion: runtimeCapabilities().schemaVersion, extensionDirectory: extensionRoot(), modes: runtimeCapabilities().modes.map((mode) => mode.id) }
 }));
 ipcMain.handle("update:get", () => updater?.getState() || {
-  currentVersion: app.getVersion(), status: "idle", message: "尚未初始化"
+  currentVersion: componentVersion, status: "idle", message: "尚未初始化"
 });
 ipcMain.handle("update:check", () => updater?.check() || Promise.reject(new Error("更新服务尚未初始化")));
 ipcMain.handle("update:install", () => updater?.install() || Promise.reject(new Error("更新服务尚未初始化")));
@@ -1262,15 +1292,15 @@ app.whenReady().then(async () => {
     return;
   }
   if (mcpMode) {
-    const entryPath = path.join(app.getAppPath(), "desktop", "mcp-stdio-entry.mjs");
+    const entryPath = path.join(componentAppRoot, "desktop", "mcp-stdio-entry.mjs");
     mcpBridgeChild = spawn(process.execPath, [entryPath], {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         CAINIAO_ASSISTANT_EXE: process.execPath,
-        CAINIAO_ASSISTANT_APP_PATH: app.isPackaged ? "" : app.getAppPath(),
+        CAINIAO_ASSISTANT_APP_PATH: app.isPackaged ? "" : componentAppRoot,
         CAINIAO_ASSISTANT_USER_DATA: app.getPath("userData"),
-        CAINIAO_ASSISTANT_VERSION: app.getVersion()
+        CAINIAO_ASSISTANT_VERSION: componentVersion
       },
       windowsHide: true,
       stdio: "inherit"
@@ -1296,7 +1326,7 @@ app.whenReady().then(async () => {
       getDb(); // Real ERP schema and migrations; only explicit first installation.
     }
     cloudControl = await startCloudControl({
-      root: app.getAppPath(), dataDir: app.getPath('userData'), version: app.getVersion(),
+      root: componentAppRoot, dataDir: app.getPath('userData'), version: componentVersion,
       busy: () => !!runningChild || !!runningTaskPromise || reminderWork>0,
       migration: {databasePath:inventoryDatabasePath(),dataDir:app.getPath('userData')},
       business: {
@@ -1334,7 +1364,7 @@ app.whenReady().then(async () => {
   const importedUpdateToken = await importBundledUpdateToken();
   if (importedUpdateToken) appendLog("在线升级凭据已内置并转存到 Windows 安全存储。", "success");
   updater = createUpdater({
-    app,
+    app: componentContext ? {isPackaged: app.isPackaged, getVersion: () => componentVersion} : app,
     getToken: async () => (await readSecrets()).githubUpdateToken,
     onState: (state) => mainWindow?.webContents.send("update:state", state),
     log: appendLog

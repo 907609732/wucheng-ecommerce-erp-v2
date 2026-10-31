@@ -77,64 +77,62 @@ function verifyScanFiles(summaryFile,proof,{stage,manifest}){
 async function validateInputs({stage:stageInput,electronDist:electronInput,scanSummary:summaryInput}){
  const stage=boundedInput(path.join(root,'dist/agent-beta/stages'),stageInput);
  const scanSummary=boundedInput(path.join(root,'.codex-artifacts'),summaryInput);
- const canonicalElectron=path.join(root,'node_modules/electron/dist');
+ const canonicalElectron=path.join(root,'apps/exporter/node_modules/electron/dist');
  if(!path.isAbsolute(electronInput)||path.resolve(electronInput)!==canonicalElectron)throw Error('Use the repository locked Electron distribution');
- noLinks(canonicalElectron);const electronDist=fs.realpathSync(canonicalElectron),electronPackage=json(path.join(root,'node_modules/electron/package.json'));
- const lock=json(path.join(root,'package-lock.json'));
+ noLinks(canonicalElectron);const electronDist=fs.realpathSync(canonicalElectron),electronPackage=json(path.join(root,'apps/exporter/node_modules/electron/package.json'));
+ const lock=json(path.join(root,'apps/exporter/package-lock.json'));
  if(electronPackage.name!=='electron'||electronPackage.version!==lock.packages?.['node_modules/electron']?.version||fs.readFileSync(path.join(electronDist,'version'),'utf8').trim().replace(/^v/,'')!==electronPackage.version||!fs.existsSync(path.join(electronDist,'electron.exe')))throw Error('Locked Electron runtime is incomplete or mismatched');
  const {suiteSourceDigests,suiteSourceDigest}=await import('./suite-source-digests.mjs');
  const {globalSourceHash}=await import('./agent-beta-coverage.mjs');
  const sourceDigests={business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()},sourceCommit=gitCommit();
  const manifest=json(path.join(stage,'agent-beta-resources.json')),manifestSha256=digest(path.join(stage,'agent-beta-resources.json'));
+ if(manifest.sharedElectron?.version!==electronPackage.version)throw Error('Shared Electron does not match the frozen component runtime');
  if(!same(manifest.sourceDigests,sourceDigests))throw Error('Source changed since staging; prepare a new current stage');
  const proof=json(scanSummary);assertPublicScanBinding(proof,{stage,manifestSha256,sourceCommit,sourceDigests});
  const {auditStage}=await import('./agent-beta-package-audit.mjs');const audit=auditStage(stage);
  verifyScanFiles(scanSummary,proof,{stage,manifest});
  const pkg=json(path.join(stage,'package.json')),launcher=json(path.join(stage,'desktop/launcher/package.json'));
  if(!/^\d+\.\d+\.\d+$/.test(pkg.version||'')||launcher.version!==pkg.version)throw Error('Preview must use the frozen stage version');
- for(const rel of ['workbench-gateway/desktop/agent-runtime/mcp-entry.mjs','workbench-gateway/desktop/agent-runtime/hermes-bootstrap.py','apps/purchase/server.mjs','apps/sales/server.mjs','apps/overview/server.mjs','apps/purchase/public','apps/sales/public','apps/overview/public','apps/exporter/out/main/preview-ledger.js','apps/warehouse/runtime/WuchengAgentBetaWarehouse.exe','apps/exporter/runtime/WuchengAgentBetaExporter.exe'])if(!fs.existsSync(path.join(stage,rel)))throw Error('Complete preview resource missing: '+rel);
+ if(manifest.format!=='agent-beta-resources/v2'||Object.keys(manifest.payloadHashes).some(rel=>rel.startsWith('workbench-gateway/')))throw Error('A single-runtime v2 stage is required');
+ for(const rel of ['desktop/agent-runtime/mcp-entry.mjs','desktop/agent-runtime/hermes-bootstrap.py','apps/purchase/server.mjs','apps/sales/server.mjs','apps/overview/server.mjs','apps/purchase/public','apps/sales/public','apps/overview/public','apps/exporter/out/main/preview-ledger.js','apps/warehouse/runtime/resources/app.asar','apps/exporter/runtime/resources/app.asar'])if(!fs.existsSync(path.join(stage,rel)))throw Error('Complete preview resource missing: '+rel);
  for(const id of ['purchase','sales','overview','exporter'])if(!fs.existsSync(path.join(stage,'apps',id,'node_modules')))throw Error('Frozen production dependencies missing: '+id);
  return {stage,electronDist,electronVersion:electronPackage.version,scanSummary,scanSummarySha256:digest(scanSummary),manifest,manifestSha256,sourceCommit,sourceDigests,version:pkg.version,audit};
 }
 
-export const previewEntry="process.env.LINGTU_AGENT_PREVIEW='1';\nawait import('./desktop/launcher/main.mjs');\n";
-function copyTree(source,dest,{host=false,base=source}={}){
+export const previewEntry="process.env.LINGTU_AGENT_PREVIEW='1';\nimport {app} from 'electron';\nimport {dispatchPackagedApplication} from '../agent-runtime/desktop/launcher/component-dispatch.mjs';\ntry{await dispatchPackagedApplication();}catch(error){process.stderr.write('组件入口未完成核对：'+error.message+'\\n');app.exit(1);}\n";
+export function thinHostPackage(pkg,{preview=false}={}){
+ const host={name:preview?'wucheng-agent-preview':pkg.name,version:pkg.version,productName:preview?'五成工作台 开发预览':pkg.productName,type:'module',main:preview?'preview-entry.mjs':'packaged-entry.mjs'};
+ for(const field of ['description','author','license'])if(Object.hasOwn(pkg,field))host[field]=pkg[field];
+ return host;
+}
+export function thinHostLock(pkg){return {name:pkg.name,version:pkg.version,lockfileVersion:3,requires:true,packages:{'':{name:pkg.name,version:pkg.version}}};}
+function copyTree(source,dest){
  fs.cpSync(source,dest,{recursive:true,filter:file=>{
-  const rel=slash(path.relative(base,file));if(fs.lstatSync(file).isSymbolicLink())throw Error('Linked preview payload forbidden');
-  if(rel.split('/').includes('.bin'))return false;
-  if(host&&(/^(?:vendor|workbench-gateway)(?:\/|$)/.test(rel)||rel==='agent-beta-resources.json'||/^apps\/[^/]+\/(?:runtime|out)(?:\/|$)/.test(rel)))return false;
-  return true;
+  const rel=slash(path.relative(source,file));if(fs.lstatSync(file).isSymbolicLink())throw Error('Linked preview payload forbidden');
+  return !rel.split('/').includes('.bin');
  }});
 }
-function copyFile(source,dest){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(source,dest,fs.constants.COPYFILE_EXCL);}
 function checkedPayloadRelative(rel){if(typeof rel!=='string'||!rel||rel.includes('\\')||rel.includes(':')||rel.split('/').some(part=>!part||part==='.'||part==='..'))throw Error('Invalid frozen payload path');return rel;}
 
-/** Copies frozen public bytes; only the host package metadata and fixed entry are overlaid. */
+/** One canonical, external runtime tree. The Electron shell has no production dependencies. */
 export function createPreviewLayout({stage,prepackaged,manifest,manifestSha256,sourceCommit,version,scanSummarySha256}){
- if(fs.existsSync(path.join(prepackaged,'resources','app')))throw Error('Preview application directory already exists');
- const resources=path.join(prepackaged,'resources'),appRoot=path.join(resources,'app');
- copyTree(stage,appRoot,{host:true,base:stage});
- for(const name of ['apps','vendor','workbench-gateway'])copyTree(path.join(stage,name),path.join(resources,name));
- copyFile(path.join(stage,'agent-beta-resources.json'),path.join(resources,'agent-beta-resources.json'));
- copyFile(path.join(stage,'desktop/agent-runtime/hermes-bootstrap.py'),path.join(resources,'agent-engines/hermes-bootstrap.py'));
+ const resources=path.join(prepackaged,'resources'),appRoot=path.join(resources,'app'),runtimeRoot=path.join(resources,'agent-runtime');
+ if(fs.existsSync(appRoot)||fs.existsSync(runtimeRoot))throw Error('Preview application/runtime directory already exists');
+ if(manifest.format!=='agent-beta-resources/v2'||Object.keys(manifest.payloadHashes).some(rel=>rel.startsWith('workbench-gateway/')))throw Error('A single-runtime v2 stage is required');
+ copyTree(stage,runtimeRoot);
  for(const [rel,expected]of Object.entries(manifest.payloadHashes)){
   checkedPayloadRelative(rel);
-  const external=/^(?:apps|vendor|workbench-gateway)\//.test(rel),target=path.join(external?resources:appRoot,...rel.split('/'));
-  if(digest(target)!==expected)throw Error('Frozen preview payload differs: '+rel);
-  if(rel.startsWith('apps/')&&!/^apps\/[^/]+\/(?:runtime|out)(?:\/|$)/.test(rel)&&digest(path.join(appRoot,...rel.split('/')))!==expected)throw Error('Host adapter/public resource differs: '+rel);
+  if(digest(path.join(runtimeRoot,...rel.split('/')))!==expected)throw Error('Frozen preview payload differs: '+rel);
  }
- if(digest(path.join(resources,'agent-beta-resources.json'))!==manifestSha256||json(path.join(appRoot,'desktop/agent-host/packaged-manifest.json')).sha256!==manifestSha256)throw Error('Copied preview manifest/pin mismatch');
- const pkgFile=path.join(appRoot,'package.json'),lockFile=path.join(appRoot,'package-lock.json'),pkg=json(pkgFile),lock=json(lockFile);
- const originalPackageSha256=digest(pkgFile),originalLockSha256=digest(lockFile);
- pkg.name='wucheng-agent-preview';pkg.productName='五成工作台 开发预览';pkg.main='preview-entry.mjs';
- lock.name=pkg.name;if(!lock.packages?.[''])throw Error('Frozen package lock root missing');lock.packages[''].name=pkg.name;
- fs.writeFileSync(pkgFile,JSON.stringify(pkg,null,2));fs.writeFileSync(lockFile,JSON.stringify(lock,null,2));
- const entryFile=path.join(appRoot,'preview-entry.mjs');if(fs.existsSync(entryFile))throw Error('Unexpected preview entry already in frozen stage');fs.writeFileSync(entryFile,previewEntry,{flag:'wx'});
- const html=fs.readFileSync(path.join(appRoot,'desktop/launcher/agent-index.html'),'utf8');
+ if(digest(path.join(runtimeRoot,'agent-beta-resources.json'))!==manifestSha256||json(path.join(runtimeRoot,'desktop/agent-host/packaged-manifest.json')).sha256!==manifestSha256)throw Error('Copied preview manifest/pin mismatch');
+ const sourcePkgFile=path.join(stage,'package.json'),sourceLockFile=path.join(stage,'package-lock.json'),pkg=thinHostPackage(json(sourcePkgFile),{preview:true}),lock=thinHostLock(pkg);
+ fs.mkdirSync(appRoot);const pkgFile=path.join(appRoot,'package.json'),lockFile=path.join(appRoot,'package-lock.json'),entryFile=path.join(appRoot,'preview-entry.mjs');
+ fs.writeFileSync(pkgFile,JSON.stringify(pkg,null,2),{flag:'wx'});fs.writeFileSync(lockFile,JSON.stringify(lock,null,2),{flag:'wx'});fs.writeFileSync(entryFile,previewEntry,{flag:'wx'});
+ const html=fs.readFileSync(path.join(runtimeRoot,'desktop/launcher/agent-index.html'),'utf8');
  if(!/class=["'][^"']*\bdevelopment-preview\b/.test(html))throw Error('Persistent development preview banner missing');
- const metadata={format:'agent-preview-package/v1',preview:true,verifiedFullBeta:false,version,sourceCommit,builderSourceSha256:digest(import.meta.filename),stageManifestSha256:manifestSha256,strictScanSummarySha256:scanSummarySha256,appId:'com.wucheng.ecommerce.erp.v2.agentpreview',profileRootName:'WuchengAgentBeta-preview',overlays:{package:{before:originalPackageSha256,after:digest(pkgFile)},packageLock:{before:originalLockSha256,after:digest(lockFile)},entry:{path:'preview-entry.mjs',sha256:digest(entryFile)}}};
+ const metadata={format:'agent-preview-package/v2',preview:true,verifiedFullBeta:false,version,sourceCommit,builderSourceSha256:digest(import.meta.filename),stageManifestSha256:manifestSha256,strictScanSummarySha256:scanSummarySha256,appId:'com.wucheng.ecommerce.erp.v2.agentpreview',profileRootName:'WuchengAgentBeta-preview',runtimeRootName:'agent-runtime',overlays:{package:{before:digest(sourcePkgFile),after:digest(pkgFile)},packageLock:{before:digest(sourceLockFile),after:digest(lockFile)},entry:{path:'preview-entry.mjs',sha256:digest(entryFile)}}};
  fs.writeFileSync(path.join(resources,'agent-preview-package.json'),JSON.stringify(metadata,null,2),{flag:'wx'});
- return {appRoot,metadata};
+ return {appRoot,runtimeRoot,metadata};
 }
 
 export async function buildPreview(inputs){

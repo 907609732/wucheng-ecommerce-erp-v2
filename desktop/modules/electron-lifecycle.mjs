@@ -12,20 +12,26 @@ import {atomicJson} from './module-manager.mjs';
 import {fail, inside} from './package-format.mjs';
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const readRegistry=file=>fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};
+const processAlive=pid=>{if(!Number.isSafeInteger(pid)||pid<=0)throw fail('PROCESS_CHECK_FAILED','模块进程身份无效');try{process.kill(pid,0);return true;}catch(error){if(error.code==='ESRCH')return false;if(error.code==='EPERM')return true;throw fail('PROCESS_CHECK_FAILED','无法核对模块进程是否退出');}};
 
 export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getInstalled}) {
   const ids=new Set(['warehouse','exporter']);
   const running=cap=>!!cap?.running;
+  const shared=id=>{const config=services.config(id);if(config.sharedElectron!==true)return false;if(JSON.stringify(services.componentArgs?.(id))!==JSON.stringify(['--agent-component='+id]))throw fail('PROCESS_CHECK_FAILED','共享组件未绑定可信启动入口');return true;};
   async function stop(id){
     const cap=await services.capabilities(id);
     if(!running(cap))return;
+    const isShared=shared(id);
+    if(isShared&&(!Number.isSafeInteger(cap.pid)||cap.pid<=0||cap.pid===process.pid))throw fail('PROCESS_CHECK_FAILED','共享组件进程身份无效或指向工作台主机');
     if(cap.busy)throw fail('SERVICE_BUSY','模块有正在执行的任务');
     // The old standalone exporter also exposes this authenticated stop route.
     await services.request(id,'/stop',{method:'POST',body:{confirm:true}});
     for(let i=0;i<100;i++){
-      if(!running(await services.capabilities(id))){
+      const current=await services.capabilities(id);
+      if(isShared&&running(current)&&current.pid!==cap.pid)throw fail('MODULE_PROCESS_CHANGED','等待退出期间模块进程身份发生变化');
+      if(!running(current)){
         for(let attempt=0;attempt<100;attempt++){
-          try{process.kill(cap.pid,0);}catch(error){if(error.code==='ESRCH'){await wait(1000);return;}throw error;}
+          if(!processAlive(cap.pid)){await wait(1000);return;}
           await wait(100);
         }
         throw fail('STOP_TIMEOUT','接口已关闭，但模块进程尚未完全退出');
@@ -46,7 +52,13 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
       // On a first launcher installation the historical cloud executable path
       // points to this launcher itself. It is not a legacy cloud worker.
       const isLauncher=id==='warehouse'&&path.resolve(config.exe).toLowerCase()===path.resolve(process.execPath).toLowerCase();
-      if(process.platform==='win32'&&!isLauncher){
+      const isShared=shared(id);
+      if(isShared){
+        // A shared host EXE also belongs to the launcher and the other component.
+        // Only this module's validated capability/runtime PID can block its backup.
+        const own=await services.capabilities(id);
+        if(own?.pid&&processAlive(own.pid))throw fail('LEGACY_APP_RUNNING','此组件的已登记进程仍在运行，请退出对应组件后重试安装');
+      }else if(process.platform==='win32'&&!isLauncher){
         let probe;try{probe=await runFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',
           "$ErrorActionPreference='Stop'; @(Get-Process | Where-Object { $_.Path -and ($_.Path -eq $env:LINGTU_CHECK_EXE -or ($env:LINGTU_CHECK_PACKAGE_ROOT -and $_.Path.StartsWith($env:LINGTU_CHECK_PACKAGE_ROOT,[System.StringComparison]::OrdinalIgnoreCase))) }).Count"],
           {env:{...process.env,LINGTU_CHECK_EXE:config.exe,LINGTU_CHECK_PACKAGE_ROOT:config.managed&&config.root?path.dirname(config.root)+path.sep:''},encoding:'utf8',windowsHide:true,timeout:15000});}
@@ -74,7 +86,9 @@ export function withElectronLifecycle(serviceLifecycle,{services,backupRoot,getI
     async activate(candidate,_previous,backup){
       const registry=readRegistry(services.registryFile),config=services.config(candidate.id);
       const browser=getInstalled('browser-runtime');
-      registry[candidate.id]={...config,root:candidate.root,exe:inside(candidate.root,candidate.entry),
+      const isShared=candidate.sharedElectron===true;
+      if(isShared&&(candidate.entry!=='resources/app.asar'||services.sharedElectronVersion!=='44.7.0'||typeof services.sharedElectronExecutable!=='string'||!path.isAbsolute(services.sharedElectronExecutable)||!fs.existsSync(inside(candidate.root,'resources/app.asar'))))throw fail('INVALID_ENTRY','共享组件未绑定可信宿主或固定 ASAR 入口');
+      registry[candidate.id]={...config,root:candidate.root,exe:isShared?services.sharedElectronExecutable:inside(candidate.root,candidate.entry),sharedElectron:isShared,
         version:candidate.version,dataDir:backup.dataDir,managed:true,uninstalled:false,maintenance:true,
         ...(candidate.id==='warehouse'?{browserPath:inside(browser.root,browser.entry)}:{})};
       atomicJson(services.registryFile,registry);
