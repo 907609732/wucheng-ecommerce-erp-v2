@@ -27,7 +27,7 @@ import {runRemoteCommand} from '../workbench-client/cli.mjs';
 import {tailscaleHost} from '../workbench-client/gateway-lifecycle.mjs';
 import {collectMigrationSource,freezeMigrationSource,releaseMigrationSource} from '../workbench-client/migration-source.mjs';
 import {prepareServe,enableServe} from '../workbench-client/tailscale-serve.mjs';
-import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress} from '../agent-host/isolation.mjs';
+import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress,assertPreviewLocalMode} from '../agent-host/isolation.mjs';
 import {createHostIdentity} from '../agent-host/identity.mjs';
 import {createAgentHost} from '../agent-host/index.mjs';
 import {assertLauncherSender,agentEnvelope} from '../agent-host/trust.mjs';
@@ -135,6 +135,7 @@ const safeDecrypt=async bytes=>{
   const value=safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(bytes):safeStorage.decryptString(bytes);return typeof value==='string'?value:value.result;
 };
 function embeddedRuntime(){
+  assertPreviewLocalMode(agentPaths,{mode:'client'});
   if(!embedded())throw Error('请先选择客户端与内置私网连接');
   const origin=serverAddress(connection.read().serverUrl);
   let runtime=tailnetRuntimes.get(origin);
@@ -178,6 +179,7 @@ async function changePrivateConnection(operation){
   try{return await networkChangeContext.run(networkConfigurationToken,operation);}finally{networkConfigurationToken=undefined;networkConfigurationBusy=false;}
 }
 function assertPrivateRequestAllowed(){
+  assertPreviewLocalMode(agentPaths,connection.read());
   if(networkConfigurationBusy&&networkChangeContext.getStore()!==networkConfigurationToken)throw Object.assign(Error('连接设置正在更新，请稍后重新打开模块'),{code:'CONNECTION_CHANGED'});
 }
 async function resetPrivateConnection(){
@@ -201,6 +203,7 @@ function guardPrivateSession(target){
   target.webRequest.onCompleted(finished);target.webRequest.onErrorOccurred(finished);
 }
 function remoteConnection(channel='ui'){
+  assertPreviewLocalMode(agentPaths,{mode:'client'});
   assertPrivateRequestAllowed();
   assertBetaServerAddress(connection.read().serverUrl);
   if(transport&&transport.channel===channel)return transport;
@@ -224,7 +227,7 @@ function remoteConnection(channel='ui'){
   remoteManager=new RemoteServiceManager(transport);return transport;
 }
 function requireHost(){if(remote())throw Error('此操作仅能在主服务器执行');hostIdentity?.requireAdmin(hostIdentity.localActor(),true);}
-function betaTailnetHost(){const ts=tailscaleHost(),url=new URL(ts.origin);url.port='9443';return {...ts,origin:url.origin};}
+function betaTailnetHost(){assertPreviewLocalMode(agentPaths,{mode:'server'});const ts=tailscaleHost(),url=new URL(ts.origin);url.port='9443';return {...ts,origin:url.origin};}
 const betaServeOptions=()=>({httpsPort:9443,targetPort:agentPaths.gatewayPort});
 async function ensureGateway(){
   requireHost();if(agentGateway)return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
@@ -407,6 +410,7 @@ if (acquired) app.whenReady().then(async () => {
     networkProposal={...plan,token:crypto.randomUUID(),expiresAt:Date.now()+300000};return {token:networkProposal.token,difference:plan.difference,backup:plan.file};
   });
   async function saveConnectionValue(value,{connect=true}={}){
+    assertPreviewLocalMode(agentPaths,value);
     if(value.serverUrl)assertBetaServerAddress(value.serverUrl);
     if(agentHostStarting)await agentHostStarting.catch(()=>{});
     const previousMode=connection.read().mode;

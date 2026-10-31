@@ -7,8 +7,9 @@ import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {agentBetaPaths,assertPreviewPaths,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
+import {agentBetaPaths,assertPreviewPaths,assertPreviewLocalMode,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
 import {initializePreviewLedgers} from '../desktop/agent-host/preview-ledgers.mjs';
+import {verifyActivationResources} from '../desktop/agent-host/activation.mjs';
 const repo=path.resolve(import.meta.dirname,'..'),require=createRequire(path.join(repo,'apps/exporter/package.json'));
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function fixture(t){const local=fs.mkdtempSync(path.join(os.tmpdir(),'erp-preview-init-')),previous=process.env.LOCALAPPDATA;process.env.LOCALAPPDATA=local;t.after(()=>{if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(local,{recursive:true,force:true});});return {local,paths:agentBetaPaths({localAppData:local,preview:true,root:undefined})};}
@@ -19,6 +20,7 @@ test('preview identity, root and ports are fixed independently from Beta',t=>{
  assert.throws(()=>assertPreviewPaths({...paths,data:path.join(local,'formal')}),{code:'PREVIEW_LOCATION_INVALID'});
  prepareAgentProfile(paths);const registry=assertAgentRegistry(paths);assert.equal(registry.purchase.mobilePort,27480);assert.equal(registry.sales.port,27433);assert.ok(Object.values(registry).every(x=>x.allowInitialize===false));
  const beta=agentBetaPaths({localAppData:local,preview:false,root:undefined});assert.notEqual(beta.appId,paths.appId);assert.equal(beta.gatewayPort,27330);
+ assert.doesNotThrow(()=>assertPreviewLocalMode(paths,{mode:'standalone'}));for(const mode of ['server','client',undefined])assert.throws(()=>assertPreviewLocalMode(paths,{mode}),{code:'PREVIEW_LOCAL_ONLY'});assert.doesNotThrow(()=>assertPreviewLocalMode(beta,{mode:'server'}));
 });
 
 test('real domain stores create only new empty preview ledgers and preserve them on reuse',async t=>{
@@ -44,4 +46,10 @@ test('initialization rejects Beta and unsafe paths before creating data; managed
  const services=guardAgentServices({registryFile:paths.registryFile,config:id=>registry[id],ensure:()=>{started++;},start:()=>{started++;}},paths);
  assert.throws(()=>services.ensure('purchase'),{code:'TEST_LEDGER_NOT_READY'});assert.equal(started,0);
  registry.sales.allowInitialize=true;fs.writeFileSync(paths.registryFile,JSON.stringify(registry));assert.throws(()=>assertAgentRegistry(paths),{code:'BETA_REGISTRY_UNSAFE'});
+});
+
+test('activation verifies external gateway bytes before first or reused initialization',t=>{
+ const {local}=fixture(t),resources=path.join(local,'resources'),rel='workbench-gateway/apps/purchase/lib/store.mjs',file=path.join(resources,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'export const store=1;');const manifest={payloadHashes:{[rel]:hash(file)}};
+ assert.doesNotThrow(()=>verifyActivationResources(resources,manifest));fs.writeFileSync(file,'export const store=2;');assert.throws(()=>verifyActivationResources(resources,manifest),/资源摘要不符/);
+ assert.throws(()=>verifyActivationResources(resources,{payloadHashes:{'workbench-gateway/../../outside.mjs':'0'.repeat(64)}}),/资源路径无效/);
 });

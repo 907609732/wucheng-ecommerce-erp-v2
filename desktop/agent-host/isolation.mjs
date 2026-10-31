@@ -11,6 +11,7 @@ export function assertPreviewPaths(paths,{localAppData=process.env.LOCALAPPDATA}
   if(paths?.preview!==true||paths.root!==root||paths.profile!==path.join(root,'profile')||paths.data!==path.join(root,'data')||paths.registryFile!==path.join(root,'registry.json')||paths.programs!==path.join(root,'programs')||paths.appId!=='com.wucheng.ecommerce.erp.v2.agentpreview'||paths.gatewayPort!==27430)throw hostError('PREVIEW_LOCATION_INVALID','预览配置必须绑定固定隔离目录',409);
   noLinks(root);return root;
 }
+export function assertPreviewLocalMode(paths,value){if(paths?.preview===true&&value?.mode!=='standalone')throw hostError('PREVIEW_LOCAL_ONLY','未完成预览只开放本机测试账本，暂不开放公司私网连接',403);}
 export function agentBetaPaths({localAppData=process.env.LOCALAPPDATA,root=process.env.LINGTU_AGENT_BETA_ROOT,preview=process.env.LINGTU_AGENT_PREVIEW==='1'}={}){
   if(!localAppData||!path.isAbsolute(localAppData))throw hostError('BETA_LOCATION_REQUIRED','缺少独立测试版数据目录',503);
   if(preview){const fixed=path.resolve(localAppData,'WuchengAgentBeta-preview');if(root&&path.resolve(root)!==fixed)throw hostError('PREVIEW_LOCATION_INVALID','预览不能改用其他账本目录',409);const paths={root:fixed,profile:path.join(fixed,'profile'),data:path.join(fixed,'data'),registryFile:path.join(fixed,'registry.json'),programs:path.join(fixed,'programs'),gatewayPort:27430,appId:'com.wucheng.ecommerce.erp.v2.agentpreview',preview:true,environment:{mode:'test',label:'未完成预览 · 空测试账本'}};assertPreviewPaths(paths,{localAppData});return paths;}
