@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {assertPublicScanBinding,createPreviewLayout,previewEntry,replaySecretClassifications,verifiedPayloadMap} from '../scripts/build-agent-preview.mjs';
+import {assertPublicScanBinding,createPreviewLayout,previewEntry,previewInstallerOptions,replaySecretClassifications,verifiedPayloadMap} from '../scripts/build-agent-preview.mjs';
 import {classifySecretFinding,classificationPolicySha256} from '../scripts/agent-beta-scan-classification.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const sourceDigests={business:{purchase:'p',sales:'s',overview:'o',exporter:'e',warehouse:'w'},desktop:'d',global:'g'};
 const binding={stage:'C:\\isolated-stage',manifestSha256:'a'.repeat(64),sourceCommit:'b'.repeat(40),sourceDigests};
 function proof(){return {ok:true,scope:'isolated-beta',execution:'stage-public-scan',error:null,scannerExitCode:0,scannerVersion:'8.30.1',secretScansComplete:true,unresolvedSecretFindings:0,classifiedFalsePositiveFindings:0,classificationPolicySha256,payloadInventorySha256:'e'.repeat(64),violations:0,needsReview:0,audit:{ok:true},stage:binding.stage,stageManifestSha256:binding.manifestSha256,sourceCommit:binding.sourceCommit,sourceDigests:structuredClone(sourceDigests),currentSourceDigests:structuredClone(sourceDigests),officialRuleSha256:'e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf',strictConfigSha256:'ebf46a58b5d6ed45d3260602db2713f31732ec466607dc8483473504ce09e45e',counts:{stageFiles:10,sqliteMagicStageFilesChecked:10,asarFiles:2,asarFilesExtracted:4,sqliteMagicAsarFilesChecked:4,asarIntegrityChecked:4,vendorZipEntries:2,sqliteMagicVendorEntriesChecked:2,vendorTextExtracted:1}};}
+test('preview ZIP transport disables incompatible differential archives and retains user data',()=>{
+ const options=previewInstallerOptions();
+ assert.equal(options.useZip,true);assert.equal(options.differentialPackage,false);
+ assert.equal(options.deleteAppDataOnUninstall,false);assert.equal(options.perMachine,false);
+});
+
 test('preview requires a successful strict scan bound to the exact source and stage',()=>{
  assert.doesNotThrow(()=>assertPublicScanBinding(proof(),binding));
  for(const key of ['stage','stageManifestSha256','sourceCommit','sourceDigests','currentSourceDigests']){const changed=proof();changed[key]=key.endsWith('Digests')?{stale:true}:'stale';assert.throws(()=>assertPublicScanBinding(changed,binding),/stale|bound/);}

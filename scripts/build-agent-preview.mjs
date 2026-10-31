@@ -106,6 +106,11 @@ export function thinHostPackage(pkg,{preview=false}={}){
  return host;
 }
 export function thinHostLock(pkg){return {name:pkg.name,version:pkg.version,lockfileVersion:3,requires:true,packages:{'':{name:pkg.name,version:pkg.version}}};}
+// The default NSIS 7z route extracts to a temporary tree, then copies every
+// file. Use the supported single-pass ZIP route for external Node resources.
+// Disable differential packaging as well, or electron-builder still creates
+// a 7z archive despite configuring the installer to extract ZIP.
+export function previewInstallerOptions(){return {oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,useZip:true,differentialPackage:false};}
 function copyTree(source,dest){
  fs.cpSync(source,dest,{recursive:true,filter:file=>{
   const rel=slash(path.relative(source,file));if(fs.lstatSync(file).isSymbolicLink())throw Error('Linked preview payload forbidden');
@@ -147,7 +152,7 @@ export async function buildPreview(inputs){
  if(gitCommit()!==validated.sourceCommit||!same(validated.sourceDigests,{business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()}))throw Error('Source changed during preview preparation');
  if(digest(validated.scanSummary)!==validated.scanSummarySha256)throw Error('Strict public scan evidence changed during preview preparation');
  const configFile=path.join(output,'preview-builder.cjs'),artifactName=`WuchengAgentPreview-Setup-\${version}-preview-${validated.sourceCommit.slice(0,12)}-\${arch}.\${ext}`;
- const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:{oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false}};
+ const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions()};
  fs.writeFileSync(configFile,'module.exports='+JSON.stringify(config),{flag:'wx'});
  fs.writeFileSync(path.join(output,'validated-inputs.json'),JSON.stringify({stage:validated.stage,sourceCommit:validated.sourceCommit,sourceDigests:validated.sourceDigests,stageManifestSha256:validated.manifestSha256,scanSummary:validated.scanSummary,scanSummarySha256:validated.scanSummarySha256,scannerSha256,rulesSha256,scanConfigSha256,classificationPolicySha256,audit:validated.audit,metadata},null,2),{flag:'wx'});
  const builder=path.join(root,'node_modules/electron-builder/cli.js'),logFile=path.join(output,'builder.log'),log=fs.openSync(logFile,'wx');let result;
