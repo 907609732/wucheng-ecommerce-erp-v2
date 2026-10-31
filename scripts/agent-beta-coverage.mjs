@@ -5,7 +5,7 @@ import {warehouseAdapter,exporterAdapter} from '../desktop/workbench/descriptors
 import {suiteSourceDigest} from './suite-source-digests.mjs';
 const root=path.resolve(import.meta.dirname,'..');
 const hash=b=>createHash('sha256').update(b).digest('hex');
-const globalSources=['desktop/shared/ai-interface.mjs','desktop/mcp-server.mjs','desktop/launcher/main.mjs','desktop/launcher/preload.cjs','scripts/agent-beta-isolation.mjs','scripts/agent-beta-stage.mjs','scripts/agent-beta-package-audit.mjs','scripts/agent-beta-vendor.mjs','scripts/sync-agent-approval.mjs','build/agent-beta-builder.cjs','build/agent-beta-stage-plan.json'];
+const globalSources=['desktop/shared/ai-interface.mjs','desktop/mcp-server.mjs','desktop/launcher/main.mjs','desktop/launcher/preload.cjs','scripts/agent-beta-isolation.mjs','scripts/agent-beta-stage.mjs','scripts/agent-beta-package-audit.mjs','scripts/agent-beta-scan-classification.mjs','build/agent-beta-public-code-review.json','scripts/build-agent-preview.mjs','scripts/agent-beta-vendor.mjs','scripts/sync-agent-approval.mjs','build/agent-beta-builder.cjs','build/agent-beta-stage-plan.json'];
 export const globalSourceHash=()=>hash([...globalSources.map(f=>f+':'+(fs.existsSync(path.join(root,f))?hash(fs.readFileSync(path.join(root,f))):'absent')),...['desktop/agent-runtime','desktop/agent-host'].map(f=>f+':'+(fs.existsSync(path.join(root,f))?suiteSourceDigest(path.join(root,f)):'absent'))].join('\n'));
 export function inventory(){
  const builtin=[warehouseAdapter,exporterAdapter];

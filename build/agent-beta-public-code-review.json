@@ -1,0 +1,354 @@
+{
+  "format": "agent-beta-public-code-review/v1",
+  "scope": "finite-reviewed-public-code-and-metadata-only",
+  "privateKeysAllowed": false,
+  "reviews": [
+    {
+      "owner": "dependency",
+      "pkgName": "axios",
+      "version": "1.20.0",
+      "relativeFile": "dist/axios.js",
+      "fileSha256": "225162f7503fc512109759a876eccfb5e7e3bb077cea1f0c970c251460133f93",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 1172,
+          "endLine": 1172,
+          "startColumn": 8,
+          "endColumn": 37
+        }
+      ],
+      "semantic": "The finding is an allOwnKeys JavaScript variable assignment, not a key or credential constant."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "node-forge",
+      "version": "1.4.0",
+      "relativeFile": "dist/forge.all.min.js",
+      "fileSha256": "cb9ba4045a81825f8edb646c38d53a1ac30ce07665bf26042c8dea86d7208642",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 1,
+          "endLine": 1,
+          "startColumn": 71407,
+          "endColumn": 71460
+        },
+        {
+          "startLine": 1,
+          "endLine": 1,
+          "startColumn": 21461,
+          "endColumn": 21520
+        }
+      ],
+      "semantic": "Findings are minified TLS handler function aliasing and public encryption algorithm/OID mapping syntax, not API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "node-forge",
+      "version": "1.4.0",
+      "relativeFile": "dist/forge.min.js",
+      "fileSha256": "d9b9074e6861200d676e25dcfe97889db5e8f4150bb766d29c491ad709a51b58",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 1,
+          "endLine": 1,
+          "startColumn": 20715,
+          "endColumn": 20768
+        },
+        {
+          "startLine": 1,
+          "endLine": 1,
+          "startColumn": 21461,
+          "endColumn": 21520
+        }
+      ],
+      "semantic": "Findings are minified TLS handler function aliasing and public encryption algorithm/OID mapping syntax, not API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "node-forge",
+      "version": "1.4.0",
+      "relativeFile": "lib/pkcs12.js",
+      "fileSha256": "d0f9693ff8b6e755031566139f0e23a762c9a7af6a1b08a27d522810019906d3",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 1078,
+          "endLine": 1078,
+          "startColumn": 2,
+          "endColumn": 47
+        }
+      ],
+      "semantic": "The finding is a generateKey function alias assignment to the public PKCS12 implementation, not a credential literal."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "playwright-core",
+      "version": "1.61.0",
+      "relativeFile": "lib/coreBundle.js",
+      "fileSha256": "6bc8db3d485266f1e0b62d18494849dce89c03479220b1784d96625ab8eb9cc0",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 38608,
+          "endLine": 38608,
+          "startColumn": 2,
+          "endColumn": 46
+        }
+      ],
+      "semantic": "The finding is a fixed protocol handshake nonce in a WebSocket HTTP upgrade request, not an authentication credential."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "playwright-core",
+      "version": "1.61.0",
+      "relativeFile": "lib/vite/traceViewer/assets/xtermModule-CsJ4vdCR.js",
+      "fileSha256": "4aa82b0448cef1cf951bbe0ac80bf2d2b7c5d279dd74bcc798a9e563e98e5295",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 7,
+          "endLine": 7,
+          "startColumn": 15837,
+          "endColumn": 15866
+        }
+      ],
+      "semantic": "The finding is a FourKeyMap class export assignment in minified terminal UI code, not a credential value."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "playwright-core",
+      "version": "1.64.0-alpha-1790635538000",
+      "relativeFile": "lib/coreBundle.js",
+      "fileSha256": "cd6730be1bbcff00771a0fc1390f200306d28428ce68e305420ca623cb39cdeb",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 40484,
+          "endLine": 40484,
+          "startColumn": 2,
+          "endColumn": 46
+        }
+      ],
+      "semantic": "The finding is a fixed protocol handshake nonce in a WebSocket HTTP upgrade request, not an authentication credential."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "playwright-core",
+      "version": "1.64.0-alpha-1790635538000",
+      "relativeFile": "lib/vite/traceViewer/assets/xtermModule-BRMEnLTX.js",
+      "fileSha256": "c598422590277f9448899c2ffa9964b845eac6f077e54f1b153d3f3798eafc94",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 5,
+          "endLine": 5,
+          "startColumn": 13297,
+          "endColumn": 13326
+        }
+      ],
+      "semantic": "The finding is a FourKeyMap class export assignment in minified terminal UI code, not a credential value."
+    },
+    {
+      "owner": "first-party",
+      "pkgName": "wucheng-agent-beta",
+      "version": "0.11.6",
+      "relativeFile": "desktop/agent-runtime/hermes-compatibility.json",
+      "fileSha256": "e3998857465b2277caf86779c0893a6684d1d04174bf8159453c2192122ebe8e",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 11,
+          "endLine": 11,
+          "startColumn": 13,
+          "endColumn": 101
+        }
+      ],
+      "semantic": "The finding is a 64-hex SHA256 of a public compatibility source file. All seven compatibility-file values in this JSON are SHA256 digests."
+    },
+    {
+      "owner": "first-party",
+      "pkgName": "wucheng-agent-beta",
+      "version": "0.11.6",
+      "relativeFile": "desktop/agent-runtime/settings.mjs",
+      "fileSha256": "3aa2e739dc365403e730616313b8dfe6c6dafb858e451f71c365641b8482e527",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 23,
+          "endLine": 23,
+          "startColumn": 28,
+          "endColumn": 72
+        }
+      ],
+      "semantic": "The finding is the incoming.apiKey / clearApiKey boolean-expression code used to decide whether an existing secret must be read, not a hardcoded secret value."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "node-forge",
+      "version": "1.4.0",
+      "relativeFile": "README.md",
+      "fileSha256": "4ea0e2db410fd5d87c3c9b21912b9ed3fe6c57b3107fa92e2c90b1e618121a49",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 877,
+          "endLine": 877,
+          "startColumn": 6,
+          "endColumn": 50
+        }
+      ],
+      "semantic": "Published ED25519 example assigns a fixed example password used only as a documented 32-byte seed; not an application account credential."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@alicloud/dyvmsapi20170525",
+      "version": "4.5.0",
+      "relativeFile": "dist/models/CloudGetRecordUrlResponseBody.d.ts",
+      "fileSha256": "4b50b985b670f44b14d1a43088d45ff25ae4220a4230a042c4729054e27050e2",
+      "rule": "aws-access-token",
+      "spans": [
+        {
+          "startLine": 8,
+          "endLine": 8,
+          "startColumn": 262,
+          "endColumn": 281
+        },
+        {
+          "startLine": 8,
+          "endLine": 8,
+          "startColumn": 76,
+          "endColumn": 313
+        }
+      ],
+      "semantic": "JSDoc response example is a voice-1.aliyun.cn signed URL with X-Amz protocol fields, in TypeScript source/declaration documentation; not current user credentials. No network validation was performed."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@alicloud/dyvmsapi20170525",
+      "version": "4.5.0",
+      "relativeFile": "src/models/CloudGetRecordUrlResponseBody.ts",
+      "fileSha256": "52d3be9d8d6013e5b1044993607f8987485d448098629709f582e6a38174f80c",
+      "rule": "aws-access-token",
+      "spans": [
+        {
+          "startLine": 11,
+          "endLine": 11,
+          "startColumn": 260,
+          "endColumn": 279
+        },
+        {
+          "startLine": 11,
+          "endLine": 11,
+          "startColumn": 74,
+          "endColumn": 311
+        }
+      ],
+      "semantic": "JSDoc response example is a voice-1.aliyun.cn signed URL with X-Amz protocol fields, in TypeScript source/declaration documentation; not current user credentials. No network validation was performed."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "20.19.43",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "855cd5f7eb396f5f1ab1bc0f8580339bff77b68a770f84c6b254e319bbfd1ac7",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 516,
+          "endLine": 516,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "20.19.43",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "855cd5f7eb396f5f1ab1bc0f8580339bff77b68a770f84c6b254e319bbfd1ac7",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 519,
+          "endLine": 519,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "20.19.43",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "855cd5f7eb396f5f1ab1bc0f8580339bff77b68a770f84c6b254e319bbfd1ac7",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 522,
+          "endLine": 522,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "22.20.5",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "a10f0e1854f3316d7ee437b79649e5a6ae3ae14ffe6322b02d4987071a95362e",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 517,
+          "endLine": 517,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "22.20.5",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "a10f0e1854f3316d7ee437b79649e5a6ae3ae14ffe6322b02d4987071a95362e",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 520,
+          "endLine": 520,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    },
+    {
+      "owner": "dependency",
+      "pkgName": "@types/node",
+      "version": "22.20.5",
+      "relativeFile": "https.d.ts",
+      "fileSha256": "a10f0e1854f3316d7ee437b79649e5a6ae3ae14ffe6322b02d4987071a95362e",
+      "rule": "generic-api-key",
+      "spans": [
+        {
+          "startLine": 523,
+          "endLine": 523,
+          "startColumn": 18,
+          "endColumn": 78
+        }
+      ],
+      "semantic": "HTTPS certificate-pinning documentation lists public pin-sha256 fingerprints; not private keys or API credentials."
+    }
+  ]
+}
