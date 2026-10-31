@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {pipeline} from 'node:stream/promises';
 import yazl from 'yazl';
@@ -46,6 +47,15 @@ test('shared native capabilities bind module identity, ASAR root, data, version 
  response={...runtime,pid:process.pid+1};await assert.rejects(manager.capabilities(id),{code:'SHARED_COMPONENT_IDENTITY_MISMATCH'});
  response={...runtime};runtime.root=path.join(f.root,'foreign','app.asar');saveRuntime();await assert.rejects(manager.capabilities(id),{code:'SHARED_COMPONENT_IDENTITY_MISMATCH'});
  runtime.root=response.root;runtime.version='2.0.0';saveRuntime();await assert.rejects(manager.capabilities(id),{code:'SHARED_COMPONENT_IDENTITY_MISMATCH'});
+});
+
+test('a proven-dead previous component record is archived verbatim before restart, while live or unconfirmed PIDs stay blocked',async t=>{
+ const f=fixture(t),c=f.registry.exporter;fs.mkdirSync(path.join(c.root,'resources'),{recursive:true});fs.writeFileSync(path.join(c.root,'resources','app.asar'),'public component');fs.mkdirSync(c.dataDir,{recursive:true});
+ const exited=spawnSync(process.execPath,['-e',''],{windowsHide:true});assert.equal(exited.status,0);assert.throws(()=>process.kill(exited.pid,0),{code:'ESRCH'});
+ const file=path.join(c.dataDir,'.integration-runtime.json'),record={id:'lingtu-order-export',apiVersion:1,version:'0.9.0',root:path.join(f.paths.programs,'exporter','previous','runtime','resources','app.asar'),dataDir:c.dataDir,pid:exited.pid,url:'http://127.0.0.1:9'},bytes=Buffer.from(JSON.stringify(record));fs.writeFileSync(file,bytes);
+ const manager=guardAgentServices(new ServiceManager({registryFile:f.paths.registryFile}),f.paths),status=await manager.capabilities('exporter');assert.equal(status.running,undefined);assert.equal(fs.existsSync(file),false);assert.deepEqual(fs.readFileSync(path.join(c.dataDir,status.staleRuntimeArchived)),bytes);assert.equal((await manager.capabilities('exporter')).installed,true);
+ for(const pid of [process.pid,0,0x80000000]){fs.writeFileSync(file,JSON.stringify({...record,pid}));await assert.rejects(manager.capabilities('exporter'),{code:'SHARED_COMPONENT_IDENTITY_MISMATCH'});assert.equal(fs.existsSync(file),true);}
+ const kill=process.kill;process.kill=(pid,signal)=>{if(pid===exited.pid&&signal===0)throw Object.assign(Error('access denied'),{code:'EPERM'});return kill(pid,signal);};try{fs.writeFileSync(file,bytes);await assert.rejects(manager.capabilities('exporter'),{code:'SHARED_COMPONENT_IDENTITY_MISMATCH'});assert.deepEqual(fs.readFileSync(file),bytes);}finally{process.kill=kill;}
 });
 
 test('shared lifecycle ignores unrelated same-EXE host but blocks a recorded live component PID',async t=>{

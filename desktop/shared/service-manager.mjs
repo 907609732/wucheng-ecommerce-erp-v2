@@ -14,9 +14,26 @@ function sharedNative(id,config,trustedExecutable,trustedVersion){
  if(!['warehouse','exporter'].includes(id)||config.managed!==true||trustedVersion!=='44.7.0'||typeof trustedExecutable!=='string'||!path.isAbsolute(trustedExecutable)||config.exe!==trustedExecutable)throw startError('共享 Electron 未绑定可信打包宿主','SHARED_ELECTRON_NOT_BOUND');
  return true;
 }
-function nativeRuntimeIdentity(id,config,record){
- if(record?.id!==config.id||record.apiVersion!==1||record.version!==config.version||typeof record.root!=='string'||path.resolve(record.root).toLowerCase()!==path.resolve(config.root,'resources','app.asar').toLowerCase()||typeof record.dataDir!=='string'||path.resolve(record.dataDir).toLowerCase()!==path.resolve(config.dataDir).toLowerCase()||!Number.isSafeInteger(record.pid)||record.pid<=0)throw startError('共享组件进程身份、版本或数据目录不符','SHARED_COMPONENT_IDENTITY_MISMATCH');
+function nativeRuntimeObservation(config,record){
+ if(record?.id!==config.id||record.apiVersion!==1||typeof record.version!=='string'||!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(record.version)||typeof record.root!=='string'||!path.isAbsolute(record.root)||typeof record.dataDir!=='string'||path.resolve(record.dataDir).toLowerCase()!==path.resolve(config.dataDir).toLowerCase()||!Number.isSafeInteger(record.pid)||record.pid<=0||record.pid>0x7fffffff)throw startError('共享组件进程身份、版本或数据目录不符','SHARED_COMPONENT_IDENTITY_MISMATCH');
  return record.pid;
+}
+function nativeRuntimeIdentity(id,config,record){
+ const pid=nativeRuntimeObservation(config,record);
+ if(record.version!==config.version||path.resolve(record.root).toLowerCase()!==path.resolve(config.root,'resources','app.asar').toLowerCase())throw startError('共享组件进程身份、版本或数据目录不符','SHARED_COMPONENT_IDENTITY_MISMATCH');
+ return pid;
+}
+function confirmedDead(pid){
+ try{process.kill(pid,0);return false;}catch(error){if(error.code==='ESRCH')return true;throw startError('无法确认共享组件旧进程已退出','SHARED_COMPONENT_IDENTITY_MISMATCH');}
+}
+function physicalRuntimeBytes(file){
+ const stat=fs.lstatSync(file);if(stat.isSymbolicLink()||!stat.isFile()||path.relative(file,fs.realpathSync.native(file))!=='')throw startError('共享组件运行记录路径无效','SHARED_COMPONENT_IDENTITY_MISMATCH');
+ return fs.readFileSync(file);
+}
+function archiveDeadRuntime(file,bytes,config,record){
+ const pid=nativeRuntimeObservation(config,record);if(!confirmedDead(pid))return null;
+ if(!physicalRuntimeBytes(file).equals(bytes)||!confirmedDead(pid))throw startError('共享组件运行记录在核对期间已变化','SHARED_COMPONENT_IDENTITY_MISMATCH');
+ const archive=file+'.stale-'+pid+'-'+randomUUID()+'.json';fs.renameSync(file,archive);return path.basename(archive);
 }
 const readStartLock=file=>{try{const text=fs.readFileSync(file,'utf8').trim();if(/^\d+$/.test(text))return {legacy:true,ownerPid:Number(text)};const value=JSON.parse(text);if(value.schemaVersion!==1||typeof value.token!=='string'||!Number.isSafeInteger(value.ownerPid)||value.childPid!==null&&!Number.isSafeInteger(value.childPid))throw Error();return value;}catch(e){if(e.code==='ENOENT')return null;throw startError('扩展启动记录损坏，已阻止重复启动；请检查运行日志和启动记录');}};
 const activeStart=record=>record&&(record.childPid?processAlive(record.childPid):processAlive(record.ownerPid));
@@ -68,7 +85,9 @@ export class ServiceManager{
   async capabilities(id){
     const c=this.config(id);if(['exporter','warehouse'].includes(id)){
       const shared=sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion),installed={id:c.id,installed:fs.existsSync(c.exe)&&(!shared||fs.existsSync(path.join(c.root,'resources','app.asar'))),root:c.root,dataDir:c.dataDir,exe:c.exe,...(shared?{sharedElectron:true,component:id}:{})};
-      let runtime;try{runtime=JSON.parse(fs.readFileSync(path.join(c.dataDir,c.runtimeFile||'.integration-runtime.json'),'utf8'));}catch(error){if(shared&&error.code!=='ENOENT')throw startError('共享组件运行记录损坏','SHARED_COMPONENT_IDENTITY_MISMATCH');return installed;}
+      const runtimeFile=path.join(c.dataDir,shared?(id==='warehouse'?'.integration-runtime-cloud.json':'.integration-runtime.json'):c.runtimeFile||'.integration-runtime.json');
+      let runtime,runtimeBytes;try{runtimeBytes=shared?physicalRuntimeBytes(runtimeFile):fs.readFileSync(runtimeFile);runtime=JSON.parse(runtimeBytes);}catch(error){if(shared&&error.code!=='ENOENT')throw startError('共享组件运行记录损坏','SHARED_COMPONENT_IDENTITY_MISMATCH');return installed;}
+      if(shared){const archived=archiveDeadRuntime(runtimeFile,runtimeBytes,c,runtime);if(archived)return {...installed,staleRuntimeArchived:archived};}
       if(shared)installed.pid=nativeRuntimeIdentity(id,c,runtime);
       if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.url||''))throw Error('导出台本机接口地址无效');
       let cap;try{const response=await fetch(runtime.url+'/api/integration/v1/capabilities',{signal:AbortSignal.timeout(1500),redirect:'error'});cap=await response.json();}catch{return installed;}
