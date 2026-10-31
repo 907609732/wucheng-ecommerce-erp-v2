@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import {classifySecretFinding,classificationPolicySha256} from './agent-beta-scan-classification.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
-const scannerSha256='d4e3ee6714c53a8872d7fbaaae2486c305abe472aa56f34826f1f39bd3555890';
+const scannerSha256='363cab9a83014379a05a3ae1a9a26d73113c0f6631923c0f53e0b2e1617af2a8';
 const rulesSha256='e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf';
 const scanConfigSha256='ebf46a58b5d6ed45d3260602db2713f31732ec466607dc8483473504ce09e45e';
 const slash=value=>value.replaceAll('\\','/');
@@ -17,25 +19,58 @@ function boundedInput(base,file){if(!path.isAbsolute(file))throw Error('Preview 
 function gitCommit(){const result=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true});if(result.status!==0||!/^\s*[a-f0-9]{40}\s*$/.test(result.stdout||''))throw Error('Current source commit unavailable');const builderState=spawnSync('git',['diff','--quiet','HEAD','--','scripts/build-agent-preview.mjs'],{cwd:root,windowsHide:true});if(builderState.status!==0)throw Error('Preview builder changed after the source freeze');return result.stdout.trim();}
 
 export function assertPublicScanBinding(proof,{stage,manifestSha256,sourceCommit,sourceDigests}){
- if(proof?.ok!==true||proof.scope!=='isolated-beta'||proof.execution!=='stage-public-scan'||proof.error!==null||proof.scannerExitCode!==0||proof.scannerVersion!=='8.30.1'||proof.violations!==0||proof.needsReview!==0||proof.audit?.ok!==true)throw Error('Strict public scan is missing, failed or incomplete');
+ if(proof?.ok!==true||proof.scope!=='isolated-beta'||proof.execution!=='stage-public-scan'||proof.error!==null||![0,1].includes(proof.scannerExitCode)||proof.scannerVersion!=='8.30.1'||proof.secretScansComplete!==true||proof.violations!==0||proof.needsReview!==0||proof.audit?.ok!==true||proof.unresolvedSecretFindings!==0||!Number.isSafeInteger(proof.classifiedFalsePositiveFindings)||proof.classifiedFalsePositiveFindings<0)throw Error('Strict public scan is missing, failed or incomplete');
+ if((proof.scannerExitCode===0)!==(proof.classifiedFalsePositiveFindings===0))throw Error('Raw secret scanner exit/count evidence is inconsistent');
  if(proof.stage!==stage||proof.stageManifestSha256!==manifestSha256||proof.sourceCommit!==sourceCommit||!same(proof.sourceDigests,sourceDigests)||!same(proof.currentSourceDigests,sourceDigests))throw Error('Strict public scan is stale or bound to another source/stage');
  if(proof.officialRuleSha256!==rulesSha256||proof.strictConfigSha256!==scanConfigSha256)throw Error('Unknown strict public scan policy');
+ if(proof.classificationPolicySha256!==classificationPolicySha256||!/^[a-f0-9]{64}$/.test(proof.payloadInventorySha256||''))throw Error('Unknown semantic classification policy or payload inventory');
  const c=proof.counts;
  if(!c||!(c.stageFiles>0)||c.sqliteMagicStageFilesChecked!==c.stageFiles||!(c.asarFiles>=2)||!(c.asarFilesExtracted>0)||c.sqliteMagicAsarFilesChecked!==c.asarFilesExtracted||!(c.asarIntegrityChecked>0)||!(c.vendorZipEntries>0)||!(c.sqliteMagicVendorEntriesChecked>0)||!(c.vendorTextExtracted>0))throw Error('Strict scan archive/SQLite coverage is incomplete');
 }
 
-function verifyScanFiles(summaryFile,proof){
+export function verifiedPayloadMap(inventory,manifest){
+ if(!Array.isArray(inventory)||!manifest.payloadHashes||typeof manifest.payloadHashes!=='object'||Array.isArray(manifest.payloadHashes))throw Error('Measured payload inventory missing');
+ const measured=new Map();
+ for(const item of inventory){checkedPayloadRelative(item.path);if(measured.has(item.path)||!/^[a-f0-9]{64}$/.test(item.sha256||'')||!Number.isSafeInteger(item.bytes)||item.bytes<0)throw Error('Measured payload inventory entry is invalid');measured.set(item.path,item.sha256);}
+ const verified=new Map();for(const [relative,expected]of Object.entries(manifest.payloadHashes)){checkedPayloadRelative(relative);if(!/^[a-f0-9]{64}$/.test(expected)||measured.get(relative)!==expected)throw Error('Measured payload inventory differs from audited manifest');verified.set(relative,expected);}
+ return verified;
+}
+
+export function replaySecretClassifications({raw,records,scan,stage,scanRoot,verifiedPayloadHashes}){
+ if(!Array.isArray(raw)||!Array.isArray(records)||raw.length!==records.length||scan.findings!==raw.length||![0,1].includes(scan.exitCode)||scan.signal!==null||scan.spawnErrorCode!==null||(raw.length===0?scan.exitCode!==0:scan.exitCode!==1))throw Error('Raw secret scanner execution is inconsistent or failed');
+ let classified=0,unresolved=0;
+ for(let index=0;index<raw.length;index++){
+  const finding=raw[index];if(typeof finding.Fingerprint!=='string'||!finding.Fingerprint||typeof finding.File!=='string')throw Error('Raw finding provenance missing');
+  const file=boundedInput(scanRoot,finding.File),classification=classifySecretFinding({finding,file,stage,verifiedPayloadHashes});
+  const fingerprintSha256=createHash('sha256').update(finding.Fingerprint).digest('hex');
+  if(!isDeepStrictEqual(records[index],{index,fingerprintSha256,classification}))throw Error('Secret finding classification does not replay exactly');
+  if(classification===null)unresolved++;else classified++;
+ }
+ if(scan.classifiedFalsePositives!==classified||scan.unresolvedFindings!==unresolved||classified+unresolved!==scan.findings)throw Error('Secret classification counts differ from raw findings');
+ if(unresolved)throw Error('Unresolved secret findings block preview packaging');
+ return {classified,unresolved,rawExitCode:scan.exitCode};
+}
+
+function verifyScanFiles(summaryFile,proof,{stage,manifest}){
  const directory=path.dirname(summaryFile),scannerDirectory=path.dirname(directory);
  const checked=name=>{const file=path.join(directory,name);noLinks(file);if(!fs.statSync(file).isFile())throw Error('Strict scanner evidence file missing');return file;};
  for(const name of ['violations.json','needs-review.json']){const entries=json(checked(name));if(!Array.isArray(entries)||entries.length)throw Error('Strict scanner has unresolved findings');}
  for(const [file,expected] of [[path.join(scannerDirectory,'scan-stage-public.mjs'),scannerSha256],[path.join(scannerDirectory,'gitleaks-v8.30.1.official.toml'),rulesSha256],[checked('gitleaks.toml'),proof.strictConfigSha256]]){noLinks(file);if(digest(file)!==expected)throw Error('Strict scanner or rules provenance changed');}
+ const inventory=checked('payload-inventory.json');if(digest(inventory)!==proof.payloadInventorySha256)throw Error('Measured payload inventory file changed');
+ const inventoryRows=json(inventory);if(!Array.isArray(inventoryRows)||inventoryRows.length!==proof.counts.stageFiles)throw Error('Measured inventory file count differs from actual scan');
+ const verifiedPayloadHashes=verifiedPayloadMap(inventoryRows,manifest);
  const scans=json(checked('gitleaks-scanners.json'));
  if(!Array.isArray(scans)||scans.length!==2)throw Error('Both actual-stage and archive secret scans are required');
+ let totalClassified=0,totalUnresolved=0,rawExitCode=0;
  for(const name of ['actual-stage','extracted-archive-files']){
   const scan=scans.find(item=>item.name===name);
-  if(!scan||scan.exitCode!==0||scan.signal!==null||scan.findings!==0||scan.spawnErrorCode!==null||scan.report!==`gitleaks-${name}.redacted.json`)throw Error('A strict secret scanner did not finish cleanly');
-  for(const file of [scan.report,`gitleaks-${name}.findings.json`]){const findings=json(checked(file));if(!Array.isArray(findings)||findings.length)throw Error('Strict secret scan findings require review');}
+  if(!scan||scan.report!==`gitleaks-${name}.redacted.json`)throw Error('A strict secret scanner report is missing');
+  const raw=json(checked(scan.report)),records=json(checked(`gitleaks-${name}.classified.json`));
+  const result=replaySecretClassifications({raw,records,scan,stage,scanRoot:name==='actual-stage'?stage:path.join(directory,'extracted'),verifiedPayloadHashes});
+  const minimal=json(checked(`gitleaks-${name}.findings.json`));if(!Array.isArray(minimal)||minimal.length!==raw.length||minimal.some((entry,index)=>entry.fingerprintSha256!==records[index].fingerprintSha256))throw Error('Minimal finding report differs from its raw findings');
+  totalClassified+=result.classified;totalUnresolved+=result.unresolved;rawExitCode=Math.max(rawExitCode,result.rawExitCode);
  }
+ if(totalClassified!==proof.classifiedFalsePositiveFindings||totalUnresolved!==proof.unresolvedSecretFindings||rawExitCode!==proof.scannerExitCode)throw Error('Summary does not preserve actual raw scanner/classification results');
 }
 
 async function validateInputs({stage:stageInput,electronDist:electronInput,scanSummary:summaryInput}){
@@ -51,8 +86,9 @@ async function validateInputs({stage:stageInput,electronDist:electronInput,scanS
  const sourceDigests={business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()},sourceCommit=gitCommit();
  const manifest=json(path.join(stage,'agent-beta-resources.json')),manifestSha256=digest(path.join(stage,'agent-beta-resources.json'));
  if(!same(manifest.sourceDigests,sourceDigests))throw Error('Source changed since staging; prepare a new current stage');
- const proof=json(scanSummary);assertPublicScanBinding(proof,{stage,manifestSha256,sourceCommit,sourceDigests});verifyScanFiles(scanSummary,proof);
+ const proof=json(scanSummary);assertPublicScanBinding(proof,{stage,manifestSha256,sourceCommit,sourceDigests});
  const {auditStage}=await import('./agent-beta-package-audit.mjs');const audit=auditStage(stage);
+ verifyScanFiles(scanSummary,proof,{stage,manifest});
  const pkg=json(path.join(stage,'package.json')),launcher=json(path.join(stage,'desktop/launcher/package.json'));
  if(!/^\d+\.\d+\.\d+$/.test(pkg.version||'')||launcher.version!==pkg.version)throw Error('Preview must use the frozen stage version');
  for(const rel of ['workbench-gateway/desktop/agent-runtime/mcp-entry.mjs','workbench-gateway/desktop/agent-runtime/hermes-bootstrap.py','apps/purchase/server.mjs','apps/sales/server.mjs','apps/overview/server.mjs','apps/purchase/public','apps/sales/public','apps/overview/public','apps/exporter/out/main/preview-ledger.js','apps/warehouse/runtime/WuchengAgentBetaWarehouse.exe','apps/exporter/runtime/WuchengAgentBetaExporter.exe'])if(!fs.existsSync(path.join(stage,rel)))throw Error('Complete preview resource missing: '+rel);
@@ -114,7 +150,7 @@ export async function buildPreview(inputs){
  const configFile=path.join(output,'preview-builder.cjs'),artifactName=`WuchengAgentPreview-Setup-\${version}-preview-${validated.sourceCommit.slice(0,12)}-\${arch}.\${ext}`;
  const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:{oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false}};
  fs.writeFileSync(configFile,'module.exports='+JSON.stringify(config),{flag:'wx'});
- fs.writeFileSync(path.join(output,'validated-inputs.json'),JSON.stringify({stage:validated.stage,sourceCommit:validated.sourceCommit,sourceDigests:validated.sourceDigests,stageManifestSha256:validated.manifestSha256,scanSummary:validated.scanSummary,scanSummarySha256:validated.scanSummarySha256,scannerSha256,rulesSha256,scanConfigSha256,audit:validated.audit,metadata},null,2),{flag:'wx'});
+ fs.writeFileSync(path.join(output,'validated-inputs.json'),JSON.stringify({stage:validated.stage,sourceCommit:validated.sourceCommit,sourceDigests:validated.sourceDigests,stageManifestSha256:validated.manifestSha256,scanSummary:validated.scanSummary,scanSummarySha256:validated.scanSummarySha256,scannerSha256,rulesSha256,scanConfigSha256,classificationPolicySha256,audit:validated.audit,metadata},null,2),{flag:'wx'});
  const builder=path.join(root,'node_modules/electron-builder/cli.js'),logFile=path.join(output,'builder.log'),log=fs.openSync(logFile,'wx');let result;
  try{result=spawnSync(process.execPath,[builder,'--projectDir',appRoot,'--prepackaged',prepackaged,'--config',configFile,'--win','--publish','never'],{cwd:root,stdio:['ignore',log,log],windowsHide:true});}finally{fs.closeSync(log);}
  fs.writeFileSync(path.join(output,'builder-result.json'),JSON.stringify({exitCode:result.status,signal:result.signal,spawnErrorCode:result.error?.code||null},null,2));
