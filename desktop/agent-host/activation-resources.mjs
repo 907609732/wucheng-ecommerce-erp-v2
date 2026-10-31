@@ -1,7 +1,10 @@
-import fs from 'node:fs';
+import nodeFs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {setImmediate as yieldToHost} from 'node:timers/promises';
+// Resource manifests describe physical files, including the ASAR containers.
+// Electron's normal fs intentionally exposes those containers as directories.
+const fs=process.versions.electron?process.getBuiltinModule('original-fs'):nodeFs;
 import {AGENT_RESOURCE_FORMAT_V2} from './resource-layout.mjs';
 
 export const activationCancelled=()=>Object.assign(Error('已取消准备工作台'),{name:'AbortError',code:'BETA_ACTIVATION_CANCELLED'});

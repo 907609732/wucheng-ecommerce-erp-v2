@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import nodeFs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
@@ -8,6 +8,7 @@ import {initializePreviewLedgers} from './preview-ledgers.mjs';
 import {createActivationResourceOperation,verifyActivationResources,activationCancelled} from './activation-resources.mjs';
 import {AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2} from './resource-layout.mjs';
 export {verifyActivationResources} from './activation-resources.mjs';
+const fs=process.versions.electron?process.getBuiltinModule('original-fs'):nodeFs;
 const require=createRequire(import.meta.url),yauzl=require('yauzl');
 const ids=['warehouse','purchase','sales','overview','exporter'];
 const ledgers={warehouse:'workspace/data/erp.sqlite',purchase:'purchases.sqlite',sales:'sales.sqlite',overview:'overview.sqlite',exporter:'orders.sqlite'};
