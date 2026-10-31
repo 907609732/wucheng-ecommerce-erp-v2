@@ -35,6 +35,7 @@ import {saveArtifactDownload} from '../agent-host/artifacts.mjs';
 import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent-host/launcher-policy.mjs';
 import {createDesktopUiSessions} from '../agent-host/desktop-ui-sessions.mjs';
 import {betaProcessesRunning} from '../agent-host/startup.mjs';
+import {createPreparationWindow,createPreparationShutdown,formatPreparationProgress} from './preparation-window.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
@@ -59,21 +60,19 @@ app.setPath('userData', path.join(profile, 'launcher'));
 const cliIndex=process.argv.indexOf('--cli'),mcpMode=process.argv.includes('--mcp-stdio'),headless=cliIndex>=0||mcpMode;
 const acquired = headless || app.requestSingleInstanceLock();
 if (!acquired) app.quit();
-let win, modules, services, desks, updater, recoveryError, tray, quitting=false, preparation, preparationStatus, rendererReady=false, previousCloudExecutable;
+let win, modules, services, desks, updater, recoveryError, tray, quitting=false, preparation, preparationUi, preparationStatus, activationPromise, rendererReady=false, previousCloudExecutable;
+const activationAbort=new AbortController();
 const moduleArgument=args=>args.find(value=>/^--open-module=(warehouse|purchase|sales|overview|exporter)$/.test(value))?.split('=')[1];
 let requestedModule=headless?undefined:moduleArgument(process.argv);
 function deliverRequestedModule(){if(rendererReady&&requestedModule){const id=requestedModule;requestedModule=undefined;send('desks:navigate',{id});}}
 function reportPreparation(value){
   if(headless||process.argv.includes('--hidden')||process.env.LINGTU_SKIP_BUNDLED_ACTIVATION)return;
-  const label=value.phase==='ready'?'准备完成':'正在准备工作台';
-  preparationStatus={label,detail:value.component?('正在准备 '+(names[value.component]||value.component)+' · '+value.version):'正在校验程序与本机数据，请稍候。'};
-  if(!preparation){
-    preparation=new BrowserWindow({width:960,height:600,minWidth:480,minHeight:300,resizable:true,maximizable:false,minimizable:true,title:'准备五成电子商务工作台',icon:path.join(here,'../assets/lingtu-icon.png'),webPreferences:{preload:path.join(here,'preparing-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
-    preparation.webContents.setWindowOpenHandler(()=>({action:'deny'}));preparation.webContents.on('will-navigate',event=>event.preventDefault());
-    preparation.webContents.on('did-finish-load',()=>{if(preparation&&!preparation.isDestroyed())preparation.webContents.send('launcher:preparation',preparationStatus);});
-    preparation.on('close',event=>{if(!quitting){event.preventDefault();preparation.hide();}});
-    preparation.on('closed',()=>{preparation=undefined;});void preparation.loadFile(path.join(here,'preparing.html'));
-  }else if(!preparation.isDestroyed())preparation.webContents.send('launcher:preparation',preparationStatus);
+  preparationStatus=formatPreparationProgress(value,names);
+  if(!preparationUi){
+    preparationUi=createPreparationWindow({BrowserWindow,ipcMain,html:path.join(here,'preparing.html'),preload:path.join(here,'preparing-preload.cjs'),icon:path.join(here,'../assets/lingtu-icon.png'),signal:activationAbort.signal,isQuitting:()=>quitting,onCancel:()=>app.quit(),onClosed:()=>{preparation=undefined;}});
+    preparation=preparationUi.window;
+  }
+  preparationUi.update(preparationStatus);
 }
 const send=(channel,value)=>{if(win&&!win.isDestroyed()&&!win.webContents.isDestroyed())win.webContents.send(channel,value);};
 const showWindow=()=>{const target=win&&!win.isDestroyed()?win:preparation&&!preparation.isDestroyed()?preparation:null;if(target){if(target.isMinimized())target.restore();target.show();target.focus();}};
@@ -267,13 +266,19 @@ if (acquired) app.whenReady().then(async () => {
   hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host')});
   let activation,activationError;
   if(app.isPackaged){
-    reportPreparation({phase:'preparing'});
     try{
+      reportPreparation({phase:'verify'});
+      await preparationUi?.ready;
+      activationAbort.signal.throwIfAborted();
       const pin=JSON.parse(fs.readFileSync(path.join(here,'../agent-host/packaged-manifest.json'),'utf8'));
       const {createAgentActivation}=await import('../agent-host/activation.mjs');
-      activation=await createAgentActivation({paths:agentPaths,resourcesDir:process.resourcesPath,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths)})();
+      activationAbort.signal.throwIfAborted();
+      const pending=createAgentActivation({paths:agentPaths,resourcesDir:process.resourcesPath,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths),signal:activationAbort.signal,onProgress:reportPreparation})();
+      activationPromise=pending;
+      try{activation=await pending;}finally{if(activationPromise===pending)activationPromise=undefined;}
+      activationAbort.signal.throwIfAborted();
       reportPreparation({phase:'ready'});
-    }catch(error){activationError=error;recoveryError='测试组件尚未就绪：'+error.message;diagnostics.write('error','workbench',recoveryError);}
+    }catch(error){if(quitting||activationAbort.signal.aborted)return;activationError=error;recoveryError='测试组件尚未就绪：'+error.message;diagnostics.write('error','workbench',recoveryError);}
   }
   services = guardAgentServices(new ServiceManager({registryFile:location.registryFile}),agentPaths);
   if(activationError){const blocked=()=>{throw Object.assign(Error(recoveryError),{code:'BETA_COMPONENTS_NOT_READY'});};services.ensure=blocked;services.start=blocked;}
@@ -583,16 +588,15 @@ if (acquired) app.whenReady().then(async () => {
     return operation==='artifacts.open'?saveArtifactDownload(result,{dialog,window:win,downloads:app.getPath('downloads')}):result;
   });
   await win.loadFile(path.join(here, 'agent-index.html'));
-  if(preparation&&!preparation.isDestroyed())preparation.destroy();
+  preparationUi?.destroy();
   if(!process.argv.includes('--hidden')||moduleArgument(process.argv))showWindow();
   if(!remote())try{await getAgentHost();}catch(error){send('modules:message','任务主机尚未就绪：'+error.message);}
   if(connection.read().mode==='server')try{await ensureGateway();}catch(error){send('modules:message',error.message);}
   if(recoveryError)send('modules:message','上次模块更新需要恢复检查：'+recoveryError);
-}).catch(error=>{diagnostics.write('error','workbench','启动失败 · '+(error.stack||error.message));if(headless)console.log(JSON.stringify({ok:false,code:error.code||'STARTUP_FAILED',error:error.message}));else dialog.showErrorBox('工作台准备未完成','请重新打开工作台重试。若仍然失败，请保留原数据并联系管理员处理。\n\n'+error.message);app.exit(1);});
+}).catch(error=>{if(quitting||activationAbort.signal.aborted)return;diagnostics.write('error','workbench','启动失败 · '+(error.stack||error.message));if(headless)console.log(JSON.stringify({ok:false,code:error.code||'STARTUP_FAILED',error:error.message}));else dialog.showErrorBox('工作台准备未完成','请重新打开工作台重试。若仍然失败，请保留原数据并联系管理员处理。\n\n'+error.message);app.exit(1);});
 app.on('second-instance',(_event,args)=>{const id=moduleArgument(args);if(id){requestedModule=id;deliverRequestedModule();}if(id||!args.includes('--hidden'))showWindow();});
-let agentShutdownDone=false;
+const shutdownPreparation=createPreparationShutdown({controller:activationAbort,getActivation:()=>activationPromise,getHost:()=>agentHost,getGateway:()=>agentGateway,quit:()=>app.quit(),onError:error=>diagnostics.write('error','workbench','任务主机退出未完成 · '+error.code)});
 app.on('before-quit',event=>{
-  quitting=true;tray?.destroy();
-  if(!agentShutdownDone&&(agentHost||agentGateway)){event.preventDefault();agentShutdownDone=true;void(async()=>{await agentGateway?.stop();await agentHost?.close();app.quit();})().catch(error=>{diagnostics.write('error','workbench','任务主机退出未完成 · '+error.code);app.quit();});}
+  quitting=true;tray?.destroy();shutdownPreparation(event);
 });
 app.on('window-all-closed',()=>{if(headless||quitting)app.quit();});
