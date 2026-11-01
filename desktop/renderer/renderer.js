@@ -556,7 +556,7 @@ async function refreshSettings() {
 }
 
 function navigateView(view) {
-  const titles = { dashboard: '云仓同步', inventory: '云仓同步', sales: '云仓同步', attendance: '签到管理', settings: '云仓设置' };
+  const titles = { dashboard: '云仓同步', inventory: '云仓同步', sales: '云仓同步', settings: '云仓设置' };
   if (!titles[view]) return;
   document.querySelectorAll('.view-tab').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));

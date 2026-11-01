@@ -22,7 +22,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
   workbenchDb.exec(`CREATE TABLE IF NOT EXISTS requests(actor_id TEXT NOT NULL,request_id TEXT NOT NULL,route TEXT NOT NULL,payload_hash TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(actor_id,request_id));
     CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,session_id TEXT NOT NULL,channel TEXT NOT NULL,operation TEXT NOT NULL,result TEXT NOT NULL,created_at TEXT NOT NULL);`);
   const runtimeFile = path.join(dataDir, '.integration-runtime-cloud.json');
-  const state = {id:'lingtu-warehouse',apiVersion:1,root,dataDir,version,pid:process.pid,capabilities:['warehouse.read','warehouse.run','warehouse.daily','module.lifecycle'],workbench:{...warehouseAdapter,protocolVersion:1}};
+  const state = {id:'lingtu-warehouse',apiVersion:1,root,dataDir,version,pid:process.pid,capabilities:['warehouse.read','warehouse.run','module.lifecycle'],workbench:{...warehouseAdapter,protocolVersion:1}};
   const sanitize=value=>Array.isArray(value)?value.map(sanitize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).filter(([key])=>!/(?:path|directory|^root$|^pid$|secret|cookie|password|token)/i.test(key)).map(([key,v])=>[key,sanitize(v)])):value;
   const audit=(actor,operation,result)=>workbenchDb.prepare('INSERT INTO audit VALUES(?,?,?,?,?,?,?)').run(randomUUID(),actor.id,actor.sessionId,actor.channel,operation,result,new Date().toISOString());
   const taskPayload=body=>{
@@ -115,7 +115,8 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
           if(['/ui','/ui/app.js','/ui/app.css'].includes(route)){res.writeHead(200,{'Content-Type':route==='/ui'?'text/html; charset=utf-8':route.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(route==='/ui'?warehouseHtml:route.endsWith('.js')?warehouseScript:warehouseStyles);}
           if(route==='/state')return send(200,{version,busy:isBusy(),maintenance:maintenance(),executionLocation:'server',permissions:{read:true,runTasks:true},...(business.getState?sanitize(await business.getState(actor)): {}),...getDataSetIdentity()});
           if(route==='/inventory')return send(200,sanitize(await business.getInventory(actor)));
-          if(route==='/daily'){
+          if(route==='/daily')return send(410,{error:'云仓签到功能已移除'});
+          if(false){
             if(!business.getDailyStatus)return send(503,{error:'签到服务尚未就绪'});
             return send(200,sanitize(await business.getDailyStatus(actor)));
           }
@@ -124,6 +125,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
           if(route==='/logs'){const state=sanitize(await business.getTaskState(actor)),limit=Math.max(1,Math.min(100,Number(url.searchParams.get('limit'))||30));return send(200,{logs:(Array.isArray(state.logs)?state.logs:[]).slice(-limit)});}
           return send(404,{error:'未知云仓业务接口'});
         }
+        if(route==='/daily'||route.startsWith('/daily/'))return send(410,{error:'云仓签到功能已移除'});
         const dailyRoute=['/daily/action','/daily/config','/daily/remind'].includes(route);
         if(req.method!=='POST'||!['/jobs','/jobs/stop','/host-action','/send-latest-valid','/daily/action','/daily/config','/daily/remind'].includes(route))return send(404,{error:'未知云仓业务接口'});
         if(maintenance())return send(409,{error:'模块正在安装或迁移检查',code:'MODULE_MAINTENANCE'});

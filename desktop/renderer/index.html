@@ -39,11 +39,9 @@
       <button class="view-tab active" type="button" data-view="dashboard">运行概览</button>
       <button class="view-tab" type="button" data-view="inventory">商品库存</button>
       <button class="view-tab" type="button" data-view="sales">销售趋势</button>
-      <button class="view-tab" type="button" data-view="attendance">签到管理</button>
       <button class="view-tab" type="button" data-view="settings">云仓设置</button>
     </nav>
     <div data-view-panel="dashboard">
-    <div id="dailyOverview"></div>
     <section class="summary-grid">
       <article class="summary-card"><span>运行状态</span><strong id="runState">空闲</strong></article>
       <article class="summary-card"><span>下次执行</span><strong id="nextRun">未启用</strong></article>
@@ -60,7 +58,6 @@
     </section>
     </div>
 
-    <div data-view-panel="attendance" class="hidden"><div id="dailyManagement"></div></div>
 
     <div data-view-panel="inventory" class="hidden">
       <section class="inventory-summary-grid">
@@ -177,7 +174,6 @@
             <option value="dashboard">运行概览</option>
             <option value="inventory">商品库存</option>
             <option value="sales">销售趋势</option>
-            <option value="attendance">签到管理</option>
             <option value="settings">云仓设置</option>
           </select></label>
         </div>
@@ -340,6 +336,5 @@
   <script src="feature-help.js"></script>
   <script src="renderer.js"></script>
   <script type="module" src="../shared/loading-screen-auto.mjs"></script>
-  <script type="module" src="daily-work-entry.mjs"></script>
 </body>
 </html>

@@ -971,37 +971,6 @@ function openRemoteLogin() {
 }
 
 ipcMain.handle("settings:get", async () => publicSettings());
-ipcMain.handle('warehouse-daily:get', async event => {
-  if(event.sender!==mainWindow?.webContents)throw Error('无权访问工作记录');
-  if(runtimeMode()==='client')throw Error('请从工作台 Tailscale 入口打开云仓');
-  return dailyStatus();
-});
-ipcMain.handle('warehouse-daily:action', async (event,payload={}) => {
-  if(agentManaged)throw Object.assign(Error('请从中央任务结果页复核本人操作'),{code:'AGENT_REVIEW_REQUIRED'});
-  if(event.sender!==mainWindow?.webContents)throw Error('无权操作工作记录');
-  assertDailyAvailable();
-  if(payload.action==='remind')return dailyRemind(localDailyActor,payload);
-  return dailyService().action(localDailyActor,payload);
-});
-ipcMain.handle('warehouse-daily:config', (event,payload={}) => {
-  if(agentManaged)throw Object.assign(Error('请从中央任务结果页复核员工配置'),{code:'AGENT_REVIEW_REQUIRED'});
-  if(event.sender!==mainWindow?.webContents)throw Error('无权修改员工设置');
-  assertDailyAvailable();
-  return dailyService().configure(localDailyActor,payload);
-});
-ipcMain.handle('warehouse-daily:reminder-settings', async (event,payload={}) => {
-  if(event.sender!==mainWindow?.webContents||runtimeMode()==='client')throw Error('提醒凭据只能在主机设置');
-  assertDailyAvailable();
-  const warehouseReminders=normalizeReminderSettings(payload.settings||{}),secrets={...await readSecrets()};
-  for(const key of ['smtpPassword','aliyunAccessKeyId','aliyunAccessKeySecret']){
-    if(payload.clearSecrets?.includes(key))delete secrets[key];
-    else if(String(payload.secrets?.[key]||'').trim())secrets[key]=String(payload.secrets[key]).trim();
-  }
-  await encryptSecrets(secrets);
-  const settings={...readSettings(),warehouseReminders};
-  fs.writeFileSync(settingsPath(),JSON.stringify(settings,null,2)+'\n','utf8');cachedSettings=settings;
-  return {ok:true};
-});
 ipcMain.handle("branding:get", () => currentBranding());
 ipcMain.handle("app:about", () => ({ version: componentVersion, build: readBuildInfo(), changelog: CHANGELOG }));
 ipcMain.handle("secrets:get-editable", async (event) => {
@@ -1371,12 +1340,7 @@ app.whenReady().then(async () => {
   });
   if (!managedCloud) updater.initialize();
   configureSchedule();
-  if(!agentManaged)reminderTimer=setInterval(async()=>{
-    if(reminderWork||managedMaintenance||fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json'))||!fs.existsSync(inventoryDatabasePath()))return;
-    reminderWork++;
-    try{await dailyService().tick();}catch{appendLog('员工自动提醒检查失败，请核对签到管理配置','error');}finally{reminderWork--;}
-  },30000);
-  reminderTimer?.unref();
+
   try {
     await configureRemoteService();
   } catch {

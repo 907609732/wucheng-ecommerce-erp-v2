@@ -1,10 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("inventoryApp", {
-  getDailyStatus: () => ipcRenderer.invoke('warehouse-daily:get'),
-  dailyAction: payload => ipcRenderer.invoke('warehouse-daily:action', payload),
-  saveDailyConfig: payload => ipcRenderer.invoke('warehouse-daily:config', payload),
-  saveReminderSettings: payload => ipcRenderer.invoke('warehouse-daily:reminder-settings', payload),
   getBranding: () => ipcRenderer.invoke("branding:get"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   getAbout: () => ipcRenderer.invoke("app:about"),
