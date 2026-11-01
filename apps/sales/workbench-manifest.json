@@ -471,15 +471,6 @@
     },
     {
       "module": "sales",
-      "method": "POST",
-      "path": "/api/jobs",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "sales:POST:/api/jobs"
-    },
-    {
-      "module": "sales",
       "method": "GET",
       "path": "/api/jobs/:id/report",
       "kind": "read",

@@ -29,7 +29,8 @@ if(!process.argv.includes('--launch')){
     throw Error('Could not allocate an independent fixture port');
   };
   const debugPort=process.argv.includes('--debug')?await freePort():null;
-  const manifest={debugPort,schemaVersion:1,purpose:'hybrid-source-manual-acceptance',nonce,root,fixtureRoot,registryFile,output,scope:'Real source Electron and three HTTP services, synthetic temporary books, no company model credentials; not a packaged Beta'};
+  const windowsEnvironment=Object.fromEntries(['HOME','USERPROFILE','APPDATA','LOCALAPPDATA'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
+  const manifest={windowsEnvironment,debugPort,schemaVersion:1,purpose:'hybrid-source-manual-acceptance',nonce,root,fixtureRoot,registryFile,output,scope:'Real source Electron and three HTTP services, synthetic temporary books, no company model credentials; not a packaged Beta'};
   let manager,child,exitCode=1;
   try{
     for(const name of Object.keys(process.env))if(/(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET)|^(?:CODEX_HOME|HERMES_HOME|LINGTU_REGISTRY_PATH|LINGTU_WORKBENCH_POLICY_FILE)$/i.test(name))delete process.env[name];

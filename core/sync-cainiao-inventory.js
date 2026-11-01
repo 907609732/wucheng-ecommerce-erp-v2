@@ -607,7 +607,6 @@ async function synchronizeInventory(daily, runId) {
 
   // 保留历史库存快照，用于跨日验真和审计；仅停用当前快照已经不存在的 SKU。
   console.log('\n🧹 更新库存主数据...');
-  const { getDb } = await import('./erp/db.js');
   const db = getDb();
   console.log('   历史库存快照已保留');
 

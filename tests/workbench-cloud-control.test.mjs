@@ -20,8 +20,8 @@ test('warehouse delegation restricts identity, scope, tasks and retries without 
     };
     assert.equal(runtime.workbench.protocolVersion,1);const inventory=await request('/inventory');assert.equal(inventory.status,200);assert.equal(inventory.body.items[0].quantity,3);assert.equal(inventory.body.token,undefined);assert.equal(inventory.body.logPath,undefined);
     assert.equal((await request('/inventory',{actorPatch:{path:'/other'}})).status,401);
-    assert.equal((await request('/jobs',{method:'POST',body:{type:'sync'},role:'viewer'})).status,403);
-    assert.equal((await request('/jobs',{method:'POST',body:{type:'sync'},role:'editor'})).status,403);assert.equal(calls.length,0);
+    for(const role of ['viewer','editor']){assert.equal((await request('/jobs',{method:'POST',body:{type:'sync'},role})).status,200,'authenticated company members share business access');}
+    assert.equal(calls.length,2);calls.length=0;
     const requestId=randomUUID(),job={type:'monthly-sales',month:'2026-01'};const first=await request('/jobs',{method:'POST',body:job,role:'editor',canRunTasks:true,requestId});const retry=await request('/jobs',{method:'POST',body:job,role:'editor',canRunTasks:true,requestId});assert.equal(first.status,200);assert.deepEqual(retry.body,first.body);assert.equal(calls.length,1);assert.equal(calls[0].actor.id,'tailscale:owner@example.test');assert.equal(calls[0].trigger,'tailscale');
     assert.equal((await request('/jobs',{method:'POST',body:{type:'sync'},requestId})).status,409);
     const login=await request('/host-action',{method:'POST',body:{}});assert.equal(login.body.state,'waiting-host-action');assert.equal(calls.at(-1).type,'login');

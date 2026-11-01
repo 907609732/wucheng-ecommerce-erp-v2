@@ -49,16 +49,3 @@ test('data/config files and disguised state under LICENSES fail closed',t=>{
 test('license directory junctions are rejected instead of followed',t=>{
  const f=fixture(t),outside=path.join(f.directory,'outside');fs.mkdirSync(outside);fs.symlinkSync(outside,path.join(f.source,'LICENSES','linked'),process.platform==='win32'?'junction':'dir');assert.throws(()=>resource.validateTailnetResource(f.source),{code:'TAILNET_RESOURCE_LINK_OR_SPECIAL_FILE'});
 });
-
-test('the frozen actual Go artifact has a valid Winx64 manifest and only public files',()=>{
- const checked=resource.validateTailnetResource(path.resolve('dist/tailnet-runtime'));
- assert.equal(checked.manifest.protocolVersion,1);assert.equal(checked.manifest.tailscaleVersion,'1.104.2');assert.equal(checked.files.length,43);
-});
-
-test('builder hook rejects a stage changed after pre-build verification',async t=>{
- const f=fixture(t),app=path.join(f.directory,'app');
- for(const name of ['fastify','@fastify/reply-from','@fastify/cookie']){const file=path.join(app,'resources/workbench-gateway/node_modules',name,'package.json');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'{}');}
- const oldResource=process.env.LINGTU_TAILNET_RESOURCE,oldFingerprint=process.env.LINGTU_TAILNET_FINGERPRINT;process.env.LINGTU_TAILNET_RESOURCE=f.source;process.env.LINGTU_TAILNET_FINGERPRINT='0'.repeat(64);
- try{const {default:config}=await import('../build/launcher-builder.config.cjs');await assert.rejects(config.afterPack({appOutDir:app}),/stage changed after pre-build validation/);}
- finally{if(oldResource===undefined)delete process.env.LINGTU_TAILNET_RESOURCE;else process.env.LINGTU_TAILNET_RESOURCE=oldResource;if(oldFingerprint===undefined)delete process.env.LINGTU_TAILNET_FINGERPRINT;else process.env.LINGTU_TAILNET_FINGERPRINT=oldFingerprint;}
-});

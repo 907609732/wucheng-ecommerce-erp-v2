@@ -30,7 +30,7 @@ import {makeBackup,verifyBackup,listBackups,restoreBackup} from './lib/backup.mj
 import {closePreview,lockMonth,unlockMonth} from './lib/close.mjs';
 import {fetchRates} from './lib/fx.mjs';
 import {exportWorkbook,exportPddMovements} from './lib/export.mjs';
-import {runJob,sourceStatus,duePeriods} from './lib/jobs.mjs';
+import {sourceStatus} from './lib/jobs.mjs';
 import {stagePdd,pddPreview,commitPdd,pddFundsReport,pddStatementYear,setAttribution,unassignedBatches,movementsPage,movementRows,movementDetail,saveReference} from './lib/pdd.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
@@ -69,7 +69,7 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
   }]};
   installFreightRoutes(app,s);
   app.get('/api/health',(q,r)=>r.json({ok:true,app:'wucheng-sales-desk',version:integration.state.version,demo}));
-  app.get('/api/bootstrap',(q,r)=>{const identity=personnel.current(q);r.json({token,personnel:identity,shops:identity.selected?s.shops():[],kinds:KINDS,datasets:DATASETS,currencies:CURRENCIES,fields:FIELDS,month:shiftMonth(beijing().month,-1),today:beijing().date,demo,pendingEdits:identity.canReconcile?s.get("SELECT COUNT(*) count FROM integration_edit_drafts WHERE state='draft'").count:0,schedule:{enabled:s.setting('schedulerEnabled',false),time:'每月 15 日 20:00（北京时间）',due:identity.canReviewReport?duePeriods(s):[]},notices:identity.canReconcile?s.all('SELECT * FROM notices ORDER BY created_at DESC LIMIT 20'):[]});});
+  app.get('/api/bootstrap',(q,r)=>{const identity=personnel.current(q);r.json({token,personnel:identity,shops:identity.selected?s.shops():[],kinds:KINDS,datasets:DATASETS,currencies:CURRENCIES,fields:FIELDS,month:shiftMonth(beijing().month,-1),today:beijing().date,demo,pendingEdits:identity.canReconcile?s.get("SELECT COUNT(*) count FROM integration_edit_drafts WHERE state='draft'").count:0,notices:identity.canReconcile?s.all('SELECT * FROM notices ORDER BY created_at DESC LIMIT 20'):[]});});
   app.get('/api/personnel/session',(q,r)=>r.json(personnel.current(q)));
   app.post('/api/personnel/session',(q,r)=>r.json(personnel.select(q,r,q.body.role)));
   app.get('/api/task-center',(q,r)=>r.json(personnel.taskCenter(q,month(q.query.month))));
@@ -133,8 +133,9 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
   app.post('/api/backups',async(q,r)=>r.json(await makeBackup(s)));
   app.post('/api/backups/:name/verify',(q,r)=>r.json(verifyBackup(s,q.params.name)));
   app.post('/api/backups/:name/restore-copy',(q,r)=>r.json(restoreBackup(s,q.params.name,path.join(s.dir,'recovered',q.params.name))));
+  app.post('/api/jobs',(_q,r)=>r.status(410).json({code:'FEATURE_RETIRED',error:'月度自动任务已停用；已有报表继续可读取'}));
   app.get('/api/jobs',(q,r)=>r.json(s.all('SELECT * FROM jobs ORDER BY created_at DESC LIMIT 100').map(j=>({...j,report_status:s.get('SELECT status FROM report_history WHERE filename=?',(()=>{try{return JSON.parse(j.detail).file||'';}catch{return '';}})())?.status||'current'}))));
-  app.post('/api/jobs',async(q,r)=>r.json(await runJob(s,{period:q.body.period,trigger:'manual'})));
+  ;
   app.get('/api/jobs/:id/report',(q,r)=>{const job=s.get('SELECT * FROM jobs WHERE id=?',q.params.id);const file=job&&JSON.parse(job.detail).file;if(!file)throw fail('报告尚未生成',404);r.download(path.join(s.dir,'reports',path.basename(file)),`sales-${job.period}.xlsx`);});
   app.use('/vendor/chart',express.static(path.join(root,'node_modules/chart.js/dist')));
   app.use('/vendor/tabulator',express.static(path.join(root,'node_modules/tabulator-tables/dist')));

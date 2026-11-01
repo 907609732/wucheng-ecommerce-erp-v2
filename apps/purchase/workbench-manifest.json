@@ -615,33 +615,6 @@
     },
     {
       "module": "purchase",
-      "method": "POST",
-      "path": "/api/ocr",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "purchase:POST:/api/ocr"
-    },
-    {
-      "module": "purchase",
-      "method": "GET",
-      "path": "/api/ocr/:id",
-      "kind": "read",
-      "remote": true,
-      "uiOnly": false,
-      "operationId": "purchase:GET:/api/ocr/:id"
-    },
-    {
-      "module": "purchase",
-      "method": "POST",
-      "path": "/api/ocr/text",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "purchase:POST:/api/ocr/text"
-    },
-    {
-      "module": "purchase",
       "method": "GET",
       "path": "/api/order-logs",
       "kind": "read",
@@ -1255,15 +1228,6 @@
     {
       "module": "purchase",
       "method": "GET",
-      "path": "/ocr-files.mjs",
-      "kind": "ui",
-      "remote": true,
-      "uiOnly": false,
-      "operationId": "purchase:GET:/ocr-files.mjs"
-    },
-    {
-      "module": "purchase",
-      "method": "GET",
       "path": "/order-attributes-ui.js",
       "kind": "ui",
       "remote": true,
@@ -1764,24 +1728,6 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "purchase:GET:/api/mobile/orders/:id/attachments"
-    },
-    {
-      "module": "purchase",
-      "method": "POST",
-      "path": "/api/mobile/ocr",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "purchase:POST:/api/mobile/ocr"
-    },
-    {
-      "module": "purchase",
-      "method": "GET",
-      "path": "/api/mobile/ocr/:id",
-      "kind": "read",
-      "remote": true,
-      "uiOnly": false,
-      "operationId": "purchase:GET:/api/mobile/ocr/:id"
     },
     {
       "module": "purchase",

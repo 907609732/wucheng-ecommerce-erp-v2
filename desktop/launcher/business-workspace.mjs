@@ -22,7 +22,7 @@ async function navigate(view,{desk,focus=true}={}){
   for(const section of document.querySelectorAll('main>.view'))section.hidden=section.id!=='view-'+view;
   for(const button of document.querySelectorAll('.main-nav [data-view]')){if(button.dataset.view===view)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
   if(focus)$('main').focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});
-  if(view==='settings')await loadSettings();else await business.show(desk?{id:desk.id,route:desk.route,locator:desk.locator,sourceModule:desk.sourceModule}:{});
+  if(view==='settings')await loadSettings();else await business.show(desk?{id:desk.id,route:desk.route}:{});
 }
 async function refreshStatus(){
   try{const value=checked(await api.businessStatus());$('actor').textContent=value.actor?.label||value.actor?.login||'身份已连接';$('environment').textContent=value.environment?.label||'账本信息待确认';$('connection').textContent=value.connection?.label||'正在确认连接';$('connection').dataset.state=['connected','local','server'].includes(value.connection?.state)?'connected':value.ready?'connected':'offline';return value;}
@@ -132,9 +132,10 @@ async function openReviews(){await business.suspend();$('business-review-dialog'
 function setSidebarHidden(hidden){document.body.classList.toggle('sidebar-hidden',hidden);$('main-sidebar').hidden=hidden;const toggle=$('toggle-sidebar');toggle.setAttribute('aria-expanded',String(!hidden));toggle.setAttribute('aria-label',hidden?'展开侧栏':'收起侧栏');toggle.title=hidden?'展开侧栏':'收起侧栏';toggle.textContent=hidden?'☰':'‹';void business.measure().catch(showError);}
 try{setSidebarHidden(localStorage.getItem('wucheng.sidebar.hidden')==='true');}catch{}
 $('toggle-sidebar').addEventListener('click',()=>{const hidden=!document.body.classList.contains('sidebar-hidden');setSidebarHidden(hidden);try{localStorage.setItem('wucheng.sidebar.hidden',String(hidden));}catch{}});
-for(const button of document.querySelectorAll('[data-backup-desk]'))button.addEventListener('click',()=>{notice('已打开'+labels[button.dataset.backupDesk]+'，请在该业务的设置或备份与记录中创建备份。');void navigate('business',{desk:{id:button.dataset.backupDesk}}).catch(showError);});
+for(const button of document.querySelectorAll('[data-backup-desk]'))button.addEventListener('click',()=>void run('backup-'+button.dataset.backupDesk,async()=>{const result=checked(await api.backup(button.dataset.backupDesk));notice(labels[result.id]+'账本与原件已备份：'+result.directory);},[button]));
 for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>void navigate(button.dataset.view).catch(showError));
-$('nav-warehouse').addEventListener('click',()=>void navigate('business',{desk:{id:'warehouse'}}).catch(showError));document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();void navigate('business').catch(showError);});
+$('nav-warehouse').addEventListener('click',()=>void navigate('business',{desk:{id:'warehouse'}}).catch(showError));
+document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();void navigate('business').catch(showError);});
 $('dismiss-error').addEventListener('click',()=>{$('error-banner').hidden=true;});$('refresh-settings').addEventListener('click',()=>void run('settings',loadSettings,[$('refresh-settings')]));
 for(const [id,kind]of [['copy-mcp','mcp'],['copy-cli','cli']])$(id).addEventListener('click',()=>void run('copy-integration',async()=>{checked(await api.copyIntegration(kind));notice((kind==='mcp'?'MCP 配置':'CLI 命令')+'已复制。');},[$(id)]));
 for(const id of ['connection-mode','connection-provider','connection-url'])$(id).addEventListener('input',()=>{clearConnectionPlan();connectionVisibility();});$('connection-mode').addEventListener('change',connectionVisibility);$('connection-form').addEventListener('submit',event=>void saveConnection(event));$('confirm-connection').addEventListener('click',()=>void confirmConnection());$('cancel-connection').addEventListener('click',()=>{clearConnectionPlan();$('save-connection').focus();});

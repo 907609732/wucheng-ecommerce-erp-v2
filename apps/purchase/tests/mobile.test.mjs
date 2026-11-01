@@ -1,3 +1,4 @@
+import {listenForFetch} from '../../../tests/http-test-server.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import http from 'node:http';
 import jsQR from 'jsqr';
 import {PNG} from 'pngjs';
 import {createApp} from '../server.mjs';
-import {createCanvas,GlobalFonts} from '@napi-rs/canvas';
+
 const origin='https://purchase.test.ts.net';
 function qrCode(data){const png=PNG.sync.read(Buffer.from(data.image.split(',')[1],'base64'));const decoded=jsQR(new Uint8ClampedArray(png.data),png.width,png.height);assert.ok(decoded,'二维码能被独立解码器读取');const url=new URL(decoded.data);assert.equal(url.origin,origin);assert.equal(url.pathname,'/');assert.equal(url.search,'');const code=new URLSearchParams(url.hash.slice(1)).get('pair');assert.match(code,/^[a-f0-9]{64}$/);return code;}
 const order=()=>({platform:'手工',account:'默认账号',orderNo:randomUUID(),date:'2026-10-16',supplier:'手机测试',recipient:'测试收货人',phone:'13800000000',address:'测试收货地址',amountCents:12345,refundCents:0,shippingCents:100,status:'已完成',items:[{title:'螺丝',qty:2,unitPriceCents:100,unit:'盒',shipments:[{trackingNo:'SFTEST123',logisticsCompany:'顺丰速运'}]}]});
@@ -43,7 +44,7 @@ test('手机收货地址共用电脑地址库，鉴权、去重和权限限制',
 });
 async function fixture(t,options={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-mobile-')),{app,store,mobile}=createApp({dataDir:dir,mobilePolicyFile:'',...options});
- const listen=async a=>{const s=a.listen(0,'127.0.0.1');await new Promise(r=>s.once('listening',r));return s;};
+ const listen=listenForFetch;
  const desktop=await listen(app),phone=await listen(mobile.app),desktopURL='http://127.0.0.1:'+desktop.address().port,url='http://127.0.0.1:'+phone.address().port;
  t.after(async()=>{await Promise.all([new Promise(r=>desktop.close(r)),new Promise(r=>phone.close(r))]);store.close();fs.rmSync(dir,{recursive:true,force:true});});
  const token=(await fetch(desktopURL+'/api/bootstrap').then(r=>r.json())).token;
@@ -191,7 +192,7 @@ test('保存与重试原子去重、冲突不覆盖、查询、关闭及桌面�
  const [a,b]=await Promise.all([send(body),send(body)]);assert.equal(a.status,200);assert.equal(b.status,200);assert.equal(f.store.list().length,1);assert.equal(f.store.history(a.data.order.id).length,1);assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM mobile_requests').get().n,1);
  const retry=await send(body);assert.equal(retry.data.replayed,true);assert.equal((await send({...body,amountCents:99})).status,409);assert.equal(f.store.get(a.data.order.id).amountCents,12345);
  const query=await f.request('/api/mobile/orders?q='+encodeURIComponent('螺丝'));assert.equal(query.data.total,1);assert.equal(query.headers.get('cache-control'),'no-store');assert.equal((await f.request('/api/mobile/orders/'+a.data.order.id)).data.items[0].unit,'盒');
- assert.equal((await f.request('/api/mobile/orders',{...order(),ocrJobId:'desktop-job'},{'x-request-id':randomUUID()})).status,403);
+ assert.equal((await f.request('/api/mobile/orders',{...order(),ocrJobId:'desktop-job'},{'x-request-id':randomUUID()})).status,410);
  await f.admin('/config',{enabled:false});assert.equal((await f.request('/api/mobile/session')).status,503);assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM mobile_sessions').get().n,0);
  const desktop=await fetch(f.desktopURL+'/api/bootstrap').then(r=>r.json());assert.equal(desktop.orders.length,1);assert.ok(desktop.token);
 });
@@ -226,28 +227,14 @@ test('手机查询复用电脑筛选，所有业务字段与金额均可查询',
 test('上传历史可查已绑定订单附件，原件下载必须有手机会话且不缓存',async t=>{
  const f=await fixture(t);await f.admin('/config',{enabled:true,origin});await f.pair();
  const saved=await f.request('/api/mobile/orders',order(),{'x-request-id':randomUUID()}),attachment=await f.store.attachments.stash(Buffer.from('original document'),'原始单据.txt','text/plain');f.store.attachments.bind(saved.data.order.id,[attachment.id]);
+ f.store.db.prepare('INSERT INTO mobile_upload_history VALUES (?,?,?,?,?)').run('legacy-ocr-attempt',JSON.stringify(['历史凭证.png']),'2026-01-01T00:00:00Z',null,'legacy-session');
+ const attempts=(await f.request('/api/mobile/uploads?kind=attempt')).data;assert.equal(attempts.total,1);assert.equal(attempts.uploads[0].status,'expired');assert.match(attempts.uploads[0].error,/停用/);
+ assert.equal((await f.request('/api/mobile/ocr',{}, {'x-request-id':randomUUID()})).status,410);
  const list=(await f.request('/api/mobile/uploads?kind=attachment&q='+encodeURIComponent('原始单据'))).data;assert.equal(list.total,1);assert.equal(list.uploads[0].orders[0].id,saved.data.order.id);
  const resource=await f.download(list.uploads[0].downloadUrl);assert.equal(resource.status,200);assert.equal(resource.body.toString(),'original document');assert.equal(resource.headers['cache-control'],'no-store');assert.match(resource.headers['content-disposition'],/^attachment/);
  await f.request('/api/mobile/logout',{});assert.equal((await f.download(list.uploads[0].downloadUrl)).status,401);
 });
-test('手机中文原单真实OCR、会话隔离、原图保存与响应丢失重试', {timeout:120000},async t=>{
- const f=await fixture(t);await f.admin('/config',{enabled:true,origin});await f.pair();
- GlobalFonts.registerFromPath('C:/Windows/Fonts/msyh.ttc','MobileChinese');const canvas=createCanvas(1500,1000),ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,1500,1000);ctx.fillStyle='#111';ctx.font='42px MobileChinese';
- ['订单号: MOBILE20261016001','日期: 2026-10-16','供应商: 五金配件店','商品: 螺丝','数量: 2','实付金额: 123.45'].forEach((l,i)=>ctx.fillText(l,80,100+i*120));const image=canvas.toBuffer('image/png');
- const form=new FormData();form.append('file',new Blob([image],{type:'image/png'}),'采购单.png');const started=await f.request('/api/mobile/ocr',form);assert.equal(started.status,200);
- let job;for(let i=0;i<400;i++){job=(await f.request('/api/mobile/ocr/'+started.data.id)).data;if(job.status!=='running')break;await new Promise(r=>setTimeout(r,150));}
- assert.equal(job.status,'done',job.error);assert.equal(job.result.order.amountCents,12345);assert.equal(f.store.list().length,0);
- const pending=(await f.request('/api/mobile/uploads?q='+encodeURIComponent('采购单'))).data;assert.equal(pending.total,1);assert.equal(pending.uploads[0].kind,'attempt');assert.equal(pending.uploads[0].status,'done');assert.equal(pending.uploads[0].downloadUrl,null);
- const extra=new FormData();extra.append('files',new Blob([image],{type:'image/png'}),'补充图片.png');const extraId=(await f.request('/api/mobile/attachments',extra)).data[0].id;
- const body={...job.result.order,recipient:'测试收货人',phone:'13800000000',address:'测试收货地址',items:job.result.order.items.map(i=>({...i,shipments:[{trackingNo:'SFTEST123',logisticsCompany:'顺丰速运'}]})),status:'已完成',ocrJobId:job.id,attachmentIds:[extraId]},id=randomUUID();const saved=await f.request('/api/mobile/orders',body,{'x-request-id':id});assert.equal(saved.status,200,JSON.stringify(saved.data));
- assert.deepEqual(saved.data.order.attachmentIds,[extraId]);assert.deepEqual((await f.download('/api/mobile/uploads/attachment/'+extraId)).body,image);
- const original=f.store.db.prepare('SELECT file_path FROM imports').get();assert.deepEqual(fs.readFileSync(path.join(f.store.dir,original.file_path)),image);
- const retry=await f.request('/api/mobile/orders',body,{'x-request-id':id});assert.equal(retry.status,200);assert.equal(retry.data.replayed,true);assert.equal(f.store.list().length,1);
- const uploaded=(await f.request('/api/mobile/uploads?q='+encodeURIComponent(body.orderNo))).data;assert.equal(uploaded.total,2);assert.equal(uploaded.uploads[0].status,'saved');assert.equal(uploaded.uploads[0].orders[0].id,saved.data.order.id);assert.equal((await f.request('/api/mobile/uploads?kind=attempt')).data.total,0);
- const downloaded=await f.download(uploaded.uploads.find(u=>u.kind==='source').downloadUrl);assert.equal(downloaded.status,200);assert.deepEqual(downloaded.body,image);assert.equal(downloaded.headers['cache-control'],'no-store');
- await f.pair();assert.equal((await f.request('/api/mobile/ocr/'+job.id)).status,404);
- assert.equal((await f.request('/api/mobile/orders',{...body,orderNo:'OTHER'},{'x-request-id':randomUUID()})).status,403);assert.equal(f.store.list().length,1);
-});
+
 
 test('手机查询支持上传日期升降序，修改原单不改变上传日期',async t=>{
  const f=await fixture(t);await f.admin('/config',{enabled:true,origin});await f.pair();

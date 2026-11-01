@@ -11,7 +11,7 @@ import {stageImport,previewImport,commitImport,rollbackImport,readTable,FIELDS} 
 import {stageTaobao,commitTaobao,taobaoFunds,taobaoStatement,taobaoMovements,taobaoMovement,taobaoMovementRows} from './taobao.mjs';
 import {stagePdd,pddPreview,commitPdd,pddFundsReport,pddStatementYear,setAttribution,unassignedBatches,movementsPage,movementDetail,saveReference} from './pdd.mjs';
 import {freightReport,freightList,freightRecord,saveFreight,voidFreight,freightAttachment,exportFreight} from './freight.mjs';
-import {sourceStatus,runJob} from './jobs.mjs';import {fetchRates} from './fx.mjs';
+import {sourceStatus} from './jobs.mjs';import {fetchRates} from './fx.mjs';
 import {listBackups,verifyBackup,restoreBackup,makeBackup} from './backup.mjs';import {exportWorkbook,exportPddMovements} from './export.mjs';
 
 export function authorizeSalesAgent(actor){if(!actor?.id)throw fail('请先使用真实登录身份',403,'AGENT_ACTOR_REQUIRED');}
@@ -63,7 +63,7 @@ export function createSalesAgentActions({store:s,personnel,cainiao,domainPeople=
   if(name==='month-lock')return lockMonth(t,{month:i.month,revision:i.revision,confirmation:'锁定 '+i.month},{skipBackup:true});
   if(name==='month-unlock')return unlockMonth(t,{month:i.month,reason:i.reason,confirmation:'解锁 '+i.month},{skipBackup:true});
   if(name==='rates-refresh'){const data=monthData(t,month(i.month)),dates=[...data.operations.filter(x=>x.currency!=='CNY').map(x=>x.end),...data.ledger.filter(x=>x.date.startsWith(i.month)&&x.currency!=='CNY').map(x=>x.date)];return fetchRates(t,dates);}
-  if(name==='job-create')return runJob(t,{period:i.period,trigger:'manual'});if(name==='staff-handoff'){const person=(t===s?domainPeople:createSalesDomainPeople(t)).requireMapping(c.actor),result=p.handoff(q,i);t.audit('staff.handoff.identity',i.month,{globalActorId:c.actor.id,domainPersonId:person.domain_person_id,displayName:person.name});return {...result,globalActorId:c.actor.id,domainPersonId:person.domain_person_id};}
+  if(name==='staff-handoff'){const person=(t===s?domainPeople:createSalesDomainPeople(t)).requireMapping(c.actor),result=p.handoff(q,i);t.audit('staff.handoff.identity',i.month,{globalActorId:c.actor.id,domainPersonId:person.domain_person_id,displayName:person.name});return {...result,globalActorId:c.actor.id,domainPersonId:person.domain_person_id};}
   if(name==='backup')return c.backup||{preview:'创建一致性备份'};
   if(name==='restore-copy')return restoreBackup(t,i.name,path.join(t.dir,'recovered',path.basename(i.name)));
   throw fail('业务能力未实现',501);

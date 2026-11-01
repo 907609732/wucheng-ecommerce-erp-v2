@@ -41,14 +41,10 @@ function preloadHarness(isMainFrame=true){
   return {listeners,calls,events};
 }
 
-test('only main-frame preload forwards a bounded locator, with no URL or draft command',async()=>{
-  const h=preloadHarness(),target={module:'purchase',recordId:'order-1',period:'2026-10',basis:'来源记录日期'};
-  await h.listeners.get('wucheng-business-navigate')({detail:target});assert.equal(h.calls[0][0],'desks:child-navigate');assert.equal(h.calls[0][1].recordId,'order-1');assert.equal(h.events[0].detail.status,'dispatched');
-  await h.listeners.get('wucheng-business-navigate')({detail:{...target,url:'http://127.0.0.1:17868/'}});assert.equal(h.calls.length,1);assert.equal(h.events.at(-1).detail.status,'blocked');
-  assert.equal(preloadHarness(false).listeners.has('wucheng-business-navigate'),false);
-});
+test('retired cross-module navigation has no preload listener',()=>{for(const main of [true,false])assert.equal(preloadHarness(main).listeners.has('wucheng-business-navigate'),false);});
 
 test('surface policy is limited to three registered business modules and leaves maintenance closed',()=>{
-  for(const name of ['desks:surface','desks:child-navigate']){for(const moduleId of ['overview','purchase','sales'])assert.doesNotThrow(()=>assertLauncherOperationAllowed(name,{moduleId}));for(const moduleId of ['warehouse','exporter','bank'])assert.throws(()=>assertLauncherOperationAllowed(name,{moduleId}),{code:'BETA_MAINTENANCE_DISABLED'});}
+  for(const name of ['desks:surface']){for(const moduleId of ['overview','purchase','sales'])assert.doesNotThrow(()=>assertLauncherOperationAllowed(name,{moduleId}));for(const moduleId of ['warehouse','exporter','bank'])assert.throws(()=>assertLauncherOperationAllowed(name,{moduleId}),{code:'BETA_MAINTENANCE_DISABLED'});}
+  assert.throws(()=>assertLauncherOperationAllowed('desks:child-navigate',{moduleId:'purchase'}),{code:'BETA_MAINTENANCE_DISABLED'});
   assert.throws(()=>assertLauncherOperationAllowed('desks:stop',{moduleId:'overview'}),{code:'BETA_MAINTENANCE_DISABLED'});
 });

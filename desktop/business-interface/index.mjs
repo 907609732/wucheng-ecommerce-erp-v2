@@ -28,14 +28,21 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
  async function actorFor(actor){const value=actor?.id&&await identity.resolveActor(actor.id);if(!value?.id||value.enabled===false)throw fail('IDENTITY_REQUIRED','请先登录公司工作台',401);return {...value,role:'admin',modules:[...WORKBENCH_MODULES],canRunTasks:true,sessionId:actor.sessionId||value.sessionId,channel:actor.channel||'mcp'};}
  const validApproval=claims=>{const row=store.get('review',claims.resultId);return !!row&&row.state==='committing'&&row.approvedBy===claims.actorId&&row.approvalId===claims.approvalId&&row.approvedVersion===claims.resultVersion&&row.requestId===claims.taskId&&row.module===claims.module&&row.capabilityId===claims.capabilityId&&row.prepared.changeDigest===claims.changeDigest&&row.prepared.binding.dataSetId===claims.dataSetId&&canonicalJson(row.prepared.binding.revision)===canonicalJson(claims.revision)&&row.idempotencyKey===claims.idempotencyKey;};
  const transport=providedTransport||createBusinessModuleTransport({services,resolveActor:id=>identity.resolveActor(id),validateApproval:validApproval,artifactRoot:path.join(storeDir,'requests')});
- const adapters=providedAdapters||await Promise.all([
-  import('../workbench/warehouse-agent.mjs').then(m=>m.createWarehouseAgentAdapter({transport})),
-  loadActivatedBusinessAdapter('purchase',services,transport),
-  loadActivatedBusinessAdapter('sales',services,transport),
-  loadActivatedBusinessAdapter('overview',services,transport),
-  import('../../apps/exporter/src/main/agent-adapter.mjs').then(m=>m.createExporterAgentAdapter({transport}))
- ]);
- const modules=new Map(adapters.map(adapter=>[adapter.id,adapter]));
+ const factories={
+  warehouse:async()=>{await services.prepareComponent?.('warehouse');return (await import('../workbench/warehouse-agent.mjs')).createWarehouseAgentAdapter({transport});},
+  purchase:()=>loadActivatedBusinessAdapter('purchase',services,transport),
+  sales:()=>loadActivatedBusinessAdapter('sales',services,transport),
+  overview:()=>loadActivatedBusinessAdapter('overview',services,transport),
+  exporter:async()=>{if(services.prepareComponent)return loadActivatedBusinessAdapter('exporter',services,transport);return (await import('../../apps/exporter/src/main/agent-adapter.mjs')).createExporterAgentAdapter({transport});}
+ };
+ const adapters=providedAdapters||[],modules=new Map(adapters.map(adapter=>[adapter.id,adapter])),loading=new Map();
+ async function loadAdapter(id){
+  if(modules.has(id))return modules.get(id);
+  if(providedAdapters||!Object.hasOwn(factories,id))throw fail('CAPABILITY_UNAVAILABLE','业务模块未登记',409);
+  if(!loading.has(id))loading.set(id,Promise.resolve().then(factories[id]).then(adapter=>{adapters.push(adapter);modules.set(id,adapter);return adapter;}).finally(()=>loading.delete(id)));
+  return loading.get(id);
+ }
+ if(!providedAdapters&&!services.prepareComponent)await Promise.all(WORKBENCH_MODULES.map(loadAdapter));
  function requestScope(id,actor){const row=id?store.get('request',id):store.insert('request',{ownerId:actor.id});if(!row||row.ownerId!==actor.id)throw fail('REQUEST_SCOPE_DENIED','请求关联标识不属于当前人员',403);return row;}
  function regularFile(file,root){const relative=path.relative(root,file);if(!relative||relative.startsWith('..')||path.isAbsolute(relative)||path.relative(file,fs.realpathSync.native(file))!==''||fs.lstatSync(file).isSymbolicLink()||!fs.statSync(file).isFile())throw fail('BUSINESS_FILE_CHANGED','业务原件路径或类型已变化',409);return file;}
  function context(scope,actor,capabilityId,capabilityInput){
@@ -46,13 +53,14 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
   };
  }
  function review(id){const row=store.get('review',id);if(!row||!states.has(row.state))throw fail('REVIEW_NOT_FOUND','业务复核不存在',404);return row;}
- async function reconcile(row,actor){if(!['unknown','committing'].includes(row.state))return row;const adapter=modules.get(row.module),scope=requestScope(row.requestId,{id:row.ownerId}),result=await adapter.receipt(row.idempotencyKey,{...context(scope,actor,row.capabilityId,row.prepared.input),idempotencyKey:row.idempotencyKey});if(verified(result,row.idempotencyKey))return store.update('review',row.id,{state:'completed',receipt:result.receipt,error:null},{expectedVersion:row.version});return row;}
+ async function reconcile(row,actor){if(!['unknown','committing'].includes(row.state))return row;const adapter=await loadAdapter(row.module),scope=requestScope(row.requestId,{id:row.ownerId}),result=await adapter.receipt(row.idempotencyKey,{...context(scope,actor,row.capabilityId,row.prepared.input),idempotencyKey:row.idempotencyKey});if(verified(result,row.idempotencyKey))return store.update('review',row.id,{state:'completed',receipt:result.receipt,error:null},{expectedVersion:row.version});return row;}
  async function invoke(operation,payload={},meta={}){
   if(closed)throw fail('BUSINESS_INTERFACE_CLOSED','业务接口已关闭',503);
   if(typeof operation!=='string'||!publicOperations.has(operation)&&!['reviews.approve','reviews.reject'].includes(operation))throw fail('BUSINESS_OPERATION_UNKNOWN','未登记的业务接口',404);
   const input=safeInput(payload),actor=await actorFor(meta.actor);
   if(operation==='requests.create'){const scope=requestScope(undefined,actor);return {requestId:scope.id};}
   if(operation==='capabilities'){
+   await Promise.all((input.module?[input.module]:providedAdapters?providedAdapters.map(a=>a.id):WORKBENCH_MODULES).map(loadAdapter));
    const rows=adapters.filter(a=>!input.module||a.id===input.module).flatMap(a=>a.capabilities.map(({roles,requiresTaskPermission,dataAccessModules,...cap})=>({...cap,module:a.id})));
    if(input.capabilityId){const capability=rows.find(c=>c.id===input.capabilityId);if(!capability)throw fail('CAPABILITY_UNKNOWN','业务能力未登记',404);return {capability};}
    const offset=Number.isSafeInteger(input.cursor)&&input.cursor>=0?input.cursor:0,limit=Number.isSafeInteger(input.limit)?Math.max(1,Math.min(20,input.limit)):10;return {capabilities:rows.slice(offset,offset+limit),total:rows.length,nextCursor:offset+limit<rows.length?offset+limit:null};
@@ -67,7 +75,7 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
    if(operation==='reviews.reject')return {review:publicReview(store.update('review',row.id,{state:'rejected',rejectedBy:actor.id,reason:String(input.reason||'').slice(0,2000)},{expectedVersion:row.version}))};
    if(!publicReview(row).canApprove)throw fail('BLOCKING_ISSUES','结果存在待处理异常，不能正式提交',409);
 
-   const adapter=modules.get(row.module),scope=requestScope(row.requestId,{id:row.ownerId}),ctx=context(scope,actor,row.capabilityId,row.prepared.input),actual=await adapter.binding(ctx);
+   const adapter=await loadAdapter(row.module),scope=requestScope(row.requestId,{id:row.ownerId}),ctx=context(scope,actor,row.capabilityId,row.prepared.input),actual=await adapter.binding(ctx);
    if(canonicalJson(actual)!==canonicalJson(row.prepared.binding)){store.update('review',row.id,{state:'stale',error:'账本已变化，请重新生成草稿'},{expectedVersion:row.version});throw fail('REVIEW_DATA_CHANGED','账本已变化，请重新生成草稿',409);}
    row=store.update('review',row.id,{state:'committing',approvedBy:actor.id,approvedVersion:row.version,approvalId:randomUUID()},{expectedVersion:row.version});
    let sent=false;
@@ -81,7 +89,7 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
    const bytes=Buffer.from(input.dataBase64,'base64');if(!bytes.length||bytes.length>50*1024*1024||bytes.toString('base64')!==input.dataBase64||input.sha256&&createHash('sha256').update(bytes).digest('hex')!==input.sha256)throw fail('ATTACHMENT_INPUT_INVALID','附件大小、编码或摘要无效');
    const id=randomUUID(),directory=path.join(storeDir,'attachments',id);fs.mkdirSync(directory,{recursive:true,mode:0o700});const file=path.join(directory,input.name);fs.writeFileSync(file,bytes,{flag:'wx',mode:0o600});const item=store.insert('attachment',{id,ownerId:actor.id,requestId:scope.id,path:file,name:input.name,mimeType:input.mimeType||'application/octet-stream',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});const {path:privatePath,ownerId,...attachment}=item;return {requestId:scope.id,attachment};
   }
-  const adapter=modules.get(input.module),cap=adapter?.capabilities.find(c=>c.id===input.capabilityId);if(!cap||cap.kind!==operation||cap.available===false)throw fail('CAPABILITY_UNAVAILABLE','业务能力未登记、类型不符或尚未开通',409);
+  const adapter=await loadAdapter(input.module),cap=adapter?.capabilities.find(c=>c.id===input.capabilityId);if(!cap||cap.kind!==operation||cap.available===false)throw fail('CAPABILITY_UNAVAILABLE','业务能力未登记、类型不符或尚未开通',409);
   const params=safeInput(input.input||{}),validation=await fromJsonSchema(cap.inputSchema)['~standard'].validate(params);if(validation.issues)throw fail('CAPABILITY_INPUT_INVALID','业务参数不符合能力约定');
   const ctx=context(scope,actor,cap.id,params),before=operation==='prepare'?await adapter.binding(ctx):null,output=await adapter[operation](cap.id,params,ctx);if(!plain(output)||output.ok===false)throw fail('BUSINESS_RESULT_INVALID','业务模块未返回可核验结果',502);
   if(operation==='query'||output.requiresReview===false){if(operation==='prepare'&&(cap.requiresReview!==false||output.commitData!==undefined||(output.changes||[]).length))throw fail('AUTOMATIC_SIDE_EFFECT_DENIED','此草稿必须经过业务复核',403);const {commitData,...result}=output;return {requestId:scope.id,requiresReview:false,result};}

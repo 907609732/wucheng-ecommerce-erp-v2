@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ServiceManager} from './shared/service-manager.mjs';
-import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from './business-host/business-surface.mjs';
+import {businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from './business-host/business-surface.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},prepareView=async()=>{},authorizeOperation=()=>{},decorateURL=(_id,url)=>url}={}){
   const views=new Map(),viewLocations=new Map(),readyViews=new Set(),loadingViews=new Map(),visibleViews=new Map();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
@@ -25,6 +25,56 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     return visible;
   };
   const hide=(cancel=true)=>{if(cancel)generation++;active='';for(const v of views.values())setViewVisible(v,false);};
+  function createView(id,cap){
+    const existing=views.get(id);
+    if(existing&&!existing.webContents.isDestroyed())return existing;
+    const view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id),backgroundThrottling:true}});
+    views.set(id,view);win.contentView.addChildView(view);setViewVisible(view,false);
+    view.webContents.on('did-finish-load',()=>{if(!view.webContents.isDestroyed())view.webContents.send('desks:visibility',{visible:visibleViews.get(view)===true});});
+    const external=url=>{let target;try{target=new URL(url);}catch{return;}if(['127.0.0.1','localhost','[::1]'].includes(target.hostname)){notify('此本机链接不属于当前测试工作台，已阻止跳转');return;}if(/^https?:$/.test(target.protocol))void shell.openExternal(url).catch(e=>notify(e.message));};
+    const crossModule=url=>{
+      let target;try{target=new URL(url);}catch{return false;}const base=new URL(cap.url),pointer=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)?$/);let destination,route;
+      if(isRemote()){
+        if(target.origin!==base.origin)return false;
+        if(!pointer)return false;destination=pointer[1];route=(pointer[2]||'/')+target.search+target.hash;
+      }else{
+        if(target.protocol!=='http:'||!['127.0.0.1','localhost'].includes(target.hostname))return false;
+        const originDesk=['purchase','sales','overview'].find(candidate=>{try{return Number(target.port)===manager.config(candidate).port;}catch{return false;}});
+        if(target.origin!==base.origin&&!originDesk)return false;
+        destination=pointer?pointer[1]:originDesk;route=(pointer?(pointer[2]||'/'):target.pathname)+target.search+target.hash;
+      }
+      if(!destination||destination===id&&!pointer)return false;
+      win.webContents.send('desks:navigate',{id:destination,...(route!=='/'?{route}:{})});return true;
+    };
+    view.webContents.setWindowOpenHandler(({url})=>{if(crossModule(url))return {action:'deny'};if(url.startsWith(cap.url+'/'))void view.webContents.loadURL(url).catch(e=>notify(e.message));else external(url);return {action:'deny'};});
+    const navigate=(event,url)=>{if(crossModule(url)){event.preventDefault();return;}if(!url.startsWith(cap.url+'/')){event.preventDefault();external(url);}};
+    view.webContents.on('will-navigate',navigate);view.webContents.on('will-redirect',navigate);
+    view.webContents.on('render-process-gone',()=>{readyViews.delete(view);loadingViews.delete(view);if(active===id)hide();win.webContents.send('desks:invalidated',{id,reason:'renderer-exited'});notify(`${id} 页面意外退出，请重新打开`);});
+    view.webContents.session.on('will-download',(_e,item)=>{item.setSaveDialogOptions({title:'保存扩展导出文件'});});
+    return view;
+  }
+
+  async function preload(id){
+    if(!['purchase','sales','overview',...(isRemote()?['warehouse','exporter']:[])].includes(id))throw Error('该扩展不支持内嵌打开');
+    await beforeOpen(id);
+    const cap=await manager.ensure(id);
+    let view=views.get(id);
+    if(view&&viewLocations.get(id)!==cap.url)throw Error('业务服务地址已变化，请保存当前内容后重新打开工作台');
+    viewLocations.set(id,cap.url);
+    if(!view)view=createView(id,cap);
+    await prepareView({id,view,cap});
+    const targetURL=decorateURL(id,cap.url+'/'),currentURL=view.webContents.getURL?.();
+    if(!readyViews.has(view)||currentURL?.startsWith('chrome-error:')){
+      const pending=loadingViews.get(view);
+      if(pending)await pending.promise;
+      if(!readyViews.has(view)||view.webContents.getURL?.().startsWith('chrome-error:')){
+        readyViews.delete(view);const promise=view.webContents.loadURL(targetURL);loadingViews.set(view,{promise,targetURL});
+        try{await promise;readyViews.add(view);}finally{if(loadingViews.get(view)?.promise===promise)loadingViews.delete(view);}
+      }
+    }
+    return {id,url:cap.url,preloaded:true};
+  }
+
   async function open(id,route){
     if(!['purchase','sales','overview',...(isRemote()?['warehouse','exporter']:[])].includes(id))throw Error('该扩展不支持内嵌打开');
     if(route!==undefined&&(typeof route!=='string'||route.length>2000||!/^\/(?:[a-zA-Z0-9/_-]+\.html)?(?:\?[a-zA-Z0-9%=&._-]+)?(?:#[a-zA-Z0-9/_-]+)?$/.test(route)||route.includes('..')))throw Error('扩展页面无效');
@@ -36,31 +86,7 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     let view=views.get(id);
     if(view&&viewLocations.get(id)!==cap.url)throw Error('业务服务地址已变化，请保存当前内容后重新打开工作台');
     viewLocations.set(id,cap.url);
-    if(!view){
-      view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id),backgroundThrottling:true}});
-      views.set(id,view);win.contentView.addChildView(view);setViewVisible(view,false);
-      view.webContents.on('did-finish-load',()=>{if(!view.webContents.isDestroyed())view.webContents.send('desks:visibility',{visible:visibleViews.get(view)===true});});
-      const external=url=>{let target;try{target=new URL(url);}catch{return;}if(['127.0.0.1','localhost','[::1]'].includes(target.hostname)){notify('此本机链接不属于当前测试工作台，已阻止跳转');return;}if(/^https?:$/.test(target.protocol))void shell.openExternal(url).catch(e=>notify(e.message));};
-      const crossModule=url=>{
-        let target;try{target=new URL(url);}catch{return false;}const base=new URL(cap.url),pointer=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)?$/);let destination,route;
-        if(isRemote()){
-          if(target.origin!==base.origin)return false;
-          if(!pointer)return false;destination=pointer[1];route=(pointer[2]||'/')+target.search+target.hash;
-        }else{
-          if(target.protocol!=='http:'||!['127.0.0.1','localhost'].includes(target.hostname))return false;
-          const originDesk=['purchase','sales','overview'].find(candidate=>{try{return Number(target.port)===manager.config(candidate).port;}catch{return false;}});
-          if(target.origin!==base.origin&&!originDesk)return false;
-          destination=pointer?pointer[1]:originDesk;route=(pointer?(pointer[2]||'/'):target.pathname)+target.search+target.hash;
-        }
-        if(!destination||destination===id&&!pointer)return false;
-        win.webContents.send('desks:navigate',{id:destination,...(route!=='/'?{route}:{})});return true;
-      };
-      view.webContents.setWindowOpenHandler(({url})=>{if(crossModule(url))return {action:'deny'};if(url.startsWith(cap.url+'/'))void view.webContents.loadURL(url).catch(e=>notify(e.message));else external(url);return {action:'deny'};});
-      const navigate=(event,url)=>{if(crossModule(url)){event.preventDefault();return;}if(!url.startsWith(cap.url+'/')){event.preventDefault();external(url);}};
-      view.webContents.on('will-navigate',navigate);view.webContents.on('will-redirect',navigate);
-      view.webContents.on('render-process-gone',()=>{readyViews.delete(view);loadingViews.delete(view);if(active===id)hide();win.webContents.send('desks:invalidated',{id,reason:'renderer-exited'});notify(`${id} 页面意外退出，请重新打开`);});
-      view.webContents.session.on('will-download',(_e,item)=>{item.setSaveDialogOptions({title:'保存扩展导出文件'});});
-    }
+    if(!view)view=createView(id,cap);
     await prepareView({id,view,cap});
     const currentURL=view.webContents.getURL?.();
     if(!readyViews.has(view)||currentURL?.startsWith('chrome-error:')||route&&currentURL!==targetURL){
@@ -79,17 +105,7 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   handle('desks:status',e=>{if(!rootSender(e))throw Error('来源不符');return manager.status({includeWarehouse});});
   handle('desks:open',(e,{id,route}={})=>{if(!rootSender(e))throw Error('来源不符');return open(id,route);});
   handle('desks:hide',e=>{if(!rootSender(e))throw Error('来源不符');hide();});
-  handle('desks:child-navigate',async(e,input)=>{
-    if(!childSender(e))throw Error('来源不符');
-    const sourceModule=[...views.entries()].find(([,view])=>e.sender===view.webContents)?.[0],mine=generation,target=controlledBusinessLocator(input);
-    if(sourceModule!==active)throw Error('来源页面已不在当前工作台');
-    try{
-      await beforeOpen(target.module);
-      if(mine!==generation||sourceModule!==active||!childSender(e))return {status:'cancelled'};
-      win.webContents.send('desks:navigate',{id:target.module,locator:target,sourceModule});
-      return {status:'dispatched',target,sourceModule};
-    }catch(error){notify(error.message);throw error;}
-  });
+
   handle('desks:surface',async(e,input)=>{
     if(!rootSender(e))throw Error('来源不符');
     const request=businessSurfaceRequest(input);await beforeOpen(request.module);
@@ -122,5 +138,5 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   tick();const timer=setInterval(tick,5000);timer.unref();
   win.on('closed',()=>{clearInterval(timer);for(const name of handlers)ipcMain.removeHandler(name);for(const v of views.values())if(!v.webContents.isDestroyed())v.webContents.close();try{if(JSON.parse(fs.readFileSync(hostFile,'utf8')).pid===process.pid)fs.unlinkSync(hostFile);}catch{}});
   const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);loadingViews.delete(view);visibleViews.delete(view);views.delete(id);viewLocations.delete(id);};
-  return {open,hide,manager,invalidate,reset:()=>{hide();for(const id of [...views.keys()])invalidate(id);}};
+  return {open,preload,hide,manager,invalidate,reset:()=>{hide();for(const id of [...views.keys()])invalidate(id);}};
 }

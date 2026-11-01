@@ -1,5 +1,4 @@
 import {integrationHash} from '../lib/local-integration.mjs';
-import {createCanvas,GlobalFonts} from '@napi-rs/canvas';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
@@ -46,14 +45,6 @@ test('real HTTP business mutation requires signed actor and central proof, recor
  const persisted=store.imports().find(x=>x.id===imported.id);assert.equal(persisted.metadata.importReport.imported,1);
  const download=await request('/files/'+file.fileId+'/download');assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),raw);
  const afterImport=await (await request('/query',{capabilityId:'import.preview',input:{previewId:preview2.previewId},taskId:'task'})).json();assert.equal(afterImport.data.summary.duplicate,1);
- GlobalFonts.registerFromPath('C:/Windows/Fonts/msyh.ttc','PurchaseAgentHttpChinese');const canvas=createCanvas(1500,1000),pen=canvas.getContext('2d');pen.fillStyle='white';pen.fillRect(0,0,1500,1000);pen.fillStyle='#111';pen.font='42px PurchaseAgentHttpChinese';['订单号: AGENTHTTP20261028002','日期: 2020-03-16','供应商: 五金配件店','商品: 螺丝','数量: 2','实付金额: 123.45'].forEach((line,i)=>pen.fillText(line,80,100+i*120));
- const originalImage=canvas.toBuffer('image/png'),imageFile=await automatic('files.upload',{filename:'采购凭证.png',dataBase64:originalImage.toString('base64')});
- const started=await automatic('ocr.start',{fileIds:[imageFile.fileId]});let recognized;
- for(let n=0;n<500;n++){const response=await request('/query',{capabilityId:'ocr.status',input:{jobId:started.jobId},taskId:'task'});assert.equal(response.status,200,await response.clone().text());recognized=(await response.json()).data;if(recognized.status!=='running')break;await new Promise(r=>setTimeout(r,150));}
- assert.equal(recognized.status,'done',recognized.error);assert.equal(recognized.result.order.amountCents,12345);
- const recognizedOrder={platform:'微信',account:'OCR核对账号',orderNo:'AGENTHTTP20261028002',date:'2020-03-16',supplier:'五金配件店',status:'已完成',amountCents:recognized.result.order.amountCents,items:[{title:'螺丝',qty:2,unitPriceCents:null}]};
- const ocrBooked=await reviewed('ocr.commit',{jobId:started.jobId,order:recognizedOrder});assert.equal(ocrBooked.imported,1);
- const actualOcrOrder=store.list().find(o=>o.orderNo===recognizedOrder.orderNo);assert.equal(actualOcrOrder.attachmentIds.length,1);assert.deepEqual(fs.readFileSync(store.attachments.resource(actualOcrOrder.attachmentIds[0],'full').path),originalImage);
  const collectedTask={id:'collected-task',platform:'taobao',from:'2020-04-01',to:'2020-04-30',status:'completed',listOutcome:'complete',count:1};const collectedOrders=[{platform:'taobao',account:'当前账号',id:'AGENTCOLLECTED001',createdAt:'2020-04-05 12:00:00',status:'交易成功',shop:'采集合成店铺',paidFen:34567,freightFen:null,refundFen:null,items:[{id:'item-1',title:'配件',quantity:1,unitPriceFen:34567}]}];
  const draft=transfers.create({schema:'order-transfer/v1',task:collectedTask,orders:collectedOrders,digest:integrationHash({task:collectedTask,orders:collectedOrders})});
  const checked=await automatic('transfer.save',{id:draft.id,revision:draft.revision,decisions:{account:'已核对采集账号',rows:{AGENTCOLLECTED001:{refundCents:0,refundEvidence:'已核对来源平台无退款'}}}});assert.equal(checked.canConfirm,true);

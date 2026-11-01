@@ -1,3 +1,4 @@
+import {listenForFetch} from '../../../tests/http-test-server.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,8 +15,7 @@ const png=async()=>sharp({create:{width:4,height:4,channels:3,background:'#fffff
 test('采购单附件：暂存、绑定、下载、删除边界与编辑补传',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-att-'));
  const {app,store}=createApp({dataDir:dir});
- const server=app.listen(0,'127.0.0.1');
- await new Promise(r=>server.once('listening',r));
+ const server=await listenForFetch(app);
  const url='http://127.0.0.1:'+server.address().port;
  try{
   const {token}=await fetch(url+'/api/bootstrap').then(r=>r.json());

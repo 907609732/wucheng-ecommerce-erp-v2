@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {money,dateValue,normalizeTable,readTable,validateOrder,extractText} from '../lib/importer.mjs';
+import {money,dateValue,normalizeTable,readTable,validateOrder} from '../lib/importer.mjs';
 import {openStore,summarize} from '../lib/store.mjs';
 import {createApp} from '../server.mjs';
 
@@ -14,7 +14,6 @@ test('日期校验与 Excel serial 不产生错误归月',()=>{assert.equal(date
 test('整单重复金额仅计一次，保留全部商品行',async()=>{const t=await readTable(csv,'x.csv'),r=normalizeTable(t);assert.equal(r.orders.length,2);assert.equal(r.orders[0].items.length,2);assert.equal(r.orders[0].amountCents,9990);assert.equal(r.orders[1].status,'已关闭');assert.equal(r.issues.length,0);});
 test('逐行金额模式、冲突金额与异常行',async()=>{const t=await readTable(csv,'x.csv');assert.equal(normalizeTable(t,{amountMode:'line'}).orders[0].amountCents,19980);t.rows[1].cells[6]='100';assert.match(normalizeTable(t).orders[0].errors[0],/不同金额/);t.rows[0].cells[0]='';assert.equal(normalizeTable(t).issues.length,1);});
 test('月度看板区分付款和下单，排除关闭和待核对，扣已知退款',()=>{const a=base(),b={...base(),orderNo:'2',status:'已关闭',amountCents:90000},c={...base(),orderNo:'3',status:'待核对'},d={...base(),orderNo:'4',paidAt:'',amountCents:999,refundCents:0};const paid=summarize([a,b,c,d],2026,'paid');assert.equal(paid.netCents,10899);assert.equal(paid.orderCount,2);assert.equal(paid.excludedCount,2);assert.equal(paid.months[0].netCents,999);assert.equal(paid.months[1].netCents,9900);assert.equal(paid.missingPaidCount,1);assert.equal(summarize([a],2026,'created').months[0].netCents,9900);});
-test('文字提取保留缺失字段，不能编造日期或金额',()=>{const o=extractText('订单号：PO20261013001\n供应商：五金店\n日期：2026-10-13\n商品：螺丝\n数量：2\n实付金额：128.50');assert.equal(o.orderNo,'PO20261013001');assert.equal(o.amountCents,12850);assert.equal(o.date,'2026-10-13');assert.equal(o.supplier,'五金店');assert.equal(o.items[0].title,'螺丝');assert.equal(o.items[0].qty,2);assert.equal(extractText('没有金额日期').amountCents,null);assert.equal(extractText('没有金额日期').date,'');assert.throws(()=>validateOrder({...base(),amountCents:null}));});
 test('持久化、去重、更新审计、并发版本与备份恢复',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-test-'));let store=openStore(dir);try{const o=store.transaction(()=>store.insert(base(),null));assert.equal(store.find(base()).id,o.id);assert.throws(()=>store.transaction(()=>store.insert(base(),null)));const next=store.update(o.id,{...o,refundCents:200});assert.equal(store.history(o.id).length,2);assert.throws(()=>store.update(o.id,{...o,amountCents:20000}),/刷新/);assert.throws(()=>validateOrder({...base(),refundCents:20000}));await store.backup(path.join(dir,'copy.sqlite'));store.close();store=openStore(dir);assert.equal(store.get(o.id).refundCents,200);assert.equal(store.get(o.id).updatedAt,next.updatedAt);}finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}});
 test('导入接口预览不写账、二次导入去重、保护写操作、CSV 导出与备份',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-api-'));const {app,store}=createApp({dataDir:dir});const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url='http://127.0.0.1:'+server.address().port;try{
  const boot=await fetch(url+'/api/bootstrap').then(r=>r.json());assert.equal(boot.orders.length,0);assert.equal((await fetch(url+'/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(base())})).status,403);
@@ -27,13 +26,12 @@ test('导入接口预览不写账、二次导入去重、保护写操作、CSV �
  }finally{await new Promise(r=>server.close(r));store.close();fs.rmSync(dir,{recursive:true,force:true});}});
 
 
-test('平台列表和月度确认不再提供手工，文本录入默认其他且旧订单可读取',()=>{
+test('平台列表和月度确认不再提供手工，旧订单仍可读取',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-platform-')),store=openStore(dir);
  try{
   const rows=store.monthLocks.overview('2026-01').platforms;
   assert.equal(rows.length,7);
   assert.equal(rows.some(p=>p.platform==='手工'),false);
-  assert.equal(extractText('商品：测试').platform,'其他');
   const legacy=store.insert(validateOrder(base()),null);
   assert.equal(store.get(legacy.id).platform,'手工');
   assert.equal(store.monthLocks.preview('2026-02','手工').count,1);

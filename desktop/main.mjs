@@ -111,27 +111,10 @@ const managedCloud = process.env.LINGTU_MANAGED_MODULE === '1' || process.argv.i
 let managedMaintenance = managedCloud && process.env.LINGTU_MAINTENANCE === '1';
 let cloudControl = null;
 let warehouseDaily = null;
-let reminderTimer = null;
-let reminderWork = 0;
-const localDailyActor={id:'local-admin',login:'local-admin',name:'本机管理员',role:'admin',local:true,channel:'ui'};
 function dailyService() {
   if(!warehouseDaily)warehouseDaily=createWarehouseDaily({databasePath:inventoryDatabasePath()});
   return warehouseDaily;
 }
-async function dailyStatus(actor=localDailyActor) {
-  assertDailyAvailable();
-  const value=await dailyService().status(actor);
-  return value;
-}
-async function dailyRemind(actor,payload) {
-  assertDailyAvailable();
-  reminderWork++;
-  try{return await dailyService().remind(actor,payload);}finally{reminderWork--;}
-}
-function assertDailyAvailable(){
-  if(managedMaintenance||fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Error('云仓正在维护，请完成维护后再操作签到管理');
-}
-
 function appDataDir() {
   return path.join(app.getPath("userData"), "workspace");
 }
@@ -1297,7 +1280,7 @@ app.whenReady().then(async () => {
     }
     cloudControl = await startCloudControl({
       root: componentAppRoot, dataDir: app.getPath('userData'), version: componentVersion,
-      busy: () => !!runningChild || !!runningTaskPromise || reminderWork>0,
+      busy: () => !!runningChild || !!runningTaskPromise,
       migration: {databasePath:inventoryDatabasePath(),dataDir:app.getPath('userData')},
       business: {
         agentManaged,
@@ -1305,10 +1288,6 @@ app.whenReady().then(async () => {
           if(!warehouseAgent){const {verifyAgentApproval}=await import('./business-interface/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),collectDiagnostics,searchDebugLogs,exportDebugBundle,getConfiguration:publicSettings});}
           return warehouseAgent;
         }:undefined,
-        getDailyStatus: actor => dailyStatus(actor),
-        dailyAction: (actor,payload) => dailyService().action(actor,payload),
-        saveDailyConfig: (actor,payload) => dailyService().configure(actor,payload),
-        remindDaily: (actor,payload) => dailyRemind(actor,payload),
         getInventory: async () => readCainiaoInventory(inventoryDatabasePath()),
         getMonthlySales: async filters => localMonthlySales(filters),
         getTaskState: async () => {

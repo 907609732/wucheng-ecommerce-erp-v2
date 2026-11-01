@@ -11,7 +11,7 @@ const reviewSteps={
 };
 
 export function createTaskCenter(ctx){
- const {state,api,esc,money,toast,modal,closeModal,refresh,render,today,historyHtml,openImport,openOcr,openConfirmation,openOrders,setKind}=ctx;
+ const {state,api,esc,money,toast,modal,closeModal,refresh,render,today,historyHtml,openImport,openManual,openConfirmation,openOrders,setKind}=ctx;
  let data=null,epoch=0,filter='all',operatorName='';
  const $=s=>document.querySelector(s);
  const monthLabel=month=>`${month.slice(0,4)} 年 ${Number(month.slice(5))} 月`;
@@ -39,7 +39,7 @@ export function createTaskCenter(ctx){
     <details class="tc-instructions"><summary>操作步骤</summary><p class="tc-description">${esc(task.description)}</p>${task.status==='stale'?'<p class="tc-stale-note">采购数据已变化，请重新核对。</p>':''}${task.mark?`<p class="tc-mark">上次记录：${esc(task.mark.operator)} · ${esc(timestamp(task.mark.updatedAt))}${task.mark.note?` · ${esc(task.mark.note)}`:''}</p>`:''}<ol>${instructions(task).map(step=>`<li>${esc(step)}</li>`).join('')}</ol>${task.kind==='collect'?'<p>覆盖本平台全部采购账号，包括还没有入账记录的账号。上传表格可以包含多个月份，入账日期仍以原始订单为准。</p>':''}${locked?'<p>此平台已锁定。补录或修改前，请在月度确认中由管理员取消确认。</p>':''}</details>
    </div>
    <div class="tc-task-actions"><button class="btn ${!complete(task)?'primary':''}" data-tc-op="start" data-tc-id="${esc(task.id)}" ${locked&&task.kind==='collect'?'disabled':''}>${mainLabel}</button>
-    ${task.kind==='collect'?`<details class="tc-extra-actions"><summary>其他操作</summary><div class="tc-secondary"><button class="text-button" data-tc-op="orders" data-tc-id="${esc(task.id)}">查看订单</button>${!['微信','其他'].includes(task.platform)?`<button class="text-button" data-tc-op="ocr" data-tc-id="${esc(task.id)}" ${locked?'disabled':''}>单据补录</button>`:`<button class="text-button" data-tc-op="import" data-tc-id="${esc(task.id)}" ${locked?'disabled':''}>表格导入</button>`}</div></details>`:''}
+    ${task.kind==='collect'?`<details class="tc-extra-actions"><summary>其他操作</summary><div class="tc-secondary"><button class="text-button" data-tc-op="orders" data-tc-id="${esc(task.id)}">查看订单</button>${!['微信','其他'].includes(task.platform)?`<button class="text-button" data-tc-op="manual" data-tc-id="${esc(task.id)}" ${locked?'disabled':''}>手工补录</button>`:`<button class="text-button" data-tc-op="import" data-tc-id="${esc(task.id)}" ${locked?'disabled':''}>表格导入</button>`}</div></details>`:''}
     ${task.canMark?`<button class="text-button tc-record" data-tc-op="record" data-tc-id="${esc(task.id)}">${complete(task)?'修改记录':'标记已核对'}</button>`:task.kind==='confirm'?`<span class="tc-unlock-tip">${locked?'全部账号已锁定':data.canConfirm?'核对完成后确认锁定':`${esc(data.availableOn)} 起可确认`}</span>`:'<span class="tc-unlock-tip">已锁定，需管理员取消确认后处理</span>'}
    </div></li>`;
  }
@@ -57,7 +57,7 @@ export function createTaskCenter(ctx){
    <nav class="tc-months" aria-label="任务月份">${Array.from({length:12},(_,index)=>{const month=String(index+1).padStart(2,'0');return `<button type="button" data-tc-op="month" data-tc-month="${currentYear}-${month}" aria-pressed="${data.month.endsWith('-'+month)}" class="${data.month.endsWith('-'+month)?'active':''}">${index+1}月</button>`;}).join('')}</nav>
    <section class="tc-overview" aria-label="本月任务进度"><div class="tc-progress-main"><div class="tc-progress-value"><span>已处理</span><strong>${summary.completed}</strong><span>/ ${summary.total}</span></div><progress max="${summary.total||1}" value="${summary.completed}" aria-label="本月任务完成进度"></progress></div><div class="tc-overview-stats"><div><strong>${summary.pending}</strong><span>待处理</span></div><div><strong>${summary.orderCount}</strong><span>本月入账</span></div><div><strong>${summary.lockedPlatforms} / 7</strong><span>已锁定</span></div></div><div class="tc-next"><span>下一项</span><strong>${next?esc(next.title):'全部已处理'}</strong><button class="btn" data-tc-op="continue" ${!next?'disabled':''}>${next?'定位下一项':'全部已处理'}</button></div></section>
    <details class="tc-scope"><summary>任务范围与核对规则</summary><p>按付款月份整理；缺少付款日期时按下单月份。需核查各平台全部采购账号；无采购也须逐个账号检查后记录。已核对、无采购和已锁定分别记录。</p></details>
-   <div class="tc-utilities"><span>常用工具</span><button class="text-button" data-action="import">通用表格导入</button><button class="text-button" data-action="ocr">识别 / 直接填写</button><a href="/integration-review.html?launch=1" target="_blank" rel="noopener">历史订单采集 / 导入</a><a href="/api/template">下载通用模板</a></div>
+   <div class="tc-utilities"><span>常用工具</span><button class="text-button" data-action="import">通用表格导入</button><button class="text-button" data-action="manual">手工录入采购</button><a href="/integration-review.html?launch=1" target="_blank" rel="noopener">历史订单采集 / 导入</a><a href="/api/template">下载通用模板</a></div>
    <div class="tc-list-toolbar"><div class="segmented" role="group" aria-label="任务状态筛选"><button data-tc-op="filter" data-tc-filter="all" class="${filter==='all'?'active':''}" aria-pressed="${filter==='all'}">全部任务</button><button data-tc-op="filter" data-tc-filter="pending" class="${filter==='pending'?'active':''}" aria-pressed="${filter==='pending'}">待处理 ${summary.pending}</button><button data-tc-op="filter" data-tc-filter="completed" class="${filter==='completed'?'active':''}" aria-pressed="${filter==='completed'}">已处理 ${summary.completed}</button></div><span>${summary.stale?`${summary.stale} 项需复核`:''}</span></div>
    <div class="tc-groups">${data.groups.map((group,index)=>{const all=data.tasks.filter(task=>task.group===group.id),rows=all.filter(task=>filter==='all'||(filter==='completed'?complete(task):!complete(task)));return `<section class="panel tc-group" aria-labelledby="tc-group-${esc(group.id)}"><header class="tc-group-head"><span class="tc-stage">${String(index+1).padStart(2,'0')}</span><div><h2 id="tc-group-${esc(group.id)}">${esc(group.title)}</h2><p>${esc(group.description)}</p></div><span class="tc-group-count">${all.filter(complete).length} / ${all.length} 已处理</span></header><ol class="tc-tasks">${rows.map(task=>taskRow(task,data.tasks.indexOf(task))).join('')||'<li class="tc-empty">当前筛选下没有任务</li>'}</ol></section>`;}).join('')}</div>
    <details class="tc-history"><summary>导入记录与未导入清单 <span>${state.imports.length} 批 · 全部月份</span></summary>${historyHtml()}</details>
@@ -81,8 +81,8 @@ export function createTaskCenter(ctx){
    if(!task)return;
    if(op==='orders'){await openOrders(data.month,task.platform);return;}
    if(op==='import'){openImport(task.platform);return;}
-   if(op==='ocr'){openOcr(task.platform);return;}
-   if(op==='start'){if(task.kind==='confirm')await openConfirmation(data.month,task.platform);else if(task.kind==='review')await openOrders(data.month);else if(['微信','其他'].includes(task.platform))openOcr(task.platform);else openImport(task.platform);return;}
+   if(op==='manual'){openManual(task.platform);return;}
+   if(op==='start'){if(task.kind==='confirm')await openConfirmation(data.month,task.platform);else if(task.kind==='review')await openOrders(data.month);else if(['微信','其他'].includes(task.platform))openManual(task.platform);else openImport(task.platform);return;}
    if(op==='record')recordModal(task);
   }catch(error){toast(error.message);}
  }

@@ -9,7 +9,7 @@ function deskHarness(options={}){
   class WebContentsView{
     constructor({webPreferences}){
       this.webPreferences=webPreferences;this.visible=false;this.closed=false;views.push(this);
-      this.webContents={session:{on(){}},mainFrame:{},on(){},setWindowOpenHandler(){},loadURL:async url=>loaded.push(url),focus(){},close:()=>{this.closed=true;},isDestroyed:()=>this.closed};
+      this.webContents={session:{on(){}},mainFrame:{},on(){},send(){},setWindowOpenHandler(){},loadURL:async url=>{this.url=url;loaded.push(url);},getURL:()=>this.url||'',focus(){},close:()=>{this.closed=true;},isDestroyed:()=>this.closed};
     }
     setBounds(){}
     setVisible(value){this.visible=value;}
@@ -50,4 +50,3 @@ test('尚无视图时切换公司连接也能取消正在启动的旧页面',asy
   resolveEnsure({url:'http://127.0.0.1:19000'});const result=await opening;
   assert.equal(result.cancelled,true);assert.equal(h.views.length,0);assert.equal(h.loaded.length,0);
 });
-

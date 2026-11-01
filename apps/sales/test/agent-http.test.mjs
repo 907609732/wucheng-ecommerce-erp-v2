@@ -2,14 +2,15 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 import {createApp}from'../server.mjs';import{signWorkbenchActor}from'../lib/workbench-actor.mjs';import{signAgentApproval,agentDigest,approvalHeaders}from'../lib/agent-approval.mjs';
 import{createSalesAgentAdapter,salesAgentCapabilities}from'../lib/agent-adapter.mjs';
 
+async function listenForFetch(app){for(let attempt=0;attempt<10;attempt++){const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));try{await fetch('http://127.0.0.1:'+server.address().port+'/');return server;}catch(error){await new Promise(r=>server.close(r));if(error.cause?.message!=='bad port')throw error;}}throw Error('No Fetch-compatible test port');}
 async function setup(t){
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-http-'));let app=createApp({dataDir:dir,port:0,demo:true}),server=app.app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-http-'));let app=createApp({dataDir:dir,port:0,demo:true}),server=await listenForFetch(app.app);
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim();
  const call=async(route,{method='GET',body,actor='boss',role='admin',headers={}}={})=>{const url='/api/integration/v1/agent/'+route,at=Date.now();return fetch('http://127.0.0.1:'+server.address().port+url,{method,headers:{...signWorkbenchActor({v:1,id:actor,login:actor,role,channel:'mcp',modules:['sales'],module:'sales',canRunTasks:true,sessionId:'test-session',requestId:randomUUID(),issuedAt:at,expiresAt:at+60000,method,path:url},key),'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});};
  const prepare=async(capabilityId,input,options={})=>{const binding=await(await call('binding',options)).json(),response=await call('prepare',{...options,method:'POST',body:{taskId:'task-sales',capabilityId,input}});assert.equal(response.status,200,await response.clone().text());return {binding,capabilityId,input,...await response.json()};};
  const proof=(p,k,extra={})=>signAgentApproval({v:1,approvalId:'review-sales',actorId:'boss',module:'sales',capabilityId:p.capabilityId,taskId:'task-sales',resultId:'result-sales',resultVersion:1,...p.binding,changeDigest:agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes}),idempotencyKey:k,issuedAt:Date.now(),expiresAt:Date.now()+60000,...extra},key);
  const commit=(p,k,options={})=>call('commit',{method:'POST',body:{prepared:p},...options,headers:{'Idempotency-Key':k,...approvalHeaders(proof(p,k)),...options.headers}});
- const restart=async()=>{await new Promise(r=>server.close(r));app.store.close();app=createApp({dataDir:dir,port:0,demo:true});server=app.app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));};
+ const restart=async()=>{await new Promise(r=>server.close(r));app.store.close();app=createApp({dataDir:dir,port:0,demo:true});server=await listenForFetch(app.app);};
  t.after(async()=>{await new Promise(r=>server.close(r));app.store.close();assert.ok(dir.startsWith(path.join(os.tmpdir(),'sales-agent-http-')));fs.rmSync(dir,{recursive:true,force:true});});
  return {dir,key,call,prepare,proof,commit,restart,get app(){return app;},get base(){return 'http://127.0.0.1:'+server.address().port;}};
 }

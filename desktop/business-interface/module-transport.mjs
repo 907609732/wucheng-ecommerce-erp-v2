@@ -5,19 +5,19 @@ import {Readable,Transform} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {signWorkbenchActor,WORKBENCH_MODULES} from '../workbench/actor.mjs';
 import {loadOperationManifest,matchOperation,safeRequestPath} from '../workbench/manifest.mjs';
+import {withCompanyAccess} from '../workbench/company-access.mjs';
 import {hostError,inside} from '../business-host/common.mjs';
 
 const agentRoute=/^\/api\/(?:integration\/v1\/)?agent\/(?:[a-z0-9_-]+\/)*(?:binding|capabilities|query|prepare|commit|receipt|receipts)(?:\/[a-zA-Z0-9._:-]+)?$/;
 const readPost=/^\/api\/(?:integration\/v1\/)?agent\/(?:query|binding|receipts?(?:\/[a-zA-Z0-9._:-]+)?)$/;
 const prepareRoute=/^\/api\/(?:integration\/v1\/)?agent\/prepare$/;
-const selfService=(id,capabilityId,actor)=>id==='warehouse'&&['attendance.check-in','attendance.complete'].includes(capabilityId)&&actor.id.startsWith('tailscale:')&&['admin','editor'].includes(actor.role);
 export const moduleTimeoutBudget=(route,method='GET')=>method==='POST'&&prepareRoute.test(route.split('?')[0])?30*60*1000:120000;
 function readKey(dataDir,name){const file=path.join(dataDir,name),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1024)throw hostError('MODULE_KEY_INVALID','模块授权文件无效',503);const key=fs.readFileSync(file,'utf8').trim();if(!/^[a-f0-9]{64}$/i.test(key))throw hostError('MODULE_KEY_INVALID','模块授权文件无效',503);return key;}
 function assertArtifactDirectory(directory){let current=path.parse(path.resolve(directory)).root;for(const part of path.resolve(directory).slice(current.length).split(path.sep).filter(Boolean)){current=path.join(current,part);if(fs.existsSync(current)&&fs.lstatSync(current).isSymbolicLink())throw hostError('ARTIFACT_PATH_DENIED','任务产物目录被重定向',403);}}
 export function createBusinessModuleTransport({services,resolveActor,fetchImpl=fetch,getManifest,signProof,verifyProof,validateApproval,artifactRoot,maxArtifactBytes=64*1024*1024,maxResponseBytes=16*1024*1024}={}){
   async function current(id,ctx){
     if(!WORKBENCH_MODULES.includes(id))throw hostError('MODULE_UNKNOWN','模块未登记',404);
-    const actor=await resolveActor(ctx?.actor?.id);if(!actor||actor.enabled===false||!actor.modules.includes(id))throw hostError('MODULE_DENIED','当前人员没有此模块权限',403);
+    const identity=await resolveActor(ctx?.actor?.id);if(!identity?.id||identity.id!==ctx?.actor?.id)throw hostError('MODULE_DENIED','当前登录身份无效，请重新登录',403);const actor=withCompanyAccess(identity);
     const config=services.config(id);if(config.maintenance)throw hostError('MODULE_MAINTENANCE','模块处于维护窗口',503);
     const cap=await services.ensure(id),url=cap?.url;
     if(typeof url!=='string'||!/^http:\/\/127\.0\.0\.1:\d+$/.test(url))throw hostError('MODULE_NOT_RUNNING','模块尚未就绪',503);
@@ -28,7 +28,6 @@ export function createBusinessModuleTransport({services,resolveActor,fetchImpl=f
     if(!safeRequestPath(route)||/[#\r\n]/.test(route)||!['GET','HEAD','POST','PUT','PATCH','DELETE'].includes(method))throw hostError('MODULE_ROUTE_INVALID','业务接口路径无效');
     if([...new URL(route,'http://127.0.0.1').searchParams.keys()].some(k=>/^(?:path|filePath|directory|root|database|db|sql)$/i.test(k)))throw hostError('ATTACHMENT_ID_REQUIRED','文件访问必须使用受限附件标识',403);
     const upstream=await current(id,ctx),pathname=route.split('?')[0],mutating=!['GET','HEAD'].includes(method)&&!(method==='POST'&&readPost.test(pathname)),dedicated=agentRoute.test(pathname),commit=/(?:^|\/)commit(?:\/|$)/.test(pathname);
-    if(mutating&&upstream.actor.role==='viewer')throw hostError('READ_ONLY','此人员只有只读权限',403);
     let capabilityId=ctx?.capabilityId;
     if(commit){
       if(!approval||!idempotencyKey||!ctx?.taskId||!capabilityId)throw hostError('AGENT_APPROVAL_REQUIRED','正式提交缺少本次结果确认',403);
@@ -38,7 +37,6 @@ export function createBusinessModuleTransport({services,resolveActor,fetchImpl=f
       if(typeof validateApproval!=='function'||!await validateApproval(claims,id))throw hostError('AGENT_APPROVAL_REQUIRED','提交结果已变化或不属于当前已审批任务',403);
       capabilityId=claims.capabilityId;
     }
-    if(mutating&&!upstream.actor.canRunTasks&&!selfService(id,capabilityId,upstream.actor))throw hostError('TASK_PERMISSION_REQUIRED','此人员没有任务执行权限',403);
     if(mutating&&!commit&&body?.capabilityId&&body.capabilityId!==capabilityId)throw hostError('CAPABILITY_CONTEXT_REQUIRED','业务能力与可信任务上下文不一致',403);
     if(!dedicated){
       const manifest=await loadOperationManifest(id,{config:upstream.config,capabilities:upstream.cap,getManifest,integrationKey:upstream.integrationKey}),match=matchOperation(manifest,method,route);
@@ -73,10 +71,9 @@ export function createBusinessModuleTransport({services,resolveActor,fetchImpl=f
   request.binding=async(id,ctx)=>{const {cap}=await current(id,ctx),workbench=cap.workbench||cap.state?.workbench||cap.capabilities?.workbench||{};const dataSetId=cap.dataSetId||workbench.dataSetId,revision=cap.revision??workbench.revision;if(!dataSetId||revision===undefined)throw hostError('DATASET_UNAVAILABLE','模块缺少账本身份与版本',503);return {dataSetId,revision};};
   request.signApproval=async(claims,id)=>{
     if(typeof validateApproval!=='function'||!await validateApproval(claims,id))throw hostError('AGENT_APPROVAL_REQUIRED','没有可核对的已审批任务',403);
-    const actor=await resolveActor(claims.actorId);if(!actor||actor.role==='viewer'||!actor.canRunTasks&&!selfService(id,claims.capabilityId,actor)||!actor.modules.includes(id)||claims.module!==id)throw hostError('MODULE_DENIED','提交前人员权限已变化',403);
+    const actor=await resolveActor(claims.actorId);if(!actor?.id||actor.id!==claims.actorId||!WORKBENCH_MODULES.includes(id)||claims.module!==id)throw hostError('MODULE_DENIED','提交前登录身份已失效或模块不符',403);
     const signer=signProof||(await import('./approval.mjs')).signAgentApproval;
     return signer(claims,readKey(services.config(id).dataDir,'.workbench-key'));
   };
   return request;
 }
-

@@ -14,7 +14,7 @@ export const warehouseAdapter={
   id:'warehouse',basePath:'/api/integration/v1/workbench',
   ui:{indexPath:'/api/integration/v1/workbench/ui',prefix:'/api/integration/v1/workbench/ui'},
   operations:[['GET','/state','read'],['GET','/requests/:id','read'],['GET','/inventory','read'],['GET','/monthly-sales','read'],['GET','/task','read'],['GET','/logs','read'],['POST','/jobs','write'],['POST','/jobs/stop','write'],['POST','/host-action','write'],['POST','/send-latest-valid','write'],['GET','/ui','ui'],['GET','/ui/app.js','ui'],['GET','/ui/app.css','ui']]
-    .map(([method,path,kind])=>({module:'warehouse',method,path,kind,remote:true,operationId:'warehouse.'+method.toLowerCase()+'.'+path.slice(1).replaceAll('/','.'),...(method==='POST'&&!path.startsWith('/daily/')?{canRunTasks:true}:{}),...(path.startsWith('/daily/')?{uiOnly:true}:{})})),
+    .map(([method,path,kind])=>({module:'warehouse',method,path,kind,remote:true,operationId:'warehouse.'+method.toLowerCase()+'.'+path.slice(1).replaceAll('/','.')})),
   hostOnly:['settings.secrets','settings.browser','module.install','module.update','module.stop','backup.restore','output.directory','login.partition']
 };
 export const createExporterAdapter=()=>structuredClone(exporterAdapter);

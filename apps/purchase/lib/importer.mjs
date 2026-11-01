@@ -219,17 +219,3 @@ export function validateOrder(input){
  o.excludedFromSpend=normalizeExcluded(o.excludedFromSpend);
  o.classification=normalizeClassification(o.classification,o.amountCents,o.refundCents);o.fingerprint=fingerprint(o);return o;
 }
-export function extractText(text,platform='其他'){
- text=String(text).replace(/([\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])/g,'$1');
- const pick=re=>text.match(re)?.[1]?.trim()||'';
- const amount=pick(/(?:实付(?:金额|款)?|合计(?:金额)?|总(?:金额|计)|应付(?:金额)?)[：:\s￥¥]*([\d,]+(?:\.\d{1,2})?)/);
- const date=pick(/(20\d{2}[-/年.]\d{1,2}[-/月.]\d{1,2})/);
- const supplier=pick(/(?:供应商|店铺(?:名称)?|卖家|公司名称)[：:\s]+([^\n\r]+)/);
- const orderNo=pick(/(?:订单(?:编号|号)|单据(?:编号|号))[：:\s]*([A-Za-z0-9-]{5,})/);
- const title=pick(/(?:商品(?:名称)?|品名|货品)[：:\s]+([^\n\r]+)/);
- const qty=pick(/(?:数量|件数)[：:\s]+(\d+(?:\.\d+)?)/);
- const unitPrice=pick(/(?:单价)[：:\s￥¥]+(\d+(?:\.\d{1,2})?)/);
- const unit=pick(/(?:计量单位|商品单位|采购单位|数量单位|单位)[：: \t]+([^\s\n\r，,；;]+)/);
- let normalizedDate='';try{normalizedDate=dateValue(date);}catch{}
- return {platform,account:'默认账号',orderNo,date:normalizedDate,paidAt:'',supplier,amountCents:amount?money(amount):null,refundCents:0,shippingCents:0,status:'待核对',note:'图片 / 文本识别录入，请核对原单',items:[{title,spec:'',sku:'',qty:qty?Number(qty):'',unit,unitPriceCents:unitPrice?money(unitPrice):0}]};
-}

@@ -6,8 +6,8 @@ import {monthlyTaskModel} from './monthly-close-model.js';
 import {selectedSalesRole,canOpenSalesView,personnelCoverageDatasets,salesIdentityFromURL,personnelChoiceMarkup,identityNames} from './personnel.js';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>n==null?'—':((Object.is(n,-0)?0:n)/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}),number=n=>n==null?'—':n.toLocaleString('zh-CN'),pct=n=>n==null?'—':(n*100).toFixed(1)+'%';
-const labels={freight:'运费',operations:'运营总览',reconciliation:'资金对账',manual:'线下与代发',sources:'店铺与数据',imports:'账单导入',close:'月报确认',settings:'设置','pdd-details':'逐笔流水','tb-details':'淘宝货款明细'};
-const settingsItems=[['manual','线下与代发'],['sources','店铺与数据'],['imports','账单导入'],['close','月报确认'],['settings','自动任务与备份']];
+const labels={freight:'运费',operations:'运营总览',reconciliation:'资金对账',manual:'线下与代发',sources:'店铺与数据',imports:'账单导入',close:'月报确认','pdd-details':'逐笔流水','tb-details':'淘宝货款明细'};
+const settingsItems=[['manual','线下与代发'],['sources','店铺与数据'],['imports','账单导入'],['close','月报确认']];
 const settingsViews=new Set(settingsItems.map(([view])=>view));
 $('#settings-nav').innerHTML=settingsItems.map(([view,label])=>`<a href="${view==='settings'?'#settings':'#settings?section='+view}" data-settings-view="${view}">${label}</a>`).join('');
 let boot,state={view:'operations',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI;
@@ -40,7 +40,7 @@ function syncPeriodControls(){
 function syncShopOptions(){if(!boot.shops.some(shop=>shop.id===state.shop)&&state.shop!=='shared')state.shop='all';$('#shop').innerHTML='<option value="all">全部店铺与渠道</option>'+shopOptions()+'<option value="shared" hidden>多店共用</option>';syncPeriodControls();}
 function readRoute(){
  const [route,search]=location.hash.slice(1).split('?'),q=new URLSearchParams(search||'');
- state.view=route==='settings'&&settingsViews.has(q.get('section'))?q.get('section'):labels[route]?route:'operations';
+ state.view=route==='settings'&&settingsViews.has(q.get('section'))?q.get('section'):route==='settings'?'sources':labels[route]?route:'operations';
  if(q.has('shop_id'))state.shop=boot.shops.some(s=>s.id===q.get('shop_id'))?q.get('shop_id'):'all';
  else if(state.view==='reconciliation')state.shop='all';
  const routeMonth=q.get('month');
@@ -104,7 +104,7 @@ async function render(){
   if(isAccount){resetWidgets();await pddUI.summary();syncPeriodControls();return;}
    resetWidgets();pddUI?.destroy();
    if(state.view==='operations'||state.view==='reconciliation'){const r=await api('/api/report?'+query()+(state.view==='operations'?'&empty_trend=skip':''));if(seq!==loadId)return;if(state.view==='operations'){if(r.totals.sales==null)await renderFundsOverview({$,api,boot,state,money,number,esc,charts,valid:()=>seq===loadId});else renderOperations(r);}else await renderReconciliation(r);}
-   else if(state.view==='manual')await renderManual();else if(state.view==='sources')await renderSources();else if(state.view==='imports'){await renderImports();if(seq===loadId)$('#content').insertAdjacentHTML('afterbegin','<div class="notice"><span>按店铺导入官方账单，检查预览后提交。</span><div class="actions"><button class="button small" data-action="taobao-import">导入淘宝货款 CSV</button><button class="button primary small" data-action="pdd-import">导入拼多多 ZIP</button></div></div>');}else if(state.view==='close')await renderClose();else await renderSettings();
+   else if(state.view==='manual')await renderManual();else if(state.view==='sources')await renderSources();else if(state.view==='imports'){await renderImports();if(seq===loadId)$('#content').insertAdjacentHTML('afterbegin','<div class="notice"><span>按店铺导入官方账单，检查预览后提交。</span><div class="actions"><button class="button small" data-action="taobao-import">导入淘宝货款 CSV</button><button class="button primary small" data-action="pdd-import">导入拼多多 ZIP</button></div></div>');}else if(state.view==='close')await renderClose();else await renderSources();
  }catch(e){if(seq===loadId)$('#content').innerHTML=`<div class="notice warning" role="alert">${esc(e.message)}</div>`;}
 }
 function renderOperations(r){const known=r.operations.filter(o=>o.rmb.sales!=null).sort((a,b)=>b.rmb.sales-a.rmb.sales),none=r.totals.sales==null;
@@ -131,7 +131,7 @@ async function renderSources(){const [sources,history]=await Promise.all([api('/
 async function renderImports(){const rows=await api('/api/imports');if(state.view!=='imports')return;$('#content').innerHTML=`<div class="notice"><span>先选择店铺与月份，再映射原表列名、检查预览。相同记录会跳过，有冲突时不会覆盖。</span><button class="button primary small" data-action="import">导入文件</button></div><section class="card"><div class="card-head"><h2>导入批次与原件</h2><div class="actions"><a class="button small" href="/api/template/operations">运营模板</a><a class="button small" href="/api/template/ledger">流水模板</a></div></div>${htmlTable(['导入时间','店铺','文件','数据类型','状态','操作'],rows.map(b=>[new Date(b.created_at).toLocaleString('zh-CN'),b.attribution==='unassigned'?'店铺待确认':esc(shopName(b.shop_id)),`<a href="/api/imports/${b.id}/original">${esc(b.filename)}</a>`,b.dataset==='operations'?'运营':b.dataset==='pdd_funds'?'拼多多货款动账':'资金流水',esc(({staged:'待映射',previewed:'待提交',committed:'已提交',pending_locked:'锁定月待处理',rolled_back:'已撤销'})[b.status]||b.status),`<div class="actions">${b.dataset==='pdd_funds'?`<button class="button small" data-pdd-assign="${b.id}">确认店铺</button><button class="button small" data-pdd-preview="${b.id}">查看核对</button>`:''}${b.status==='committed'?`<button class="button small" data-rollback="${b.id}">撤销批次</button>`:''}</div>`]))}</section><section class="card"><h2>导入前准备</h2><p class="section-note">拼多多官方货款账务 ZIP 可直接识别。其他运营文件选择支付金额、订单数、退款、访客、广告消耗等字段；资金文件按结算、收款、单店费用分别导入。</p><p class="section-note">金额最多两位小数，币种支持 CNY、RUB、USD、EUR。业务编号须保留完整文本格式。多工作表文件可填写工作表名称和表头行号。</p></section>`;const history=isBoss()?await api('/api/report-history'):[];if(state.view!=='imports')return;if(history.length)$('#content').insertAdjacentHTML('beforeend',`<section class="card"><h2>归属纠正前的历史草稿</h2><p class="section-note">以下旧文件保留用于追溯。当前报表请重新导出。</p>${htmlTable(['文件','状态','说明'],history.map(h=>[esc(h.filename),'归属纠正前',esc(h.reason)]))}</section>`);}
 
 async function renderClose(){const [info,history]=await Promise.all([api('/api/close?month='+month()),api('/api/close/history')]);if(state.view!=='close')return;closeInfo=info;const {gaps}=monthlyTaskModel({month:month(),shops:boot.shops,closeInfo:info});$('#content').innerHTML=`<div class="notice ${gaps?'warning':''}"><span>${esc(month())} 有 ${gaps} 项数据尚未完整核对。锁定会固定当前结果，包括缺失标记。</span></div><section class="card"><div class="card-head"><div><h2>${esc(month())} 月报确认</h2><p class="subtext">${info.locked?'月份已锁定，导入和修改均受保护。':'核对完数据后确认锁定。后台、导入和定时任务都不能更改锁定月份。'}</p></div><button class="button ${info.locked?'danger':'primary'}" data-action="${info.locked?'unlock':'lock'}">${info.locked?'明确解锁本月':'确认并锁定'}</button></div><p class="section-note">修改历史数据前必须手动解锁并填写原因；之前的快照、导入原件和审计记录会保留。后来取得的锁定月原件可留存待处理，不会自动替换报表。</p></section><section class="card"><h2>运费台账</h2><p class="section-note">已登记 ${info.freight?.count||0} 条 · 发货费用合计 ${info.freight?.total==null?'尚未录入':'¥ '+money(info.freight.total)}。运费与凭证一并锁定，独立统计，不参与资金对账扣费。</p></section><section class="card"><h2>确认与修订历史</h2>${htmlTable(['时间','月份','动作','说明'],history.map(h=>[new Date(h.created_at).toLocaleString('zh-CN'),h.month,h.action==='lock'?'锁定':'解锁',esc(h.reason)]))}</section>`;}
-async function renderSettings(){const [jobs,backups,audit]=await Promise.all([api('/api/jobs'),api('/api/backups'),api('/api/audit')]);if(state.view!=='settings')return;$('#content').innerHTML=`<section class="card"><div class="card-head"><div><h2>自动任务与运行记录</h2><p class="subtext">北京时间每月 15 日 20:00 · 处理上一个自然月 · Windows 独立任务计划</p></div><span class="pill">待真实采集验收，定时未启用</span></div><p class="section-note">当前可检查已保存数据的缺口并生成月报草稿。后台自动导出尚未验收，不会把“生成报表”冒充“已自动采集”。漏跑月份保留独立目标月份。</p><button class="button primary" data-action="job">检查 ${esc(month())} 缺口并生成月报</button>${htmlTable(['月份','运行时间','状态','结果'],jobs.map(j=>[j.period,new Date(j.created_at).toLocaleString('zh-CN'),esc((({needs_action:'需补数据',complete:'已生成',running:'运行中',failed:'失败'})[j.state]||j.state)+(j.report_status==='before_attribution_correction'?' · 归属纠正前':'')),['needs_action','complete'].includes(j.state)?`<a href="/api/jobs/${j.id}/report">下载月报</a>`:esc(j.detail)]))}</section><section class="card"><div class="card-head"><div><h2>备份与恢复</h2><p class="subtext">包含数据库、导入原件、匹配、锁定快照与审计。导入和锁定前自动备份。</p></div><button class="button" data-action="backup">立即备份</button></div>${htmlTable(['时间','文件数','用途','操作'],backups.map(b=>[new Date(b.created_at).toLocaleString('zh-CN'),b.files,esc(b.reason),`<div class="actions"><button class="button small" data-verify="${b.name}">验证完整性</button><button class="button small" data-restore="${b.name}">恢复为独立副本</button></div>`]))}<p class="subtext">恢复先生成独立副本，不覆盖正在使用的账本。切换账本步骤见项目使用说明。</p></section><section class="card"><h2>最近审计记录</h2>${htmlTable(['时间','动作','对象'],audit.slice(0,30).map(a=>[new Date(a.created_at).toLocaleString('zh-CN'),esc(a.action),esc(a.entity_id)]))}</section>`;}
+
 
 function shopDeleteForm(shopId){
  if(!isBoss())throw Error('只有老板可以删除店铺');const shop=boot.shops.find(item=>item.id===shopId);if(!shop)throw Error('店铺不存在');
@@ -153,7 +153,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(b.dataset.personnelRole){b.disabled=true;await selectPersonnel(b.dataset.personnelRole);return;}
   if(!selectedSalesRole(boot?.personnel))return;
   if(b.dataset.shopDelete){shopDeleteForm(b.dataset.shopDelete);return;}
-  if(!isBoss()&&(['lock','unlock','job','backup','rates','match','receipt'].includes(b.dataset.action)||b.dataset.candidate||b.dataset.unmatch||b.dataset.verify||b.dataset.restore)){toast('该项由老板处理。');return;}
+
   if(b.dataset.nav){const view=b.dataset.nav,next=contextRoute(view,view==='reconciliation'?{shop_id:'all'}:{});if(location.hash===next){readRoute();render();}else location.hash=next;return;}
   if(b.dataset.grain){const old=month();state.grain=b.dataset.grain;state.period=state.grain==='year'?old.slice(0,4):state.grain==='day'?old+'-01':old;$('#period').type=state.grain==='month'?'month':state.grain==='day'?'date':'number';$('#period').value=state.period;document.querySelectorAll('[data-grain]').forEach(x=>x.classList.toggle('selected',x.dataset.grain===state.grain));render();return;}
   if(b.dataset.edit){const r=lastLedger.find(l=>l.id===b.dataset.edit);ledgerForm(r.kind,true,r);return;}
@@ -163,8 +163,8 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(b.dataset.candidate){matchForm({left_id:b.dataset.candidate,right_id:b.dataset.right,amount:Number(b.dataset.amount),match_key:b.dataset.key});return;}
   if(b.dataset.unmatch){reasonDialog('撤销匹配','撤销原因',reason=>api('/api/matches/'+b.dataset.unmatch,{reason},'DELETE'));return;}
   if(b.dataset.rollback){reasonDialog('撤销导入批次','撤销原因（原件和审计继续保留）',reason=>api('/api/imports/'+b.dataset.rollback+'/rollback',{reason}));return;}
-  if(b.dataset.verify){b.disabled=true;const r=await api('/api/backups/'+b.dataset.verify+'/verify',{});toast(`备份校验通过，共 ${r.files} 个文件`);return;}
-  if(b.dataset.restore){b.disabled=true;const r=await api('/api/backups/'+b.dataset.restore+'/restore-copy',{});dialog('已恢复为独立副本',`<p class="section-note">现有账本没有被覆盖。恢复目录：</p><p class="log">${esc(r.path)}</p><p class="section-note">需停止销售台服务后，按使用说明切换 SALES_DATA_DIR 再启动。</p>`);return;}
+
+
   if(b.dataset.taskImport){
    const shop=boot.shops.find(s=>s.id===b.dataset.taskImport);if(!shop)throw Error('请先选择店铺');state.shop=shop.id;syncPeriodControls();
    if(shop.manual){location.hash=contextRoute('manual');return;}
@@ -173,8 +173,8 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   }
   const action=b.dataset.action;if(action==='shop-create'){shopCreateForm();return;}
   if(['sale','refund'].includes(action))ledgerForm(action,true);if(action==='manual-receipt')ledgerForm('receipt',true);if(action==='receipt')ledgerForm('receipt');if(action==='expense')ledgerForm('expense');if(action==='match')matchForm();if(action==='import')importForm();if(action==='pdd-import')pddUploadForm();if(action==='taobao-import')taobaoUploadForm();if(action==='lock')monthConfirm(false);if(action==='unlock')monthConfirm(true);
-  if(action==='backup'){b.disabled=true;await api('/api/backups',{});toast('备份完成');render();}
-  if(action==='job'){b.disabled=true;const j=await api('/api/jobs',{period:month()});toast(j.state==='complete'?'月报已生成':'月报草稿已生成，仍有数据缺口');render();}
+
+
   if(action==='rates'){b.disabled=true;const list=await api('/api/rates',{month:month()});toast(list.length?`汇率：${list.filter(x=>x.status==='ok'||x.status==='existing').length} 个日期可用，${list.filter(x=>x.status==='failed').length} 个失败`:'本月没有需要折算的外币记录');render();}
 }catch(err){toast(err.message);}finally{if(b.isConnected)b.disabled=false;}});
 $('#dialog-close').onclick=()=>closeDialog();$('#dialog').addEventListener('cancel',e=>{e.preventDefault();closeDialog();});

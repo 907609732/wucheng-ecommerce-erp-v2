@@ -5,15 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {createApp} from '../server.mjs';
 import {validateOrder} from '../lib/importer.mjs';
-import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,validateUploadLimits,validateOcrPageCount} from '../public/upload-limits.mjs';
-import {validateOcrFiles} from '../public/ocr-files.mjs';
-import {recognizeBatch,modelDir} from '../lib/ocr.mjs';
+import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,validateUploadLimits} from '../public/upload-limits.mjs';
 
-test('真实PDF：20页可读取，21页识别拒绝并返回超限原因', {skip:!['chi_sim','eng'].every(l=>fs.existsSync(path.join(modelDir,l+'.traineddata')))},async()=>{
- const read=n=>fs.readFileSync(new URL('./fixtures/ocr-'+n+'-pages.pdf',import.meta.url));
- const accepted=await recognizeBatch([{buffer:read(20),filename:'20页.pdf'}]);assert.equal(accepted.documents.length,1);assert.match(accepted.text,/PO20261013001/);
- await assert.rejects(()=>recognizeBatch([{buffer:read(21),filename:'21页.pdf'}]),e=>e.code==='UPLOAD_LIMIT'&&/21.*20/.test(e.message));
-});
+
+
+
 
 test('统一附件限制：数量、大小、总量边界与累计已有文件',()=>{
  const f=size=>({name:'凭证.png',size});
@@ -24,9 +20,6 @@ test('统一附件限制：数量、大小、总量边界与累计已有文件',
  const existing=Array.from({length:4},()=>({filename:'已有附件',bytes:MAX_FILE_BYTES}));
  assert.doesNotThrow(()=>validateUploadLimits(existing));
  assert.throws(()=>validateUploadLimits([...existing,f(1)]),/200 MB/);
- assert.doesNotThrow(()=>validateOcrFiles(Array.from({length:20},()=>f(1))));
- assert.doesNotThrow(()=>validateOcrPageCount(20));
- assert.throws(()=>validateOcrPageCount(21),e=>e.code==='UPLOAD_LIMIT'&&/21.*20/.test(e.message));
  assert.equal(MAX_TOTAL_BYTES,200*1024*1024);assert.equal(MAX_FILES,20);
 });
 
@@ -37,7 +30,7 @@ test('接口放宽到20个；超过上传上限或累计保存上限整批拒绝
  t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));store.close();fs.rmSync(dir,{recursive:true,force:true});});
  const post=async(route,body,method='POST')=>{const r=await fetch(base+route,{method,headers:{'x-purchase-token':token,...(body instanceof FormData?{}:{'content-type':'application/json'})},body:body instanceof FormData?body:JSON.stringify(body)});return {status:r.status,data:await r.json()};};
  const form=n=>{const f=new FormData();for(let i=0;i<n;i++)f.append('files',new Blob(['original']),'凭证'+i+'.txt');return f;};
- const health=await fetch(base+'/api/health').then(r=>r.json());assert.equal(health.uploadLimits.files,20);assert.equal(health.uploadLimits.ocrPages,20);
+ const health=await fetch(base+'/api/health').then(r=>r.json());assert.equal(health.uploadLimits.files,20);assert.equal(health.uploadLimits.ocrPages,undefined);
  const tooMany=await post('/api/attachments',form(21));assert.equal(tooMany.status,400);assert.match(tooMany.data.error,/20/);assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM order_attachments').get().n,0);
  const uploaded=await post('/api/attachments',form(20));assert.equal(uploaded.status,200);assert.equal(uploaded.data.length,20);
  const order=validateOrder({platform:'微信',account:'测试账号',orderNo:'LIMIT-20',date:'2026-05-01',supplier:'测试供应商',status:'已完成',amountCents:100,items:[{title:'测试商品',qty:1}],attachmentIds:uploaded.data.map(a=>a.id)});

@@ -313,8 +313,6 @@ dialog.modal:not([open]){display:none}
 .dropzone strong{font-size:calc(15px * var(--font-scale,1));font-weight:500}
 .dropzone p{font-size:calc(14px * var(--font-scale,1));line-height:1.7;color:#646a73}
 .dropzone svg{width:23px;height:23px;color:#646a73}
-.ocr-input{background:#f6f7f9;border-radius:4px;padding:14px}
-.ocr-input textarea{font-size:calc(14px * var(--font-scale,1));border-radius:4px}
 .note-order-info{background:#f6f7f9;border-radius:4px;padding:11px 12px;font-size:calc(14px * var(--font-scale,1))}
 .note-order-info small{color:#8f959e}
 .tc-record-notice{border-color:#dee2e8;border-radius:4px;background:#f6f7f9;color:#4e5969;font-size:calc(14px * var(--font-scale,1));padding:10px 12px}

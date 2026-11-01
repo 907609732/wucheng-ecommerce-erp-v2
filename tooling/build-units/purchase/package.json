@@ -1,0 +1,10 @@
+{
+  "name": "@wucheng-build/purchase",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node ../../../scripts/engineering/build-unit.mjs purchase",
+    "verify": "node ../../../scripts/engineering/verify-unit.mjs purchase",
+    "deps": "node ../../../scripts/engineering/dependencies.mjs purchase"
+  }
+}

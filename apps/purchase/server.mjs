@@ -5,7 +5,7 @@ import {createPurchaseAgentService,installPurchaseAgentRoutes,purchaseAgentReque
 import {purchaseAgentOperations} from './lib/agent-operations.mjs';
 import {openTaskAssignment} from './lib/task-assignment.mjs';
 import {openTaskCenter} from './lib/task-center.mjs';
-import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,MAX_OCR_PAGES,validateUploadLimits} from './public/upload-limits.mjs';
+import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,validateUploadLimits} from './public/upload-limits.mjs';
 import {installLocalIntegration} from './lib/local-integration.mjs';
 import {installWorkbenchMigration} from './lib/workbench-migration-routes.mjs';
 import {createWorkbenchMigration} from './lib/workbench-migration.mjs';
@@ -24,26 +24,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
-import {fork} from 'node:child_process';
+import {} from 'node:child_process';
 import archiver from 'archiver';
-import {readTable,normalizeTable,validateOrder,fields,extractText} from './lib/importer.mjs';
+import {readTable,normalizeTable,validateOrder,fields} from './lib/importer.mjs';
 import {openStore,summarize} from './lib/store.mjs';
-import {modelDir} from './lib/ocr.mjs';
+
 import {filterOrders,sortOrders,orderUploadDate} from './public/order-query.mjs';
 import {platformMapping} from './lib/import-rules.mjs';
 import {importRules} from './public/import-rules.mjs';
-import {validateOcrFiles,OCR_MAX_FILES,OCR_MAX_FILE_BYTES} from './public/ocr-files.mjs';
+
 import {reviewImportOrders,importReportDraft} from './lib/import-review.mjs';
-import {appVersion,appBrand,appWebsite,appGithubRepo,appStatsEndpoint} from './lib/app-info.mjs';
-import {openUsage,reportOpen} from './lib/usage.mjs';
-import {checkForUpdate} from './lib/updater.mjs';
+import {appVersion} from './lib/app-info.mjs';
 import {openAddresses,quickTags as addressQuickTags} from './lib/addresses.mjs';
 import {createMobileAccess} from './lib/mobile-access.mjs';
 import {openSupplierManagement} from './lib/supplier-management.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1',mobileAgentManaged=agentManaged}={}){
- const app=express(),store=openStore(dataDir),previews=new Map(),jobs=new Map();let ocrBusy=false,mobile,agentFiles;
+ const app=express(),store=openStore(dataDir),previews=new Map(),jobs=new Map();let mobile,agentFiles;
  if(agentManaged)app.use((req,res,next)=>{
   // Header presence is only an early requirement. installWorkbenchModule below
   // verifies the HMAC before any of these business handlers can execute.
@@ -52,24 +50,17 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  });
  const taskCenter=openTaskCenter(store),personnel=openPurchasePersonnel(store),taskBoard=openTaskAssignment(store,taskCenter,personnel);
  const transfers=openOrderTransfers(store);
- const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>ocrBusy||agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','exporter.open','edits.prepare','edits.review-ui']});
+ const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','exporter.open','edits.prepare','edits.review-ui']});
  const edits=installPurchaseEdits(integration,store);
  registerTransferRoutes(integration,transfers,store);installWorkbenchMigration(integration,store,createWorkbenchMigration);installWorkbenchAudit(integration,store);integration.finish();
  const orderImages=openOrderImages(store,{downloader:imageDownloader});
  const attachments=store.attachments;
  const addresses=openAddresses(store);
  const supplierManagement=openSupplierManagement(store,addresses);
- const usage=openUsage(store.db);
+
  try{attachments.sweepOrphans();}catch{}
- const upgrade={state:'idle',current:appVersion,latest:null,hasUpdate:false,url:null,name:null,error:null,checkedAt:null};
- const runUpgradeCheck=async()=>{
-  upgrade.state='checking';upgrade.checkedAt=new Date().toISOString();upgrade.error=null;
-  const r=await checkForUpdate({repo:appGithubRepo,current:appVersion});
-  if(r.skipped){upgrade.state='unconfigured';}
-  else if(r.error){upgrade.state='error';upgrade.error=r.message||('HTTP '+r.status);}
-  else{upgrade.state='ok';upgrade.latest=r.latest;upgrade.hasUpdate=r.hasUpdate;upgrade.url=r.url;upgrade.name=r.name;}
-  return upgrade;
- };
+
+
  const token=randomBytes(32).toString('hex');
  const confirmationMode=agentManaged?'signed-review':'password';
  const uiReview=(req)=>{
@@ -99,7 +90,7 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  if(manualReceipts)app.use(manualReceipts.middleware);
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1}});
  const attachmentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_FILE_BYTES,files:MAX_FILES}});
- const ocrUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:OCR_MAX_FILE_BYTES,files:OCR_MAX_FILES}});
+
  const hash=b=>createHash('sha256').update(b).digest('hex');
  const cleanName=n=>{try{return Buffer.from(n,'latin1').toString('utf8').includes('\ufffd')?n:Buffer.from(n,'latin1').toString('utf8');}catch{return n;}};
  // 订单保存时一并绑定的暂存附件 ID；先暂存（order_id 为空），保存成功后 bind。
@@ -112,10 +103,10 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
   const {orders,issues,lineCount}=parsed;
   return {id:p.id,filename:p.filename,options:p.options,fields,sheets:p.table.sheets,sheet:p.table.sheet,headers:p.table.headers,sample:p.table.rows.slice(0,3).map(r=>r.cells),mapping:p.options.mapping||p.table.mapping,lineCount,issues,orders:orders.map(({raw,...o})=>o),summary:{orders:orders.length,valid:orders.filter(o=>o.importStatus==='ready').length,duplicates:orders.filter(o=>o.importStatus==='duplicate').length,conflicts:orders.filter(o=>o.importStatus==='conflict').length,invalid:orders.filter(o=>o.importStatus==='invalid').length,locked:orders.filter(o=>o.importStatus==='locked').length,amountCents:orders.filter(o=>o.importStatus==='ready').reduce((s,o)=>s+o.amountCents,0)}};
  };
- app.get('/api/health',(req,res)=>res.json({ok:true,app:'purchase-desk',version:appVersion,features:['procurement-classification','monthly-confirmation','batch-order-attributes','order-audit-rollback','order-attachments','address-book','item-tracking','supplier-view','item-shipments','atomic-order-attributes','contact-snapshots','atomic-attachments','upload-limits-v2','monthly-task-center','assigned-task-board'],uploadLimits:{files:MAX_FILES,fileBytes:MAX_FILE_BYTES,totalBytes:MAX_TOTAL_BYTES,ocrPages:MAX_OCR_PAGES}}));
-app.get('/api/app-info',(req,res)=>res.json({brand:appBrand,website:appWebsite,version:appVersion,upgrade,usage:usage.stats()}));
-app.post('/api/upgrade/check',async(req,res)=>res.json(await runUpgradeCheck()));
- app.get('/api/bootstrap',(req,res)=>res.json({token,orders:store.list(),imports:store.imports(),pendingEditsCount:Number(store.db.prepare("SELECT count(*) AS n FROM integration_edit_drafts WHERE state='draft'").get().n),personnel:personnel.current(req),agentManaged,localDesktop:req.workbenchActor?.localDesktop===true,confirmationMode,adminConfigured:store.monthLocks.configured(),monthConfirmations:store.monthLocks.confirmations(),ocrReady:['eng','chi_sim'].every(l=>fs.existsSync(path.join(modelDir,l+'.traineddata')))}));
+ app.all(/^\/api\/ocr(?:\/|$)/,(_req,res)=>res.status(410).json({code:'FEATURE_RETIRED',error:'图片、PDF及文本识别已停用，请使用手工录入或表格导入'}));
+ app.get('/api/health',(req,res)=>res.json({ok:true,app:'purchase-desk',version:appVersion,features:['procurement-classification','monthly-confirmation','batch-order-attributes','order-audit-rollback','order-attachments','address-book','item-tracking','supplier-view','item-shipments','atomic-order-attributes','contact-snapshots','atomic-attachments','upload-limits-v2','monthly-task-center','assigned-task-board'],uploadLimits:{files:MAX_FILES,fileBytes:MAX_FILE_BYTES,totalBytes:MAX_TOTAL_BYTES}}));
+;
+ app.get('/api/bootstrap',(req,res)=>res.json({token,orders:store.list(),imports:store.imports(),pendingEditsCount:Number(store.db.prepare("SELECT count(*) AS n FROM integration_edit_drafts WHERE state='draft'").get().n),personnel:personnel.current(req),agentManaged,localDesktop:req.workbenchActor?.localDesktop===true,confirmationMode,adminConfigured:store.monthLocks.configured(),monthConfirmations:store.monthLocks.confirmations()}));
  app.get('/api/personnel/session',(req,res)=>res.json(personnel.current(req)));
  app.post('/api/personnel/session',(req,res)=>res.json(personnel.select(req,res,req.body)));
  app.get('/api/personnel',(req,res)=>res.json({staff:personnel.list(req)}));
@@ -185,20 +176,7 @@ app.post('/api/upgrade/check',async(req,res)=>res.json(await runUpgradeCheck()))
   }
   previews.delete(p.id);res.json(result);
  });
- const saveOrder=async(req,res)=>{
-  const o=validateOrder(req.body);if(store.find(o))throw Error('同一平台、账号和订单号已存在');
-  const job=req.body.ocrJobId?jobs.get(req.body.ocrJobId):null;
-  if(req.body.ocrJobId&&(!job||job.status!=='done'))throw Error('识别结果已过期，请重新识别');
-  if(job){
-   let buffer=job.files[0].buffer,filename=job.files[0].filename;
-   if(job.files.length>1){
-    buffer=await new Promise((resolve,reject)=>{const chunks=[],archive=archiver('zip',{zlib:{level:6}});archive.on('data',c=>chunks.push(c));archive.on('end',()=>resolve(Buffer.concat(chunks)));archive.on('error',reject);job.files.forEach((f,i)=>archive.append(f.buffer,{name:`${String(i+1).padStart(2,'0')}-${path.basename(f.filename).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')}`}));archive.finalize().catch(reject);});
-    filename='采购单原始附件.zip';
-   }
-  let source,result;try{result=await write(req,()=>{store.monthLocks.assertWritable([o]);source=stash(buffer,filename);return store.importBatch([{order:o,original:{recognizedText:job.result.text,recognized:job.result.order,documents:job.result.documents}}],{...source,lineCount:job.files.length,metadata:{method:'ocr',files:job.files.map(f=>({filename:f.filename,hash:hash(f.buffer)}))}});});}catch(e){if(source)fs.unlinkSync(path.join(dataDir,source.filePath));throw e;}const order=store.find(o);return res.json({ok:true,...result,order,classification:o.classification});
- }
- const created=await write(req,()=>store.insert(o,null,req.body));res.json(created);
-};
+ const saveOrder=async(req,res)=>{if(req.body.ocrJobId)throw Object.assign(Error('单据识别已移除，请手工填写或导入表格'),{status:410,code:'FEATURE_REMOVED'});const o=validateOrder(req.body);if(store.find(o))throw Error('同一平台、账号和订单号已存在');const created=await write(req,()=>store.insert(o,null,req.body));res.json(created);};
  app.post('/api/orders',saveOrder);
  app.get('/api/order-logs',(req,res)=>res.json(store.auditLog.list(req.query)));
  app.get('/api/order-logs/:id',(req,res)=>res.json(store.auditLog.detail(req.params.id)));
@@ -251,22 +229,10 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.get('/api/source/:id',(req,res)=>{
   const row=store.db.prepare('SELECT file_path,filename FROM imports WHERE id=?').get(req.params.id);if(!row?.file_path)return res.status(404).json({error:'原始文件不存在'});res.download(path.join(dataDir,row.file_path),row.filename);
  });
- app.post('/api/ocr/text',(req,res)=>{const text=String(req.body.text||'').slice(0,100000);if(!text.trim())throw Error('请先粘贴订单文字');res.json({text,order:extractText(text,req.body.platform||'其他')});});
- const recognize=async(req,res)=>{
-  const files=(req.files||[]).map(f=>({filename:cleanName(f.originalname),buffer:f.buffer}));
-  validateOcrFiles(files.map(f=>({name:f.filename,size:f.buffer.length})));
-  if(ocrBusy)return res.status(409).json({error:'正在识别另一批采购单，请稍后重试'});
-  if(jobs.size>=10)jobs.delete(jobs.keys().next().value);
-  const id=randomUUID(),job={id,filename:files[0].filename,files,status:'running',progress:0};jobs.set(id,job);ocrBusy=true;res.json({id});
-  const worker=fork(path.join(root,'lib/ocr-worker.mjs'),[],{silent:true,windowsHide:true});
-  const timeout=setTimeout(()=>{job.status='failed';job.error='识别超时，请缩小图片或分批处理';worker.kill();},300000);
-  worker.on('message',m=>{if(job.status!=='running')return;if(m.progress!=null)job.progress=m.progress;if(m.result){job.status='done';job.result=m.result;}if(m.error){job.status='failed';job.error=m.error;job.code=m.code;}});
-  worker.on('error',()=>{job.status='failed';job.error='无法启动本地识别程序，请重试';});
-  worker.on('exit',()=>{clearTimeout(timeout);ocrBusy=false;if(job.status==='running'){job.status='failed';job.error='此文件识别失败，请另存为清晰图片后重试';}});
-  worker.send({files:files.map(f=>({data:f.buffer.toString('base64'),filename:f.filename}))});
- };
- app.post('/api/ocr',ocrUpload.array('file',OCR_MAX_FILES),recognize);
- app.get('/api/ocr/:id',(req,res)=>{const job=jobs.get(req.params.id);if(!job)return res.status(404).json({error:'识别任务已过期'});res.json({id:job.id,filename:job.filename,fileCount:job.files.length,status:job.status,progress:job.progress,result:job.result,error:job.error,code:job.code});});
+ ;
+
+ ;
+ ;
  const csv=(rows)=>'\uFEFF'+rows.map(row=>row.map(v=>{const s=String(v??'');return '"'+(typeof v!=='number'&&/^[=+@\-\t\r]/.test(s)||/^\d{16,}$/.test(s)?"'":'')+s.replace(/"/g,'""')+'"';}).join(',')).join('\r\n');
  app.get('/api/export',(req,res)=>{
   let sorters=[];try{sorters=JSON.parse(req.query.sorters||'[]');}catch{throw Error('排序参数无效');}if(!Array.isArray(sorters))throw Error('排序参数无效');
@@ -295,7 +261,7 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.get('/vendor/tabulator.css',(req,res)=>res.sendFile('tabulator.min.css',{root:path.join(root,'node_modules/tabulator-tables/dist/css')}));
  app.use(express.static(path.join(root,'public')));
  app.use((err,req,res,next)=>{if(res.headersSent)return next(err);let message=err.message||'操作失败';if(message.includes('UNIQUE constraint'))message='该平台、账号下的订单号已存在';if(err.code==='LIMIT_FILE_SIZE')message=['/api/attachments','/api/ocr'].includes(req.path)?'单个文件超过限制，最多 50 MB，请缩小后重试':'文件不能超过 25 MB';if(err.code==='LIMIT_FILE_COUNT'||err.code==='LIMIT_UNEXPECTED_FILE')message='一次最多上传 20 个文件，请减少后重试';if(message==='MONTH_LOCKED'){err.status=423;err.code='MONTH_LOCKED';message='该月份的平台采购数据已锁定，请先到「月度确认」取消确认后再修改。';}res.status(err.status||400).json({error:message,code:err.code,conflicts:err.conflicts,locks:err.locks,availableOn:err.availableOn,availableAt:err.availableAt,preview:err.preview,report:err.report});});
- mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,agentManaged:mobileAgentManaged,isMaintenance:integration.maintenance});
+ mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,agentManaged:mobileAgentManaged,isMaintenance:integration.maintenance});
  const agentOperations=purchaseAgentOperations({store,taskBoard,taskCenter,supplierManagement,addresses,attachments,jobs,personnel});
  agentOperations.edits={query:i=>i.id?edits.get(i.id):edits.list()};
  agentOperations['edit.commit']={async:true,prepare:i=>{const d=edits.previewAgent(i.id,i.revision);return {summary:'复核并保存历史待确认修改',scope:{draftId:d.id,orderId:d.target},evidence:[{id:d.id,revision:d.revision,reason:d.reason}],changes:[{before:d.before,after:d.proposed}],commitData:{revision:d.revision}};},commit:(i,d,c)=>edits.commitAgent(i.id,d.revision,c),recover:i=>{const d=edits.get(i.id);return d.state==='committed'&&d.result?.verified?{...d.result,postVerified:true}:null;}};
@@ -315,17 +281,12 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  installPurchaseAgentRoutes(integration.router,agentService);
  agentFiles.installRoutes(integration.router,purchaseAgentRequestContext);
  integration.workbench.finalize();
- return {app,store,usage,runUpgradeCheck,mobile,integration,transfers};
+ return {app,store,mobile,integration,transfers};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const {app,store,usage,runUpgradeCheck,mobile,integration}=createApp();const port=Number(process.env.PORT||17868);const server=app.listen(port,'127.0.0.1',()=>console.log(`灵兔采购台已启动：http://127.0.0.1:${port}`));integration.attach(server);
+ const {app,store,mobile,integration}=createApp();const port=Number(process.env.PORT||17868);const server=app.listen(port,'127.0.0.1',()=>console.log(`灵兔采购台已启动：http://127.0.0.1:${port}`));integration.attach(server);
  const mobileServer=mobile.app.listen(Number(process.env.PURCHASE_MOBILE_PORT||17869),'127.0.0.1',()=>console.log('手机配对管理：http://127.0.0.1:'+port+'/phone'));
  mobileServer.on('error',err=>console.error('手机入口未启动：'+err.message));
- // 记录本次打开（日活/使用次数）；后台检查更新、预留上报，均不阻塞启动。
- let installId='';
- try{installId=usage.recordOpen().installId;}catch(e){console.error('记录使用次数失败：',e.message);}
- if(appStatsEndpoint)reportOpen(appStatsEndpoint,installId).catch(err=>console.error('日活上报失败：',err.message));
- runUpgradeCheck().catch(err=>console.error('检查更新失败：',err.message));
  server.on('error',err=>{console.error(err.code==='EADDRINUSE'?'端口已占用，请打开现有灵兔采购台。':err.message);store.close();process.exit(1);});
  const shutdown=()=>{mobileServer.close();server.close(()=>{store.close();process.exit(0);});};integration.onStop=shutdown;
  for(const signal of ['SIGINT','SIGTERM'])process.on(signal,shutdown);

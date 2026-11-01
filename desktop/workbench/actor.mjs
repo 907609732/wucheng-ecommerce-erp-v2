@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHmac, randomBytes, timingSafeEqual} from 'node:crypto';
+import {PRODUCT_MODULE_IDS} from '../product/modules.mjs';
 
 export const WORKBENCH_ACTOR_HEADER = 'x-workbench-actor';
 export const WORKBENCH_SIGNATURE_HEADER = 'x-workbench-actor-signature';
 export const WORKBENCH_KEY_FILE = '.workbench-key';
-export const WORKBENCH_MODULES = Object.freeze(['warehouse','purchase','sales','overview','exporter']);
+export const WORKBENCH_MODULES = PRODUCT_MODULE_IDS;
 const roles = new Set(['admin','editor','viewer']);
 const channels = new Set(['ui','cli','mcp']);
 const fail = message => Object.assign(new Error(message), {code:'INVALID_WORKBENCH_ACTOR',statusCode:401});

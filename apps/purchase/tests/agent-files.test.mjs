@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
-import {createCanvas,GlobalFonts} from '@napi-rs/canvas';
+
 import {openStore} from '../lib/store.mjs';
 import {createPurchaseAgentFiles} from '../lib/agent-files.mjs';
 import {signWorkbenchActor,verifyWorkbenchActor,provisionWorkbenchKey} from '../lib/workbench-actor.mjs';
@@ -32,12 +32,7 @@ test('persistent table analyze/remap/review imports real source once, isolates o
  const detail=reopened.ops['import.commit'].prepare({previewId:preview.previewId,indices:[0]},ctx());assert.equal(detail.commitData.orders[0].order.amountCents,12345);let cleanup;assert.throws(()=>store.transaction(()=>{reopened.ops['import.commit'].commit({},detail.commitData,{...ctx(),onRollback:fn=>cleanup=fn});throw Error('outer receipt failed');}),/outer receipt failed/);cleanup();assert.equal(store.list().length,0);assert.equal(fs.readdirSync(path.join(dir,'originals')).length,0);
  const result=store.transaction(()=>reopened.ops['import.commit'].commit({},detail.commitData,ctx()));assert.equal(result.imported,1);assert.deepEqual(fs.readFileSync(path.join(dir,store.db.prepare('SELECT file_path FROM imports').get().file_path)),csv);assert.equal(reopened.ops['import.preview'].query({previewId:preview.previewId},ctx()).summary.duplicate,1);assert.throws(()=>reopened.ops['import.commit'].prepare({previewId:preview.previewId,indices:[0]},ctx()),/重复/);assert.equal(store.imports()[0].metadata.importReport.imported,1);
 });
-test('real local OCR persists progress/result, preserves originals as order attachments and marks restart interruption',{timeout:120000},async t=>{
- const {files,store,dir}=fixture(t);GlobalFonts.registerFromPath('C:/Windows/Fonts/msyh.ttc','AgentChinese');const canvas=createCanvas(1500,1000),c=canvas.getContext('2d');c.fillStyle='white';c.fillRect(0,0,1500,1000);c.fillStyle='#111';c.font='42px AgentChinese';['订单号: AGENTOCR20261028001','日期: 2026-10-16','供应商: 五金配件店','商品: 螺丝','数量: 2','实付金额: 123.45'].forEach((l,i)=>c.fillText(l,80,100+i*120));const buffer=canvas.toBuffer('image/png'),file=put(files,buffer,'采购单.png'),start=await files.ops['ocr.start'].execute({fileIds:[file.fileId]},ctx('ocr-start'));
- const again=await files.ops['ocr.start'].execute({fileIds:[file.fileId]},ctx('ocr-start'));assert.equal(again.data.jobId,start.data.jobId);let job;for(let i=0;i<500;i++){job=files.ops['ocr.status'].query({jobId:start.data.jobId},ctx());if(job.status!=='running')break;await new Promise(r=>setTimeout(r,150));}assert.equal(job.status,'done',job.error);assert.equal(job.progress,100);assert.equal(job.result.order.amountCents,12345);assert.equal(store.list().length,0);files.close();assert.equal(files.ops['ocr.status'].query({jobId:job.jobId},ctx()).status,'done');
- const input={jobId:job.jobId,order:{...job.result.order,platform:'微信',account:'OCR测试号',status:'已完成'}},detail=await files.ops['ocr.commit'].prepare(input,ctx('ocr-stage'));const result=store.transaction(()=>files.ops['ocr.commit'].commit(input,detail.commitData,ctx()));assert.equal(result.imported,1);const order=store.list()[0];assert.equal(order.amountCents,12345);assert.equal(order.attachmentIds.length,1);assert.deepEqual(fs.readFileSync(store.attachments.resource(order.attachmentIds[0],'full').path),buffer);
- const pending={jobId:'interrupted-synthetic-state',status:'running',progress:45};store.db.prepare('INSERT INTO agent_ocr_jobs VALUES(?,?,?)').run(pending.jobId,owner,JSON.stringify(pending));const reopened=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>reopened.close());assert.equal(reopened.ops['ocr.status'].query({jobId:pending.jobId},ctx()).status,'interrupted');assert.equal(reopened.ops['ocr.status'].query({jobId:job.jobId},ctx()).result.order.amountCents,12345);
-});
+
 
 test('locks and content hashes reject stale or damaged source without creating original files',async t=>{
  const {files,store,dir}=fixture(t),file=put(files),p=(await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信'},ctx())).data;

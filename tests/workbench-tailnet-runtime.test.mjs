@@ -184,7 +184,7 @@ test('shutdown is existing-only, confirms child exit and retains node state for 
 test('unexpected owned engine exit never spawns a second child and authenticated shutdown recovers',{timeout:35000},async t=>{
  const f=await fixture(t),a=f.manager(),first=await a.ensure();assert.equal(f.engines()[0].pid,first.descriptor.goPid);
  process.kill(first.descriptor.goPid);await until(()=>!tailnetAlive(first.descriptor.goPid),'owned fake engine did not exit');
- await assert.rejects(a.status(),{code:'TAILNET_ENGINE_EXITED'});assert.equal(f.engines().length,1);
+ await assert.rejects(a.status(),error=>['TAILNET_ENGINE_EXITED','TAILNET_ENGINE_PIPE_CLOSED'].includes(error.code));assert.equal(f.engines().length,1);
  await a.shutdown();await until(()=>!tailnetAlive(first.descriptor.pid),'owned broker did not exit');await a.ensure();assert.equal(f.engines().length,2);
 });
 

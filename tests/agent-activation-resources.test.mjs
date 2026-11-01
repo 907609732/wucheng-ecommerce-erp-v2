@@ -1,9 +1,10 @@
+import os from 'node:os';
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
 import {createActivationResourceOperation,verifyActivationResources} from '../desktop/business-host/activation-resources.mjs';
 import {createAgentActivation} from '../desktop/business-host/activation.mjs';
 import {agentBetaPaths,prepareAgentProfile} from '../desktop/business-host/isolation.mjs';
 import {AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2} from '../desktop/business-host/resource-layout.mjs';
-const base=path.resolve('.codex-artifacts/activation-resource-tests'),sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+const base=path.join(os.tmpdir(),'wucheng-activation-resource-tests'),sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 function fixture(t){fs.mkdirSync(base,{recursive:true});const work=fs.mkdtempSync(path.join(base,'case-')),resources=path.join(work,'resources');fs.mkdirSync(resources);t.after(()=>{const actual=fs.realpathSync(work),relative=path.relative(base,actual);assert.ok(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative));fs.rmSync(actual,{recursive:true,force:true});});const put=(rel,bytes='public resource')=>{const file=path.join(resources,...rel.split('/'));fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);return file;};return {work,resources,put};}
 test('normal files keep canonical/lstat/SHA checks, one buffer and bounded ancestor checks with real yields',async t=>{
  const {resources,put}=fixture(t),payloadHashes={};for(let i=0;i<256;i++){const rel='apps/purchase/deep/shared/'+i+'.txt',bytes='public-'+i;put(rel,bytes);payloadHashes[rel]=sha(bytes);}put('vendor/large.bin',Buffer.alloc(2*1024*1024+17,7));put('vendor/short.txt','x');put('vendor/empty.txt','');for(const rel of ['vendor/large.bin','vendor/short.txt','vendor/empty.txt'])payloadHashes[rel]=sha(fs.readFileSync(path.join(resources,rel)));

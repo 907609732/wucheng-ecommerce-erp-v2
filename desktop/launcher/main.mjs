@@ -8,6 +8,9 @@ import {ServiceManager} from '../shared/service-manager.mjs';
 import {createServiceLifecycle} from '../modules/service-lifecycle.mjs';
 import {withElectronLifecycle} from '../modules/electron-lifecycle.mjs';
 import {installDeskViews} from '../local-desks.mjs';
+
+import {backupBusinessModule} from '../business-host/module-backup.mjs';
+import {PRODUCT_MODULE_IDS} from '../product/modules.mjs';
 import {requestedUserDataPath} from '../shared/user-data-path.mjs';
 import {parseCliRequest} from '../shared/ai-interface.mjs';
 import {readCliChildResult} from '../shared/cli-child-result.mjs';
@@ -29,7 +32,6 @@ import {collectMigrationSource,freezeMigrationSource,releaseMigrationSource} fro
 import {prepareServe,enableServe} from '../workbench-client/tailscale-serve.mjs';
 import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress,assertPreviewLocalMode} from '../business-host/isolation.mjs';
 import {createHostIdentity} from '../business-host/identity.mjs';
-import {createBusinessInterface} from '../business-interface/index.mjs';
 import {assertLauncherSender} from '../business-host/trust.mjs';
 import {assertLauncherOperationAllowed} from '../business-host/launcher-policy.mjs';
 import {createDesktopUiSessions} from '../business-host/desktop-ui-sessions.mjs';
@@ -62,6 +64,7 @@ app.setPath('userData', path.join(profile, 'launcher'));
 const cliIndex=process.argv.indexOf('--cli'),mcpMode=process.argv.includes('--mcp-stdio'),headless=cliIndex>=0||mcpMode;
 const acquired = headless || app.requestSingleInstanceLock();
 if (!acquired) app.quit();
+let onDemand;
 let win, modules, services, desks, updater, recoveryError, tray, quitting=false, preparation, preparationUi, preparationStatus, activationPromise, rendererReady=false, previousCloudExecutable;
 const activationAbort=new AbortController();
 const moduleArgument=args=>args.find(value=>/^--open-module=(warehouse|purchase|sales|overview|exporter)$/.test(value))?.split('=')[1];
@@ -186,7 +189,7 @@ function assertPrivateRequestAllowed(){
 async function resetPrivateConnection(){
   if(activeNetworkRequests||[...privateSessionWrites.values()].some(set=>set.size))throw Error('主服务器请求尚未结束，请稍后切换连接');
   desks?.reset();
-  for(const target of new Set([clientSession,...salesPageSessions].filter(Boolean))){forgetDirectTailnetSession(target);await resetEmbeddedSession(target);}
+  for(const target of new Set([clientSession,...privateSessionWrites.keys()].filter(Boolean))){forgetDirectTailnetSession(target);await resetEmbeddedSession(target);}
   transport=null;remoteManager=null;
 }
 function guardPrivateSession(target){
@@ -238,7 +241,7 @@ async function ensureGateway(){
 }
 async function getBusinessInterface(){
   if(businessInterface)return businessInterface;
-  if(!businessInterfaceStarting)businessInterfaceStarting=Promise.resolve(createBusinessInterface({paths:workbenchPaths,services,identity:hostIdentity,startBridge:!headless})).then(value=>businessInterface=value).finally(()=>{businessInterfaceStarting=null;});
+  if(!businessInterfaceStarting)businessInterfaceStarting=import('../business-interface/index.mjs').then(({createBusinessInterface})=>createBusinessInterface({paths:workbenchPaths,services,identity:hostIdentity,startBridge:!headless})).then(value=>businessInterface=value).finally(()=>{businessInterfaceStarting=null;});
   return businessInterfaceStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};
@@ -267,7 +270,10 @@ if (acquired) app.whenReady().then(async () => {
   app.setAppUserModelId(workbenchPaths.appId);
   hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host')});
   let activation,activationError;
-  if(app.isPackaged){
+  if(app.isPackaged&&fs.existsSync(path.join(packagedResources.resourcesDir,'on-demand.json'))){
+    const {createOnDemandComponents}=await import('../business-host/on-demand.mjs');
+    onDemand=await createOnDemandComponents({paths:workbenchPaths,resourcesDir:packagedResources.resourcesDir,hostVersion,publicKeys:JSON.parse(fs.readFileSync(publicKeysFile,'utf8')),signal:activationAbort.signal,onProgress:value=>send('modules:progress',value)});
+  }else if(app.isPackaged){
     try{
       reportPreparation({phase:'verify'});
       await preparationUi?.ready;
@@ -298,7 +304,8 @@ if (acquired) app.whenReady().then(async () => {
     const c=services.config(id);
     if(c.managed&&c.allowInitialize===false&&!fs.existsSync(c.dataDir))throw Error('原数据目录不存在，已阻止创建空数据；请在设置中核对数据位置。');
   };
-  services.ensure=id=>{verifyProfile(id);return ensureService(id);};
+  services.ensure=async id=>{if(onDemand)await onDemand.ensure(id);verifyProfile(id);return ensureService(id);};
+  if(onDemand){services.prepareComponent=id=>onDemand.ensure(id);const start=services.start.bind(services);services.start=async id=>{await onDemand.ensure(id);return start(id);};}
   const store = path.join(profile, 'modules');
   modules = new ModuleManager({
     root: store, hostVersion,
@@ -307,12 +314,12 @@ if (acquired) app.whenReady().then(async () => {
   });
   const lifecycleOptions = {
     services, dataRoot: workbenchPaths.data, backupRoot: path.join(profile, 'module-backups'),
-    getInstalled: id => modules.state().packages[id]
+    getInstalled: id => {const installed=modules.state().packages[id];if(installed||!onDemand||id!=='node-runtime')return installed;const node=PRODUCT_MODULE_IDS.map(key=>services.config(key).nodePath).find(file=>file&&fs.existsSync(file));return node?{root:path.dirname(node),entry:path.basename(node)}:undefined;}
   };
   modules.lifecycle = withElectronLifecycle(createServiceLifecycle(lifecycleOptions), lifecycleOptions);
   if(fs.existsSync(modules.journalFile))recoveryError='测试版检测到旧组件更新记录，请重新运行测试包验收工具。';
   // Only pinned Beta programs are activated here; ledger copies are provisioned separately.
-  const suiteState={ready:activation?.ready===true&&!activation.missingData.length,setupRequired:activation?.ready!==true||!!activation.missingData.length};
+  const suiteState={ready:!!onDemand||activation?.ready===true&&!activation.missingData.length,setupRequired:!onDemand&&(activation?.ready!==true||!!activation.missingData.length)};
   if(headless){
     const {createWorkbenchDispatcher,legacyCliArgs}=await import('../shared/workbench-dispatcher.mjs');
     let localAgentActions;
@@ -367,20 +374,20 @@ if (acquired) app.whenReady().then(async () => {
   const beforeBusinessOpen=async id=>{
     assertLauncherOperationAllowed('modules:open',{moduleId:id});assertPrivateRequestAllowed();
     if(remote()){await remoteConnection().connect();const target=session.fromPartition(deskPartition(id));guardPrivateSession(target);await preparePrivateSession(target);}
-    else{hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(fs.existsSync(modules.journalFile))throw Error('模块正在激活或等待恢复检查，请稍后打开');if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');}
+    else{hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(onDemand)await onDemand.ensure(id);if(fs.existsSync(modules.journalFile))throw Error('模块正在激活或等待恢复检查，请稍后打开');if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');}
   };
   const viewManager={registryFile:services.registryFile,config:id=>{requireHost();return services.config(id);},
     ensure:async id=>{assertPrivateRequestAllowed();if(remote()){remoteConnection();return remoteManager.ensure(id);}hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(services.config(id).maintenance)throw Error('模块处于维护或恢复窗口，请稍后重试');return services.ensure(id);},
     status:options=>remote()?(remoteConnection(),remoteManager.status()):services.status(options),stop:id=>{requireHost();return services.stop(id);}};
   const desktopUiSessions=createDesktopUiSessions({services,resolveActor:()=>hostIdentity.requireMember(hostIdentity.localActor('ui'),true),assertRequestAllowed:()=>{assertPrivateRequestAllowed();if(remote())throw Object.assign(Error('公司连接已变化，请重新打开业务工作台'),{code:'CONNECTION_CHANGED'});},onError:error=>diagnostics.write('error','workbench','业务页面身份检查未通过 · '+(error.code||'DESKTOP_UI_FAILED'))});
   desks = installDeskViews(win, {manager:viewManager,isRemote:remote,partitionFor:deskPartition,includeWarehouse:true,
-    authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:child-navigate','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:['desks:surface','desks:child-navigate'].includes(name)?args[0]?.module:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},
+    authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='desks:surface'?args[0]?.module:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},
     prepareView:({id,view,cap})=>{if(!remote())desktopUiSessions.attach({id,view,cap});},
     beforeOpen:beforeBusinessOpen,
     notify:message=>send('modules:message',message)});
   const legacyHandlers=new Map();
   const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
-    trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='modules:open'?args[0]:undefined});const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
+    trusted(event);if(!(onDemand&&name==='modules:cancel'))assertLauncherOperationAllowed(name,{moduleId:name==='modules:open'?args[0]:undefined});const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
     if(/^(?:business:review|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireMember(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
     catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='business:review')return {ok:false,code:error.code||'BUSINESS_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
@@ -537,10 +544,11 @@ if (acquired) app.whenReady().then(async () => {
   handle('modules:refresh', () => {requireHost();return refresh();});
   handle('modules:plan', id => {requireHost();return modules.plan(id);});
   handle('modules:install', id => {requireHost();return modules.install(id);});
-  handle('modules:cancel', id => {requireHost();return modules.cancel(id);});
+  handle('modules:cancel', id => {requireHost();return onDemand?onDemand.cancel(id):modules.cancel(id);});
   handle('modules:uninstall', async id => {requireHost();const result=await modules.uninstall(id);desks.invalidate(id);return result;});
   handle('modules:open', async (id, route) => {
     assertPrivateRequestAllowed();
+    if(onDemand&&!remote()){hostIdentity.requireMember(hostIdentity.localActor('ui'),true);await onDemand.ensure(id);}
     if(remote()){
       const result=await desks.open(id,route);
       // Cache only successful, authenticated business reads. Never cache secrets or attachments implicitly.
@@ -585,10 +593,14 @@ if (acquired) app.whenReady().then(async () => {
   win.on('close',event=>{if(!quitting){event.preventDefault();win.hide();}});
   const preferences=launcherPreferences();configureLauncherLogin(preferences);persistPreferences(preferences);
   win.webContents.on('will-navigate', event => event.preventDefault());
+  handle('business:backup',id=>{requireHost();hostIdentity.requireMember(hostIdentity.localActor('ui'),true);return backupBusinessModule({id,services,lifecycle:modules.lifecycle,prepare:onDemand?key=>onDemand.ensure(key):undefined});});
   handle('business:status',async()=>{
     const state=await legacyHandlers.get('connection:status')();
-    return {ready:suiteState.ready,environment:workbenchPaths.environment,actor:hostIdentity.localActor('ui'),connection:state,embeddedAgent:false};
+    return {ready:onDemand?onDemand.ready.size>0:suiteState.ready,components:onDemand?Object.fromEntries(PRODUCT_MODULE_IDS.map(id=>[id,onDemand.ready.has(id)?'ready':onDemand.pending.has(id)?'preparing':'not-prepared'])):undefined,environment:workbenchPaths.environment,actor:hostIdentity.localActor('ui'),connection:state,embeddedAgent:false};
   });
+  // 一个入口同时打开四个模块：并行启动后台、预热内嵌页面、最后打开云仓窗口。
+
+
   handle('business:review',async value=>{
     if(!value||typeof value!=='object'||Array.isArray(value)||!['list','get','approve','reject'].includes(value.operation))throw Error('业务复核请求无效');
     const {operation,...payload}=value;
@@ -601,7 +613,7 @@ if (acquired) app.whenReady().then(async () => {
   await win.loadFile(path.join(here, 'business-index.html'));
   preparationUi?.destroy();
   if(!process.argv.includes('--hidden')||moduleArgument(process.argv))showWindow();
-  if(!remote())try{await getBusinessInterface();}catch(error){send('modules:message','外部 AI 业务接口尚未就绪：'+error.message);}
+  if(!remote()&&!onDemand)try{await getBusinessInterface();}catch(error){send('modules:message','外部 AI 业务接口尚未就绪：'+error.message);}
   if(connection.read().mode==='server')try{await ensureGateway();}catch(error){send('modules:message',error.message);}
   if(recoveryError)send('modules:message','上次模块更新需要恢复检查：'+recoveryError);
 }).catch(error=>{if(quitting||activationAbort.signal.aborted)return;diagnostics.write('error','workbench','启动失败 · '+(error.stack||error.message));if(headless)console.log(JSON.stringify({ok:false,code:error.code||'STARTUP_FAILED',error:error.message}));else dialog.showErrorBox('工作台准备未完成','请重新打开工作台重试。若仍然失败，请保留原数据并联系管理员处理。\n\n'+error.message);app.exit(1);});

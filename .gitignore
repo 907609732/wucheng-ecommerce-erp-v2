@@ -39,3 +39,9 @@ tmp/
 .tmp/
 out/
 发票核对/_run/
+
+# Incremental build cache and isolated task outputs
+.turbo/
+tooling/build-units/*/artifact/
+tooling/build-units/*/.verification/
+tooling/build-units/*/dependencies/

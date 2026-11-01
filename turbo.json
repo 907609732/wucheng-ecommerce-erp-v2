@@ -1,0 +1,618 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "@wucheng-build/host#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "deps"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/warehouse#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/config.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/!desktop/launcher/**",
+        "$TURBO_ROOT$/!desktop/workbench-client/**",
+        "$TURBO_ROOT$/!desktop/workbench-migration/**"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "^build"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/purchase#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/purchase/**",
+        "$TURBO_ROOT$/!apps/purchase/node_modules/**",
+        "$TURBO_ROOT$/!apps/purchase/data/**",
+        "$TURBO_ROOT$/!apps/purchase/out/**",
+        "$TURBO_ROOT$/!apps/purchase/dist/**",
+        "$TURBO_ROOT$/!apps/purchase/**/*.sqlite*",
+        "$TURBO_ROOT$/!apps/purchase/**/*.log",
+        "!$TURBO_ROOT$/apps/purchase/**/*.md"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "deps"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/sales#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/sales/**",
+        "$TURBO_ROOT$/!apps/sales/node_modules/**",
+        "$TURBO_ROOT$/!apps/sales/data/**",
+        "$TURBO_ROOT$/!apps/sales/out/**",
+        "$TURBO_ROOT$/!apps/sales/dist/**",
+        "$TURBO_ROOT$/!apps/sales/**/*.sqlite*",
+        "$TURBO_ROOT$/!apps/sales/**/*.log",
+        "!$TURBO_ROOT$/apps/sales/**/*.md"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "deps"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/overview#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/overview/**",
+        "$TURBO_ROOT$/!apps/overview/node_modules/**",
+        "$TURBO_ROOT$/!apps/overview/data/**",
+        "$TURBO_ROOT$/!apps/overview/out/**",
+        "$TURBO_ROOT$/!apps/overview/dist/**",
+        "$TURBO_ROOT$/!apps/overview/**/*.sqlite*",
+        "$TURBO_ROOT$/!apps/overview/**/*.log",
+        "!$TURBO_ROOT$/apps/overview/**/*.md"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "deps"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/exporter#build": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/build-unit.mjs",
+        "$TURBO_ROOT$/scripts/engineering/files.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/desktop/product/**",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/exporter/**",
+        "$TURBO_ROOT$/!apps/exporter/node_modules/**",
+        "$TURBO_ROOT$/!apps/exporter/data/**",
+        "$TURBO_ROOT$/!apps/exporter/out/**",
+        "$TURBO_ROOT$/!apps/exporter/dist/**",
+        "$TURBO_ROOT$/!apps/exporter/**/*.sqlite*",
+        "$TURBO_ROOT$/!apps/exporter/**/*.log",
+        "$TURBO_ROOT$/desktop/shared/component-context.*",
+        "!$TURBO_ROOT$/apps/exporter/**/*.md"
+      ],
+      "outputs": [
+        "artifact/**"
+      ],
+      "dependsOn": [
+        "deps"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/host#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/*/lib/**",
+        "$TURBO_ROOT$/apps/exporter/src/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md",
+        "$TURBO_ROOT$/docs/feature-manual.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/warehouse#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/warehouse/**",
+        "!$TURBO_ROOT$/apps/warehouse/node_modules/**",
+        "!$TURBO_ROOT$/apps/warehouse/data/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/purchase#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/purchase/**",
+        "!$TURBO_ROOT$/apps/purchase/node_modules/**",
+        "!$TURBO_ROOT$/apps/purchase/data/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/sales#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/sales/**",
+        "!$TURBO_ROOT$/apps/sales/node_modules/**",
+        "!$TURBO_ROOT$/apps/sales/data/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/overview#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/overview/**",
+        "!$TURBO_ROOT$/apps/overview/node_modules/**",
+        "!$TURBO_ROOT$/apps/overview/data/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/exporter#verify": {
+      "inputs": [
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/scripts/engineering/**",
+        "$TURBO_ROOT$/desktop/**",
+        "$TURBO_ROOT$/core/**",
+        "$TURBO_ROOT$/build/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json",
+        "$TURBO_ROOT$/apps/exporter/**",
+        "!$TURBO_ROOT$/apps/exporter/node_modules/**",
+        "!$TURBO_ROOT$/apps/exporter/data/**",
+        "!$TURBO_ROOT$/desktop/**/*.md",
+        "!$TURBO_ROOT$/apps/**/*.md"
+      ],
+      "outputs": [
+        ".verification/**"
+      ],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/host#deps": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/dependencies.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/package-lock.json"
+      ],
+      "outputs": [
+        "dependencies/**"
+      ],
+      "dependsOn": [],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/purchase#deps": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/dependencies.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/purchase/package.json",
+        "$TURBO_ROOT$/apps/purchase/package-lock.json"
+      ],
+      "outputs": [
+        "dependencies/**"
+      ],
+      "dependsOn": [],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/sales#deps": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/dependencies.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/sales/package.json",
+        "$TURBO_ROOT$/apps/sales/package-lock.json"
+      ],
+      "outputs": [
+        "dependencies/**"
+      ],
+      "dependsOn": [],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/overview#deps": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/dependencies.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/overview/package.json",
+        "$TURBO_ROOT$/apps/overview/package-lock.json"
+      ],
+      "outputs": [
+        "dependencies/**"
+      ],
+      "dependsOn": [],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    },
+    "@wucheng-build/exporter#deps": {
+      "inputs": [
+        "$TURBO_ROOT$/scripts/engineering/dependencies.mjs",
+        "$TURBO_ROOT$/scripts/agent-beta-stage.mjs",
+        "$TURBO_ROOT$/build/agent-beta-stage-plan.json",
+        "$TURBO_ROOT$/apps/exporter/package.json",
+        "$TURBO_ROOT$/apps/exporter/package-lock.json"
+      ],
+      "outputs": [
+        "dependencies/**"
+      ],
+      "dependsOn": [],
+      "env": [
+        "ERP_BUILD_PLATFORM",
+        "ERP_BUILD_ARCH",
+        "ERP_BUILD_NODE",
+        "ERP_BUILD_ELECTRON"
+      ],
+      "passThroughEnv": [
+        "ERP_BUILD_STAGE",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PATH"
+      ],
+      "outputLogs": "errors-only"
+    }
+  }
+}

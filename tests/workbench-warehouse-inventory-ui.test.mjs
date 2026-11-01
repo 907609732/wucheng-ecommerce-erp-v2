@@ -49,5 +49,5 @@ test('the served warehouse script renders structured API alerts as safe text, in
  const rendered=()=>document.getElementById('inventory-rows').children.map(tr=>tr.children.map(td=>td.textContent));
  assert.deepEqual(Array.from(rendered(),r=>r[4]),['🔴 不够卖 1 周','🟢 正常','—']);assert(!JSON.stringify(rendered()).includes('[object Object]'));assert.deepEqual(rows,before);
  document.getElementById('filter').value='SYNTHETIC-2';document.getElementById('filter').oninput();assert.equal(rendered().length,1);assert.equal(rendered()[0][4],'🟢 正常');
- rows[1].stockAlert.label='<img src=x onerror=alert(1)>';document.getElementById('filter').oninput();assert.equal(rendered()[0][4],'<img src=x onerror=alert(1)>');assert.equal(created.filter(e=>e.tag==='img').length,0,'labels remain text, not HTML');assert.equal(requests.length,5);
+ rows[1].stockAlert.label='<img src=x onerror=alert(1)>';document.getElementById('filter').oninput();assert.equal(rendered()[0][4],'<img src=x onerror=alert(1)>');assert.equal(created.filter(e=>e.tag==='img').length,0,'labels remain text, not HTML');assert.equal(requests.length,4);assert.ok(!requests.some(r=>r.url.endsWith('/daily')),'removed attendance/daily UI must not issue obsolete requests');
 });

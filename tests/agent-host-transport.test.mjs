@@ -23,20 +23,20 @@ async function fixture(t,{role='editor',canRunTasks=false,respond}={}){
   const transport=createAgentModuleTransport({services:{config:()=>({dataDir}),ensure:async()=>({url:'http://127.0.0.1:'+server.address().port,workbench:manifest})},resolveActor:async()=>actor,artifactRoot,verifyProof:verifyAgentApproval,signProof:signAgentApproval,validateApproval:async claims=>claims.taskId==='task-approved'&&claims.resultId==='result-approved'});
   return {root,artifactRoot,key,transport,requests,ctx:{actor,taskId:'task-approved'},setActor(value){actor=value;}};
 }
-test('viewer POST query/binding/receipt are read-only but prepares remain denied',async t=>{
+test('authenticated members with legacy roles share business access; signed requests retain identity',async t=>{
   const f=await fixture(t,{role:'viewer'});for(const route of ['query','binding','receipt','receipts/operation-1'])await f.transport('warehouse','/api/integration/v1/agent/'+route,{method:'POST',ctx:f.ctx,body:{}});
-  await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx:f.ctx,body:{}}),{code:'READ_ONLY'});assert.equal(f.requests.length,4);assert(f.requests.every(r=>r.actor.channel==='mcp'));
+  await f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx:f.ctx,body:{}});assert.equal(f.requests.length,5);assert(f.requests.every(r=>r.actor.accessMode==='company-shared' || r.actor.role==='admin'));assert(f.requests.every(r=>r.actor.channel==='mcp'));
 });
-test('employee attendance exception uses trusted context and signed persisted approval, never body alone',async t=>{
-  const f=await fixture(t),ctx={...f.ctx,capabilityId:'attendance.check-in'};
+test('business operations use trusted context and persisted approval without legacy permission gates',async t=>{
+  const f=await fixture(t),ctx={...f.ctx,capabilityId:'inventory.collect'};
   await f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx,body:{capabilityId:ctx.capabilityId}});
-  await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx:{...ctx,capabilityId:'inventory.sync'},body:{capabilityId:'attendance.check-in'}}),{code:'TASK_PERMISSION_REQUIRED'});
+  await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx:{...ctx,capabilityId:'inventory.sync'},body:{capabilityId:'inventory.collect'}}),{code:'CAPABILITY_CONTEXT_REQUIRED'});
   await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/prepare',{method:'POST',ctx,body:{capabilityId:'inventory.sync'}}),{code:'CAPABILITY_CONTEXT_REQUIRED'});
-  const now=Date.now(),claims={v:1,approvalId:'approval-1',actorId:ctx.actor.id,module:'warehouse',capabilityId:ctx.capabilityId,taskId:ctx.taskId,resultId:'result-approved',resultVersion:1,dataSetId:'test-ledger',revision:1,changeDigest:'a'.repeat(64),idempotencyKey:'attendance-operation',issuedAt:now,expiresAt:now+30000},proof=await f.transport.signApproval(claims,'warehouse');
+  const now=Date.now(),claims={v:1,approvalId:'approval-1',actorId:ctx.actor.id,module:'warehouse',capabilityId:ctx.capabilityId,taskId:ctx.taskId,resultId:'result-approved',resultVersion:1,dataSetId:'test-ledger',revision:1,changeDigest:'a'.repeat(64),idempotencyKey:'inventory-operation',issuedAt:now,expiresAt:now+30000},proof=await f.transport.signApproval(claims,'warehouse');
   await f.transport('warehouse','/api/integration/v1/agent/commit',{method:'POST',ctx:{...ctx,approval:proof,idempotencyKey:claims.idempotencyKey},body:{}});assert.equal(f.requests.length,2);
   await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/commit',{method:'POST',ctx:{...ctx,approval:{...proof,signature:'b'.repeat(64)},idempotencyKey:claims.idempotencyKey},body:{}}),{code:'AGENT_APPROVAL_INVALID'});
   const foreign=signAgentApproval({...claims,taskId:'task-unapproved'},f.key);await assert.rejects(()=>f.transport('warehouse','/api/integration/v1/agent/commit',{method:'POST',ctx:{...ctx,taskId:'task-unapproved',approval:foreign,idempotencyKey:claims.idempotencyKey},body:{}}),{code:'AGENT_APPROVAL_REQUIRED'});
-  await assert.rejects(()=>f.transport.signApproval({...claims,capabilityId:'inventory.sync'},'warehouse'),{code:'MODULE_DENIED'});
+  f.setActor(null);await assert.rejects(()=>f.transport.signApproval(claims,'warehouse'),{code:'MODULE_DENIED'});
 });
 test('long prepare has a bounded budget and cancellation makes no duplicate request',async t=>{
   let arrived;const seen=new Promise(resolve=>arrived=resolve),f=await fixture(t,{canRunTasks:true,respond:()=>arrived()}),controller=new AbortController();

@@ -1,0 +1,12 @@
+{
+  "name": "@wucheng-build/warehouse",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node ../../../scripts/engineering/build-unit.mjs warehouse",
+    "verify": "node ../../../scripts/engineering/verify-unit.mjs warehouse"
+  },
+  "dependencies": {
+    "@wucheng-build/host": "*"
+  }
+}

@@ -37,8 +37,8 @@ export const purchaseSchemas={
  sources:obj({...paging}),audit:obj({id,page:integer('页码',1,1000000),pageSize:integer('每页条数',1,100),q:text('审计搜索',4000)}),
  suppliers:obj({...paging,id,q:text('供应商关键词'),platform}),addresses:obj({...paging,q:text('联系人/地址搜索'),tag:text('标签',20)}),tasks:obj({month},['month']),months:obj({month,platform},['month']),attachments:obj({id},['id']),
  export:obj({...filter,kind:{enum:['orders','classification','monthly','template']},year:integer('年份',1900,9999)}),
- 'ocr.text':obj({text:text('从采购凭证粘贴的原文；提取后仍需人工复核',100000),platform},['text']),
- 'ocr.status':obj({jobId:id},['jobId']),'import.preview':obj({previewId:id},['previewId']),
+
+ 'import.preview':obj({previewId:id},['previewId']),
  'files.get':obj({fileId:id},['fileId']),
  'files.stage':obj({attachmentId:{...id,description:'本次中央任务附件ID；由用户上传，必须属于当前任务，不接受主机路径或文件内容'}},['attachmentId']),
  'source.file':obj({id},['id']),'attachment.file':obj({id},['id']),
@@ -47,9 +47,9 @@ export const purchaseSchemas={
  'attachment.stage':obj({fileId:id},['fileId']),
  'import.analyze':obj({fileId:id,platform,account:text('实际采购账号'),sheet:text('Excel工作表名称'),headerRow:integer('表头所在行，从1开始；自动检测不准确时指定',1,50001)},['fileId','platform']),
  'import.remap':obj({previewId:id,account:text('实际采购账号'),sheet:text('工作表名称'),headerRow:integer('重新指定表头行，从1开始',1,50001),amountMode:{enum:['order','line'],description:'order整单金额；line商品行金额'},mapping:obj(Object.fromEntries(Object.entries(fields).map(([key,f])=>[key,{anyOf:[integer(f.label+'对应的从0起列索引',0,100000),{type:'string',pattern:'^(?:[0-9]+)?$'}],description:f.label+'；空字符串表示不映射'}])))},['previewId']),
- 'ocr.start':obj({fileIds:arr(id,20,1)},['fileIds']),
- 'ocr.cancel':{...obj({jobId:id,startRequestKey:{...id,description:'可信主机取消响应丢失的启动请求时使用；一般使用jobId'}}),oneOf:[{required:['jobId'],not:{required:['startRequestKey']}},{required:['startRequestKey'],not:{required:['jobId']}}]},
- 'ocr.commit':obj({jobId:id,order:obj(orderFields,orderRequired)},['jobId','order']),
+
+
+
  transfers:obj({id}),'transfer.verify':obj({id},['id']),
  'transfer.save':obj({id,revision,decisions:obj({account:text('核实后的实际采购账号'),rows:{type:'object',maxProperties:20000,additionalProperties:obj({refundCents:money,refundEvidence:text('退款核对依据，无退款明确填写0并说明',2000),classification,fields:obj(Object.fromEntries(['date','paidAt','supplier','status','amountCents','refundCents','shippingCents','recipient','phone','address','logisticsCompany','trackingNo','note','items','classification'].map(f=>[f,{enum:['keep','source'],description:'keep保留账本值，source采用采集值'}])))})}},['account','rows'])},['id','revision','decisions']),
  'transfer.commit':obj({id,revision},['id','revision']),

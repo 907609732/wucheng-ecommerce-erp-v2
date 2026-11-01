@@ -9,7 +9,6 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test test/*.test.mjs",
-    "monthly": "node scripts/monthly.mjs",
     "install:desktop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
   },
   "dependencies": {

@@ -201,15 +201,6 @@
     },
     {
       "module": "overview",
-      "method": "POST",
-      "path": "/api/coverage",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "overview:POST:/api/coverage"
-    },
-    {
-      "module": "overview",
       "method": "GET",
       "path": "/api/dashboard",
       "kind": "read",

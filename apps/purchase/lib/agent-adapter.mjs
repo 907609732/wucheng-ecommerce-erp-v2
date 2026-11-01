@@ -4,42 +4,19 @@ import fs from 'node:fs';
 import {orderDraftFields} from './agent-drafts.mjs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {setTimeout as pause} from 'node:timers/promises';
+
 const digest=b=>createHash('sha256').update(b).digest('hex');
-export function createPurchaseAgentAdapter({transport,pollIntervalMs=1000,jobWaitMs=300000}) {
+export function createPurchaseAgentAdapter({transport}) {
   const request=typeof transport==='function'?transport:transport?.request?.bind(transport);
   if(!request)throw new TypeError('purchase transport required');
-  const base='/api/integration/v1/agent',activeOcr=new Map();
-  const stopWatching=jobId=>{const entry=activeOcr.get(jobId);if(entry){entry.signal.removeEventListener('abort',entry.abort);activeOcr.delete(jobId);}};
-  const watchOcr=(job,ctx)=>{if(!job?.jobId)return;if(!['running','queued','processing','cancelling'].includes(job.status)){stopWatching(job.jobId);return;}if(!ctx?.signal||activeOcr.get(job.jobId)?.signal===ctx.signal)return;stopWatching(job.jobId);const abort=()=>{stopWatching(job.jobId);void cancelAfterAbort(ctx,job.jobId);};activeOcr.set(job.jobId,{signal:ctx.signal,abort});ctx.signal.addEventListener('abort',abort,{once:true});if(ctx.signal.aborted)abort();};
+  const base='/api/integration/v1/agent';
+
+
   const call=(method,path,body,ctx)=>request('purchase',base+path,{method,body:body?{...body,taskId:ctx?.taskId,idempotencyKey:ctx?.idempotencyKey}:undefined,ctx,signal:ctx?.signal,approval:ctx?.approval,idempotencyKey:ctx?.idempotencyKey});
-  const ocrResult=(output,job)=>{
-    const complete=job?.status==='done'&&!!job.result&&job.progress===100,jobId=job?.jobId;
-    return {...output,summary:complete?'采购凭证识别已完成，结果尚未正式入账':'采购凭证识别尚未完成',data:job,
-      blocks:[...(output.blocks||[]),{type:'job',module:'purchase',title:'采购凭证识别',jobId,status:job?.status||'unknown',progress:job?.progress??0,nextCapability:'ocr.status',nextInput:{jobId}}],
-      evidence:[...(output.evidence||[]),{module:'purchase',jobId,status:job?.status||'unknown',complete,...(complete?{fileIds:job.fileIds,documentCount:job.result.documents?.length??0,resultAvailable:true}:{})}],
-      issues:[...(output.issues||[]),...(!complete?[{module:'purchase',id:'purchase:ocr:'+jobId,code:'OCR_JOB_INCOMPLETE',blocking:true,message:job?.error||'识别仍在处理或已中断，请按同一jobId查询，不能重复启动代替核查',jobId,status:job?.status||'unknown'}]:[])]};
-  };
-  const waitOcr=async(output,ctx)=>{
-    let latest=output,job=output.data;watchOcr(job,ctx);const expires=Date.now()+Math.max(0,jobWaitMs);
-    if(!job?.jobId)return ocrResult(output,job);
-    while(['running','queued','processing','cancelling'].includes(job.status)&&Date.now()<expires){
-      ctx?.signal?.throwIfAborted();await pause(Math.max(1,pollIntervalMs),undefined,{signal:ctx?.signal});
-      latest=await call('POST','/query',{capabilityId:'ocr.status',input:{jobId:job.jobId}},{...ctx,capabilityId:'ocr.status'});job=latest.data;ctx?.emit?.('job.progress',{module:'purchase',jobId:job?.jobId,status:job?.status,progress:job?.progress??0});
-    }
-    watchOcr(job,ctx);return ocrResult({...output,...latest,requiresReview:false},job);
-  };
-  const cancelAfterAbort=async(ctx,jobId)=>{
-    const key=digest(Buffer.from((ctx.idempotencyKey||ctx.taskId)+':ocr-cancel:'+ (jobId||'start')));
-    const cleanupCtx={...ctx,approval:undefined,signal:AbortSignal.timeout(10000),capabilityId:'ocr.cancel',idempotencyKey:key};
-    try{const result=await call('POST','/prepare',{capabilityId:'ocr.cancel',input:jobId?{jobId}:{startRequestKey:ctx.idempotencyKey}},cleanupCtx);ctx.emit?.('job.cancel',{module:'purchase',jobId:jobId||result.data?.jobs?.[0]?.jobId,status:result.data?.status||'cancelling'});}
-    catch(error){ctx.emit?.('job.cancel',{module:'purchase',jobId,status:'unknown',code:error.code||'OCR_CANCEL_UNVERIFIED',message:'底层取消尚未核实，必须回查原识别任务'});}
-  };
-  const runOcr=async(load,ctx)=>{
-    ctx?.signal?.throwIfAborted();let output;
-    try{output=await load();return await waitOcr(output,ctx);}
-    catch(error){if(ctx?.signal?.aborted)await cancelAfterAbort(ctx,output?.data?.jobId);throw error;}
-  };
+
+
+
+
   const download=async(output,ctx)=>{
     if(!output.data?.downloadUrl)return output;
     if(typeof transport.download!=='function')throw Error('主机尚未提供受控文件下载');
@@ -69,10 +46,10 @@ export function createPurchaseAgentAdapter({transport,pollIntervalMs=1000,jobWai
     id:'purchase',
     capabilities:purchaseAgentCapabilities.filter(c=>!['files.upload','files.upload.part'].includes(c.id)),
     binding:ctx=>call('GET','/binding',undefined,ctx),
-    query:async(capabilityId,input,ctx)=>{const output=await call('POST','/query',{capabilityId,input},ctx);if(capabilityId==='ocr.status'){watchOcr(output.data,ctx);return ocrResult(output,output.data);}return download(output,ctx);},
-    prepare:async(capabilityId,input,ctx)=>{ctx?.signal?.throwIfAborted();if(capabilityId==='files.stage')return stage(input,ctx);if(capabilityId==='ocr.start')return runOcr(()=>call('POST','/prepare',{capabilityId,input},ctx),ctx);const output=await call('POST','/prepare',{capabilityId,input},ctx);return capabilityId==='ocr.cancel'&&output.data?.jobId?waitOcr(output,ctx):output;},
+    query:async(capabilityId,input,ctx)=>download(await call('POST','/query',{capabilityId,input},ctx),ctx),
+    prepare:async(capabilityId,input,ctx)=>{ctx?.signal?.throwIfAborted();if(capabilityId==='files.stage')return stage(input,ctx);return download(await call('POST','/prepare',{capabilityId,input},ctx),ctx);},
     commit:(prepared,ctx)=>{const claims=JSON.parse(Buffer.from(ctx.approval.payload,'base64url').toString('utf8'));return call('POST','/commit',{preparedId:prepared.commitData?.preparedId??prepared.id,resultId:claims.resultId,resultVersion:claims.resultVersion,idempotencyKey:ctx.idempotencyKey},ctx);},
-    receipt:async(key,ctx)=>{ctx?.signal?.throwIfAborted();const output=await call('GET','/receipts/'+encodeURIComponent(key),undefined,ctx);return output?.requiresReview===false&&output.data?.jobId?runOcr(async()=>output,{...ctx,idempotencyKey:key}):output;}
+    receipt:async(key,ctx)=>{ctx?.signal?.throwIfAborted();return call('GET','/receipts/'+encodeURIComponent(key),undefined,ctx);}
   };
 }
 export const purchaseAgentCapabilities=[
@@ -85,7 +62,6 @@ export const purchaseAgentCapabilities=[
   ['suppliers','供应商与历史','query'],['addresses','收货地址','query'],
   ['tasks','月度任务与分派','query'],['months','月度确认与历史','query'],
   ['attachments','订单附件与图片','query'],['export','采购报表导出','query'],
-  ['ocr.text','识别采购文字','query'],['ocr.status','识别进度与结果','query'],
   ['import.preview','读取表格导入核对结果','query'],
   ['files.get','读取已上传原件并生成中央任务文件','query'],
   ['source.file','下载已入账采购原始凭证到任务结果','query'],
@@ -96,9 +72,6 @@ export const purchaseAgentCapabilities=[
   ['attachment.stage','将原件暂存为订单附件','prepare'],
   ['import.analyze','识别Excel或CSV字段并生成导入核对表','prepare'],
   ['import.remap','调整原件工作表与字段映射并重新核对','prepare'],
-  ['ocr.start','使用本地真实OCR识别图片或PDF原件','prepare'],
-  ['ocr.cancel','停止本任务的底层识别进程并保留原jobId回查','prepare'],
-  ['ocr.commit','核对识别结果后保存采购单及所有原件','prepare'],
   ['transfers','查询导出台传入的历史订单核对批次','query'],
   ['transfer.verify','复核历史订单导入批次与当前订单差异','query'],
   ['transfer.save','补齐采集账号退款依据及冲突字段取值','prepare'],
@@ -112,4 +85,4 @@ export const purchaseAgentCapabilities=[
   ['audit.rollback','回滚采购修改','prepare'],['import.commit','核对后导入表格','prepare'],
   ['image.prepare','提取订单来源图片','prepare'],['image.cache','缓存原始图片','prepare'],
   ['attachment.remove','删除暂存附件','prepare']
-].map(([id,title,kind])=>{const automatic=['files.upload','files.upload.part','files.stage','attachment.stage','import.analyze','import.remap','ocr.start','ocr.cancel','image.prepare','image.cache','transfer.save'].includes(id);return {id,title,kind,...(['order.create','order.update','ocr.commit'].includes(id)?{resultEditFields:[...orderDraftFields]}:{}),description:title+(kind==='query'?'。返回真实记录ID、版本与业务证据；金额Cents字段均为整数分。':automatic?'。自动整理材料，不正式入账；保留原件、摘要和可恢复任务键。':'。先查询原记录及版本；准备差异后由中央人审授权，旧版本、重复订单与已锁定月份继续拒绝。'),inputSchema:purchaseSchemas[id],requiresReview:kind==='prepare'&&!automatic};});
+].map(([id,title,kind])=>{const automatic=['files.upload','files.upload.part','files.stage','attachment.stage','import.analyze','import.remap','image.prepare','image.cache','transfer.save'].includes(id);return {id,title,kind,...(['order.create','order.update'].includes(id)?{resultEditFields:[...orderDraftFields]}:{}),description:title+(kind==='query'?'。返回真实记录ID、版本与业务证据；金额Cents字段均为整数分。':automatic?'。自动整理材料，不正式入账；保留原件、摘要和可恢复任务键。':'。先查询原记录及版本；准备差异后由中央人审授权，旧版本、重复订单与已锁定月份继续拒绝。'),inputSchema:purchaseSchemas[id],requiresReview:kind==='prepare'&&!automatic};});

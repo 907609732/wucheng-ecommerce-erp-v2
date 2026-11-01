@@ -4,15 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {parse} from 'csv-parse/sync';
-import {readTable,normalizeTable,validateOrder,backfillItemUnits,extractText} from '../lib/importer.mjs';
+import {readTable,normalizeTable,validateOrder,backfillItemUnits} from '../lib/importer.mjs';
 import {openStore} from '../lib/store.mjs';
 import {createApp} from '../server.mjs';
 const order=()=>({platform:'1688',account:'默认账号',orderNo:'UNIT-TEST',date:'2026-10-13',paidAt:'2026-10-13',supplier:'单位测试',amountCents:1400,refundCents:0,shippingCents:100,status:'已完成',note:'保留备注',items:[{title:'门把手',spec:'黑色',sku:'A',qty:2,unitPriceCents:500},{title:'螺丝',spec:'M5',sku:'B',qty:3,unitPriceCents:100}]});
-test('逐项导入单价、数量、单位，金额仍按整单去重；文字提取仅使用明确单位',async()=>{
+test('逐项导入单价、数量、单位，金额仍按整单去重',async()=>{
  const csv='订单编号,下单日期,供应商,商品名称,单价(元),数量,单位,实付金额,订单状态\nU1,2026-10-13,测试店,门把手,5.00,2,把,14.00,交易成功\nU1,2026-10-13,测试店,螺丝,1.00,3,件,14.00,交易成功\nU1,2026-10-13,测试店,赠品,0.00,1,,14.00,交易成功';
  const parsed=normalizeTable(await readTable(Buffer.from(csv),'units.csv')).orders[0];
  assert.equal(parsed.amountCents,1400);assert.deepEqual(parsed.items.map(i=>[i.unitPriceCents,i.qty,i.unit]),[[500,2,'把'],[100,3,'件'],[0,1,'']]);
- assert.deepEqual(validateOrder(parsed).items.map(i=>i.unit),['把','件','']);assert.equal(extractText('数量：2\n单位：把\n单价：5.00').items[0].unit,'把');assert.equal(extractText('数量：2\n单价：5.00').items[0].unit,'');
+ assert.deepEqual(validateOrder(parsed).items.map(i=>i.unit),['把','件','']);
 });
 test('单位迁移只补新增字段，保留原始数据、审计、时间、金额和已编辑商品；重复启动幂等',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-unit-'));let store=openStore(dir);

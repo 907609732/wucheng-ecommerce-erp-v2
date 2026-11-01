@@ -1,4 +1,5 @@
 import {app,BrowserWindow,ipcMain} from 'electron';
+import {sourceWarehouse} from './source-warehouse.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,7 +52,8 @@ const desks=installDeskViews(win,{manager,partitionFor:id=>'persist:source-hybri
   authorizeOperation:(name,args,event)=>{if(!['desks:child-open','desks:child-home','desks:child-navigate','desks:data-changed'].includes(name))trusted(event);assertLauncherOperationAllowed(name,{moduleId:['desks:surface','desks:child-navigate'].includes(name)?args[0]?.module:name==='desks:open'?args[0]?.id:name==='desks:child-open'?args[0]:undefined});},notify:message=>win.webContents.send('modules:message',message)
 });
 ipcMain.handle('launcher:ready',event=>{trusted(event);return{ready:true};});
-ipcMain.handle('modules:open',async(event,id,route)=>{trusted(event);assertModule(id);return desks.open(id,route);});
+const warehouse=sourceWarehouse({root,fixtureRoot,report,windowsEnvironment:manifest.windowsEnvironment});
+ipcMain.handle('modules:open',async(event,id,route)=>{trusted(event);if(id==='warehouse')return warehouse.open();assertModule(id);return desks.open(id,route);});
 ipcMain.handle('business:status',event=>{trusted(event);return {ready:true,environment:{mode:'test',label:'隔离合成账本 · 源码验收'},actor:actors(),connection:{state:'local',label:'临时隔离服务'},embeddedAgent:false};});
 ipcMain.handle('business:review',async(event,value)=>{trusted(event);if(!value||!['list','get','approve','reject'].includes(value.operation))throw Error('未知复核操作');const {operation,...payload}=value;return runtime.request('reviews.'+operation,payload,{actor:actors(),trustedUi:true});});
 ipcMain.handle('connection:get',event=>{trusted(event);return {mode:'standalone',networkProvider:'system',detail:'本夹具仅连接临时合成账本，禁止修改公司连接'};});
@@ -67,7 +69,7 @@ report('launcher.loaded',{url:win.webContents.getURL()});
 win.show();win.focus();
 report('window.shown',{visible:win.isVisible(),minimized:win.isMinimized(),focused:win.isFocused(),bounds:win.getBounds()});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',event=>{if(closing)return;event.preventDefault();closing=true;void(async()=>{try{await runtime.close();}catch(error){report('fixture.close-failed',{code:error.code||'SOURCE_FIXTURE_CLOSE_FAILED'});}finally{report('fixture.closed',{acceptancePassed:false});app.quit();}})();});
+app.on('before-quit',event=>{if(closing)return;warehouse.close();event.preventDefault();closing=true;void(async()=>{try{await runtime.close();}catch(error){report('fixture.close-failed',{code:error.code||'SOURCE_FIXTURE_CLOSE_FAILED'});}finally{report('fixture.closed',{acceptancePassed:false});app.quit();}})();});
 }).catch(async error=>{
   const failure={code:error.code||'SOURCE_FIXTURE_STARTUP_FAILED',message:error.message,stack:error.stack};
   try{report('fixture.startup-error',failure);}catch{}

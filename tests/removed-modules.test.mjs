@@ -7,7 +7,7 @@ import { createRemoteService } from '../desktop/shared/remote-service.mjs';
 
 test('removed modules have no files, preload methods, IPC handlers or UI entries', () => {
   for (const directory of ['desktop', 'desktop/shared', 'desktop/renderer', 'desktop/renderer/vendor']) {
-    const files = fs.existsSync(directory) ? fs.readdirSync(directory) : [];
+    const files = fs.existsSync(directory) ? fs.readdirSync(directory,{withFileTypes:true}).filter(entry=>entry.isFile()&&!/^business-service-/.test(entry.name)).map(entry=>entry.name) : [];
     assert.equal(files.some(name => /^(business|finance|purchase|invoice|pdd)[-.]/.test(name)), false, directory);
   }
   const html = fs.readFileSync('desktop/renderer/index.html', 'utf8');

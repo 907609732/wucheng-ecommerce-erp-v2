@@ -130,7 +130,6 @@ prepare('freight-void','作废运费记录','准备将运费标记作废并保�
 prepare('month-lock','确认并锁定月份','使用最新月份预览revision准备锁定已结束月份；缺失标记保留，所有后续改动受锁定保护。',object({month,revision},['month','revision']));
 prepare('month-unlock','明确解锁历史月份','准备按实际修订原因解锁月份，原锁定快照和历史继续保留。',object({month,reason},['month','reason']));
 prepare('rates-refresh','补齐官方参考汇率','按本月外币实际业务日期预演补齐参考汇率；不将参考汇率冒充最终实际到账。',monthInput);
-prepare('job-create','检查并生成月报','准备检查指定月份已保存资料并生成月报草稿；有缺口不表示已采集或已完整核对。',object({period:month},['period']));
 prepare('staff-handoff','提交资料等待老板','员工使用任务摘要staffRevision准备提交本月已就绪资料；提交不等于老板资金审核完成。',object({month,revision:{...revision,description:'本月任务摘要的staffRevision，原样传回；资料变化必须重新读取'}},['month','revision']));
 prepare('backup','创建并验证备份','创建一致性备份并核对完整性，返回受控ZIP下载；不修改正式财务业务数据。',object(),false);
 prepare('restore-copy','恢复备份为独立副本','准备将已验证备份恢复到新的独立副本，绝不覆盖正在使用的正式账本。',object({name:backupName},['name']));

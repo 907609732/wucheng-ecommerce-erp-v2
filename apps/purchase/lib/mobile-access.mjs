@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import {randomBytes,randomUUID,randomInt,createHash,timingSafeEqual} from 'node:crypto';
-import {extractText,validateOrder} from './importer.mjs';
+import {validateOrder} from './importer.mjs';
 import {importRules} from '../public/import-rules.mjs';
 import {createTailscale} from './tailscale.mjs';
 import {filterOrders,sortOrders,orderSearchValues} from '../public/order-query.mjs';
@@ -16,7 +16,7 @@ import {mobileWorkbenchIdentity,mobileBusinessWrite,mobilePolicyPath} from './mo
 const digest=v=>createHash('sha256').update(v).digest('hex');
 const secret=()=>randomBytes(32).toString('hex');
 const fail=(status,message)=>Object.assign(Error(message),{status});
-export function createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,recognize,ocrUpload,attachmentUpload,root,desktopApp,now=Date.now,policyFile,isMaintenance=()=>false,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1'}){
+export function createMobileAccess({store,addresses,supplierManagement,saveOrder,attachmentUpload,root,desktopApp,now=Date.now,policyFile,isMaintenance=()=>false,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1'}){
  const db=store.db,app=express(),mobileRoutes=[],workbenchKey=agentManaged?provisionWorkbenchKey(store.dir):undefined;
  for(const method of ['get','post','put','delete']){const register=app[method].bind(app);app[method]=(route,...handlers)=>{if(typeof route==='string'&&route.startsWith('/api/mobile')&&handlers.length)mobileRoutes.push({method,route});return register(route,...handlers);};}
  db.exec(`CREATE TABLE IF NOT EXISTS mobile_sessions(id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, csrf TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
@@ -29,14 +29,13 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  const configFile=path.join(store.dir,'mobile-config.json');
  let config={enabled:false,origin:''};try{config={...config,...JSON.parse(fs.readFileSync(configFile,'utf8'))};}catch{}
  let pairing=null,attempts=0,blockedUntil=0;
- const ownedJobs=new Map();
  const configure=input=>{
   if(typeof input.enabled!=='boolean')throw fail(400,'请明确开启或关闭手机访问');
   const origin=String(input.origin||config.origin);
   if(input.enabled&&!/^https:\/\/[a-z0-9-]+\.[a-z0-9.-]+\.ts\.net$/.test(origin))throw fail(400,'请输入 Tailscale Serve 的 HTTPS 地址，不含路径和端口');
   pairing=null;
   config={enabled:input.enabled,origin};fs.writeFileSync(configFile,JSON.stringify(config,null,2));
-  if(!config.enabled){db.exec('DELETE FROM mobile_sessions');pairing=null;ownedJobs.clear();}
+  if(!config.enabled){db.exec('DELETE FROM mobile_sessions');pairing=null;}
   return config;
  };
  desktopApp.get('/phone',(_req,res)=>res.sendFile('mobile-admin.html',{root:path.join(root,'public')}));
@@ -161,7 +160,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  const history=()=>{
   const orders=store.list(),sourceRows=store.imports().map(s=>({id:s.id,kind:'source',filename:s.filename,filenames:s.metadata?.files?.map(f=>f.filename)||[],createdAt:s.created_at,status:'saved',orders:orderRefs([...new Set([...orders.filter(o=>o.sourceId===s.id).map(o=>o.id),...db.prepare('SELECT order_id FROM order_supplements WHERE source_id=?').all(s.id).map(r=>r.order_id)])]),downloadUrl:'/api/mobile/uploads/source/'+s.id}));
   const attachmentRows=db.prepare('SELECT id,order_id,filename,created_at FROM order_attachments WHERE order_id IS NOT NULL AND active=1 ORDER BY created_at DESC').all().map(a=>({id:a.id,kind:'attachment',filename:a.filename,createdAt:a.created_at,status:'saved',orders:orderRefs([a.order_id]),downloadUrl:'/api/mobile/uploads/attachment/'+a.id}));
-  const pending=db.prepare('SELECT * FROM mobile_upload_history WHERE order_id IS NULL').all().map(a=>{const job=jobs.get(a.id),filenames=JSON.parse(a.filenames);return {id:a.id,kind:'attempt',filename:filenames.join('、'),createdAt:a.created_at,status:job?.status||'expired',error:job?.error||'',orders:[],downloadUrl:null};});
+  const pending=db.prepare('SELECT * FROM mobile_upload_history WHERE order_id IS NULL').all().map(a=>{const filenames=JSON.parse(a.filenames);return {id:a.id,kind:'attempt',filename:filenames.join('、'),createdAt:a.created_at,status:'expired',error:'识别功能已停用，历史记录保留',orders:[],downloadUrl:null};});
   return [...sourceRows,...attachmentRows,...pending].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||a.id.localeCompare(b.id));
  };
  app.get('/api/mobile/uploads',(req,res)=>{
@@ -171,7 +170,6 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
  });
  app.get('/api/mobile/uploads/source/:id',(req,res)=>{const s=db.prepare('SELECT file_path,filename FROM imports WHERE id=?').get(req.params.id);if(!s?.file_path)throw fail(404,'原件不存在');const file=path.resolve(store.dir,s.file_path);if(!file.startsWith(path.resolve(store.dir,'originals')+path.sep))throw fail(403,'原件路径无效');res.download(file,s.filename,{cacheControl:false});});
  app.get('/api/mobile/uploads/attachment/:id',(req,res)=>{const a=db.prepare('SELECT order_id,filename FROM order_attachments WHERE id=? AND active=1').get(req.params.id);if(!a?.order_id||!store.get(a.order_id))throw fail(404,'附件不存在');const resource=store.attachments.resource(req.params.id,'full');res.download(resource.path,a.filename,{cacheControl:false});});
- app.post('/api/mobile/text',(req,res)=>res.json({order:extractText(String(req.body.text||'').slice(0,100000),req.body.platform||'其他')}));
  app.post('/api/mobile/attachments',attachmentUpload.array('files',MAX_FILES),async(req,res)=>{
   if(!req.files?.length)throw fail(400,'请选择附件图片或文件');
   validateUploadLimits(req.files.map(f=>({name:f.originalname,size:f.size})));
@@ -189,20 +187,14 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   if(!store.get(req.params.id))throw fail(404,'订单不存在');
   res.json(store.attachments.list(req.params.id).map(a=>({...a,thumbUrl:null,downloadUrl:'/api/mobile/uploads/attachment/'+a.id})));
  });
- app.post('/api/mobile/ocr',ocrUpload.array('file',20),async(req,res)=>{
-  for(const id of ownedJobs.keys())if(!jobs.has(id))ownedJobs.delete(id);
-  const json=res.json.bind(res);res.json=data=>{if(data.id){ownedJobs.set(data.id,req.mobileSession.id);const job=jobs.get(data.id);db.prepare('INSERT INTO mobile_upload_history VALUES(?,?,?,?,?)').run(data.id,JSON.stringify(job?.files?.map(f=>f.filename)||[]),new Date(now()).toISOString(),null,req.mobileSession.id);}return json(data);};
-  await recognize(req,res);
- });
- app.get('/api/mobile/ocr/:id',(req,res)=>{
-  const job=jobs.get(req.params.id);if(!job||ownedJobs.get(job.id)!==req.mobileSession.id)throw fail(404,'识别任务已过期，请重新上传');
-  res.json({id:job.id,status:job.status,progress:job.progress,result:job.result,error:job.error});
- });
+ ;
+ ;
  const lookup=(id,hash)=>{
   const record=db.prepare('SELECT * FROM mobile_requests WHERE id=?').get(id);
   if(record&&record.payload_hash!==hash)throw fail(409,'此提交编号已经用于其他内容，请重新核对');
   return record&&store.get(record.order_id);
  };
+ app.all(/^\/api\/mobile\/(?:ocr|text)(?:\/|$)/,(_req,res)=>res.status(410).json({code:'FEATURE_RETIRED',error:'单据识别已停用，普通附件和手工录入继续可用'}));
  app.post('/api/mobile/orders',async(req,res)=>{
   const id=req.headers['x-request-id']||(agentManaged?req.headers['idempotency-key']:undefined);if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id))throw fail(400,'缺少有效的提交编号');
   // Only attachments uploaded by this mobile session may be bound to a new order.
@@ -215,7 +207,7 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
    for(const attachment of ids)if(db.prepare('SELECT session_id FROM mobile_attachment_owners WHERE attachment_id=?').get(attachment)?.session_id!==req.mobileSession.id)throw fail(403,'不能使用其他会话或电脑上传的附件');
    store.attachments.validate(null,ids);
   }
-  if(req.body.ocrJobId&&ownedJobs.get(req.body.ocrJobId)!==req.mobileSession.id)throw fail(403,'不能使用其他会话的识别任务');
+  if(req.body.ocrJobId||req.body.recognizedText)throw fail(410,'图片和文本识别录入已停用，请使用手工录入或普通附件');
   requireDelivery(req.body);
   if(!req.mobileSession.username)throw fail(400,'请先设置录入人姓名');
   req.mobileSubmission={id,hash};const json=res.json.bind(res);
@@ -231,6 +223,6 @@ export function createMobileAccess({store,addresses,supplierManagement,jobs,save
   if(!order)throw Error('采购未保存');
   db.prepare("INSERT INTO order_origins(order_id,channel,username) VALUES (?,'mobile',?)").run(order.id,req.workbenchActor?req.workbenchActor.id+' · '+req.mobileSession.username:req.mobileSession.username);
   db.prepare("UPDATE audit SET after_json=? WHERE order_id=? AND action='create'").run(JSON.stringify(store.get(order.id)),order.id);
-  db.prepare('INSERT INTO mobile_requests VALUES (?,?,?,?)').run(id,hash,order.id,now());if(req.body.ocrJobId)db.prepare('UPDATE mobile_upload_history SET order_id=? WHERE id=?').run(order.id,req.body.ocrJobId);return result;
+  db.prepare('INSERT INTO mobile_requests VALUES (?,?,?,?)').run(id,hash,order.id,now());return result;
  });}};
 }

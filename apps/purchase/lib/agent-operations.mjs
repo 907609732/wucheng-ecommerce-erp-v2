@@ -4,7 +4,7 @@ import {orderDraftBlock} from './agent-drafts.mjs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {summarize} from './store.mjs';
-import {extractText,validateOrder} from './importer.mjs';
+import {validateOrder} from './importer.mjs';
 import {filterOrders} from '../public/order-query.mjs';
 import {attributePatch} from '../public/order-attributes.mjs';
 import {normalizeClassification} from '../public/classification.mjs';
@@ -37,8 +37,8 @@ export function purchaseAgentOperations({store,taskBoard,taskCenter,supplierMana
   tasks:query((i,c)=>taskBoard.overview(request(c),i.month)),
   months:query(i=>i.platform?{preview:store.monthLocks.preview(i.month,i.platform),history:store.monthLocks.history(i.month,i.platform)}:store.monthLocks.overview(i.month)),
   attachments:query(i=>attachments.list(i.id)),
-  'ocr.text':query(i=>({text:String(i.text||'').slice(0,100000),order:extractText(String(i.text||'').slice(0,100000),i.platform||'其他')})),
-  'ocr.status':query(i=>{const j=jobs.get(i.id);if(!j)throw Error('识别任务已过期');return {id:j.id,status:j.status,progress:j.progress,result:j.result,error:j.error};}),
+
+
   'order.create':orderMutation(i=>{const order=validateOrder(i);store.monthLocks.assertWritable([order]);if(store.find(order))throw Error('订单已存在，请查询原单后修改，不能重复入账');return {order};},i=>store.insert(validateOrder(i),null,i)),
   'order.update':orderMutation(i=>{const before=store.get(i.id),after=validateOrder(i);if(!before||before.updatedAt!==i.updatedAt)throw Error('订单不存在或版本已变化');store.monthLocks.assertWritable([before,after]);return before;},i=>store.update(i.id,i)),
   'orders.attributes':mutation(i=>{attributePatch(i.patch);return selected(i);},i=>store.attributesBatch(i)),

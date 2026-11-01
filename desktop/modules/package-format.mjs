@@ -5,8 +5,9 @@ import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
 import yauzl from 'yauzl';
 import semver from 'semver';
+import {COMPONENT_IDS} from '../product/modules.mjs';
 
-export const MODULE_IDS = ['warehouse', 'purchase', 'sales', 'overview', 'exporter', 'node-runtime', 'browser-runtime'];
+export const MODULE_IDS = COMPONENT_IDS;
 export function fail(code, message) {
   return Object.assign(new Error(message), {code});
 }
@@ -132,6 +133,20 @@ export async function extractZip(file, target, {maxBytes, maxEntries = 100000, s
 }
 
 export async function downloadPackage(spec, file, {signal, progress = () => {}, fetchImpl = fetch} = {}) {
+  // A partial is bound to the signed digest by its caller. Never append through
+  // redirected paths. Final digest verification remains mandatory at activation.
+  let cursor=path.parse(path.resolve(file)).root;
+  for(const part of path.resolve(file).slice(cursor.length).split(path.sep).filter(Boolean)){
+    cursor=path.join(cursor,part);
+    if(fs.existsSync(cursor)&&fs.lstatSync(cursor).isSymbolicLink())throw fail('INVALID_PATH','下载路径包含链接');
+  }
+  let offset=0;
+  if(fs.existsSync(file)){
+    const stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.size>spec.bytes)throw fail('SIZE_MISMATCH','下载缓存大小无效');
+    offset=stat.size;
+    if(offset===spec.bytes){progress({received:offset,total:spec.bytes});return;}
+  }
   let url = spec.url, response;
   for (let redirects = 0; redirects <= 5; redirects++) {
     const parsed = new URL(url);
@@ -139,20 +154,25 @@ export async function downloadPackage(spec, file, {signal, progress = () => {}, 
         !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(parsed.hostname)) {
       throw fail('INVALID_URL', '下载重定向地址不受信任');
     }
-    response = await fetchImpl(url, {signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(30 * 60 * 1000)]), redirect: 'manual'});
+    response = await fetchImpl(url, {signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(30 * 60 * 1000)]), redirect: 'manual',headers:{'Accept-Encoding':'identity',...(offset?{Range:`bytes=${offset}-`}:{})}});
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     await response.body?.cancel();
     url = new URL(response.headers.get('location'), url).href;
     response = null;
   }
-  if (!response?.ok || !response.body) throw fail('DOWNLOAD_FAILED', '无法下载扩展，请重试或使用完整离线包');
-  let received = 0;
+  if (!response?.ok || !response.body) throw fail('DOWNLOAD_FAILED', '无法下载组件，请检查网络后重试');
+  if(response.status===206){
+    const range=response.headers.get('content-range');
+    if(range!==`bytes ${offset}-${spec.bytes-1}/${spec.bytes}`){await response.body.cancel();throw fail('INVALID_RANGE','下载续传范围无效');}
+  }else if(response.status===200)offset=0;
+  else{await response.body.cancel();throw fail('DOWNLOAD_FAILED','下载响应无效');}
+  let received = offset;
   const meter = new Transform({transform(chunk, _encoding, callback) {
     received += chunk.length;
     if (received > spec.bytes) return callback(fail('SIZE_MISMATCH', '下载文件大小与清单不符'));
     progress({received, total: spec.bytes});
     callback(null, chunk);
   }});
-  await pipeline(response.body, meter, fs.createWriteStream(file, {flags: 'wx'}), {signal});
+  await pipeline(response.body, meter, fs.createWriteStream(file, {flags: offset?'a':fs.existsSync(file)?'w':'wx'}), {signal});
   if (received !== spec.bytes) throw fail('SIZE_MISMATCH', '下载不完整，请重试');
 }
