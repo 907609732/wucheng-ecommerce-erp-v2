@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { launchSystemBrowser } from './browser-launch.js';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -32,8 +33,7 @@ async function main() {
 
   let browser;
   try {
-    browser = await chromium.launchPersistentContext(tempUserDataDir, {
-      ...(process.env.LINGTU_BROWSER_PATH ? {executablePath:process.env.LINGTU_BROWSER_PATH} : {channel:'chrome'}),
+    browser = await launchSystemBrowser(chromium, 'launchPersistentContext', [tempUserDataDir, {
       headless: false,
       viewport: { width: 1440, height: 900 },
       args: [
@@ -41,7 +41,7 @@ async function main() {
         '--no-first-run',
         '--no-default-browser-check',
       ],
-    });
+    }]);
 
     const pages = browser.pages();
     const page = pages.length > 0 ? pages[0] : await browser.newPage();

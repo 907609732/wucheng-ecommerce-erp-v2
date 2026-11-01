@@ -20,7 +20,7 @@ for (const id of ids) registry[id] = {port: await freePort(), mobilePort: await 
 atomicJson(registryFile, registry);
 const services = new ServiceManager({registryFile});
 const {privateKey, publicKey} = generateKeyPairSync('ed25519');
-const packages = [...(full?['node-runtime','browser-runtime']:['node-runtime']), ...ids].map(id => JSON.parse(fs.readFileSync(`dist/modules/${id}.descriptor.json`, 'utf8')));
+const packages = ['node-runtime', ...ids].map(id => JSON.parse(fs.readFileSync(`dist/modules/${id}.descriptor.json`, 'utf8')));
 const payload = Buffer.from(JSON.stringify({schemaVersion: 1, packages}));
 const modules = new ModuleManager({root: path.join(root, 'modules'), hostVersion: '0.8.0', publicKeys: {test: publicKey},
   onProgress:p=>{if(['installed','error'].includes(p.phase))console.log(JSON.stringify({module:p.id,phase:p.phase,error:p.error}));}});

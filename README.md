@@ -49,7 +49,6 @@ npm.cmd run launcher:build
 npm.cmd run ai:status
 npm.cmd run ai:doctor
 npm.cmd run ai:mcp
-npm.cmd run ai:inspect:tools
 ```
 
 会产生真实登录、采集或发送副作用的操作仍需要显式确认。接口不会返回密码、密钥或 Token。

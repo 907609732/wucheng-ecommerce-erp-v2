@@ -1,0 +1,4 @@
+interface:
+  display_name: "云仓运费导入"
+  short_description: "从本地云仓账单页逐月下载，核对净额与赔付，查重后导入正式销售台"
+  default_prompt: "使用 $cainiao-freight-import，补齐可查询的云仓月账单并更新未结月，保留原件和备份后导入销售台运费。"

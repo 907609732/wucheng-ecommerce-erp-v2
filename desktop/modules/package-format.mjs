@@ -6,7 +6,7 @@ import {Transform} from 'node:stream';
 import yauzl from 'yauzl';
 import semver from 'semver';
 
-export const MODULE_IDS = ['warehouse', 'purchase', 'sales', 'overview', 'exporter', 'node-runtime', 'browser-runtime'];
+export const MODULE_IDS = ['warehouse', 'purchase', 'sales', 'overview', 'exporter'];
 export function fail(code, message) {
   return Object.assign(new Error(message), {code});
 }
@@ -29,7 +29,7 @@ export async function digest(file) {
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
   return hash.digest('hex');
 }
-export function verifyCatalog(envelope, publicKeys, {hostVersion, platform = process.platform, arch = process.arch} = {}) {
+export function verifyCatalog(envelope, publicKeys, {hostVersion, platform = process.platform, arch = process.arch, allowedIds = MODULE_IDS} = {}) {
   if (envelope?.format !== 'lingtu-catalog/v1' || typeof envelope.payload !== 'string' ||
       typeof envelope.signature !== 'string' || !Object.hasOwn(publicKeys, envelope.keyId)) {
     throw fail('UNTRUSTED_PACKAGE', '扩展清单不是受信任的官方清单');
@@ -44,7 +44,7 @@ export function verifyCatalog(envelope, publicKeys, {hostVersion, platform = pro
   }
   const ids = new Set();
   for (const p of catalog.packages) {
-    if (!MODULE_IDS.includes(p.id) || ids.has(p.id) || !semver.valid(p.version) ||
+    if (!allowedIds.includes(p.id) || ids.has(p.id) || !semver.valid(p.version) ||
         !semver.validRange(p.hostRange) || !/^[a-f0-9]{64}$/.test(p.sha256) ||
         !Number.isSafeInteger(p.bytes) || p.bytes <= 0 ||
         !Number.isSafeInteger(p.unpackedBytes) || p.unpackedBytes <= 0 ||
@@ -61,7 +61,7 @@ export function verifyCatalog(envelope, publicKeys, {hostVersion, platform = pro
         !url.pathname.startsWith('/907609732/wucheng-ecommerce-erp-v2/releases/download/') ||
         url.username || url.password) throw fail('INVALID_URL', '扩展下载地址不属于官方发布仓库');
     for (const d of p.dependencies) {
-      if (!MODULE_IDS.includes(d.id) || !semver.validRange(d.range)) throw fail('INVALID_CATALOG', '扩展依赖信息无效');
+      if (!allowedIds.includes(d.id) || !semver.validRange(d.range)) throw fail('INVALID_CATALOG', '扩展依赖信息无效');
     }
   }
   // Validate the whole graph before any download or mutation.

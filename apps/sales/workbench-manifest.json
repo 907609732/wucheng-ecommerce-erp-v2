@@ -1,0 +1,2570 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/audit",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/audit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/backups",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/backups"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/backups",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/backups"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/backups/:name/restore-copy",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/backups/:name/restore-copy"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/backups/:name/verify",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/backups/:name/verify"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/bootstrap",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/bootstrap"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/close",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/close"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/close/history",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/close/history"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/close/lock",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/close/lock"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/close/unlock",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/close/unlock"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/coverage",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/coverage"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/export"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/freight/attachments/:id",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/freight/attachments/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/freight/export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/freight/export"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/freight/records",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/freight/records"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/freight/records",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/freight/records"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/freight/records/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/freight/records/:id"
+    },
+    {
+      "module": "sales",
+      "method": "PUT",
+      "path": "/api/freight/records/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:PUT:/api/freight/records/:id"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/freight/records/:id/void",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/freight/records/:id/void"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/freight/report",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/freight/report"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/health",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/health"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/history-coverage",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/history-coverage"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/imports",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/imports"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/imports",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/imports"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/imports/:id/attribution",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/imports/:id/attribution"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/imports/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/imports/:id/commit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/imports/:id/original",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/imports/:id/original"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/imports/:id/preview",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/imports/:id/preview"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/imports/:id/rollback",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/imports/:id/rollback"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/capabilities",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/capabilities"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/edits",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/edits"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/edits",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:POST:/api/integration/v1/edits"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/edits/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/edits/:id"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/edits/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/edits/:id/commit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/ledger",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/ledger"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/maintenance/activate",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/maintenance/activate"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/open",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/open"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/overview/open",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/overview/open"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/report",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/report"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/review-session",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:GET:/api/integration/v1/review-session"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/stop",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/stop"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/backup",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/workbench/migration/backup"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/commit",
+      "kind": "confirmation",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/workbench/migration/commit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/export",
+      "kind": "download",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/workbench/migration/export"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/files/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/workbench/migration/files/:id"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/maintenance",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/workbench/migration/maintenance"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/preview",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/workbench/migration/preview"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/integration/v1/workbench/migration/restore",
+      "kind": "write",
+      "remote": false,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/integration/v1/workbench/migration/restore"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/migration/verify/:id",
+      "kind": "read",
+      "remote": false,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/workbench/migration/verify/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/integration/v1/workbench/operations",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/integration/v1/workbench/operations"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/jobs",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/jobs"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/jobs",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/jobs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/jobs/:id/report",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/jobs/:id/report"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/ledger",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/ledger"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/ledger",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/ledger"
+    },
+    {
+      "module": "sales",
+      "method": "DELETE",
+      "path": "/api/ledger/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:DELETE:/api/ledger/:id"
+    },
+    {
+      "module": "sales",
+      "method": "PUT",
+      "path": "/api/ledger/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:PUT:/api/ledger/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/manual-summary",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/manual-summary"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/matches",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/matches"
+    },
+    {
+      "module": "sales",
+      "method": "DELETE",
+      "path": "/api/matches/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:DELETE:/api/matches/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/funds",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/funds"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/pdd/import",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/pdd/import"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/import/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/import/:id"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/pdd/import/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/pdd/import/:id/commit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/movements",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/movements"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/movements-export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/movements-export"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/movements/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/movements/:id"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/pdd/references",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/pdd/references"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/references/:id/evidence",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/references/:id/evidence"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/pdd/shops",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/pdd/shops"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/statement",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/statement"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/pdd/unassigned",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/pdd/unassigned"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/personnel/handoff",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/personnel/handoff"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/personnel/session",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/personnel/session"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/personnel/session",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/personnel/session"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/rates",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/rates"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/reconciliation",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/reconciliation"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/report",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/report"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/report-history",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/report-history"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/shops",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/shops"
+    },
+    {
+      "module": "sales",
+      "method": "DELETE",
+      "path": "/api/shops/:id",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:DELETE:/api/shops/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/sources",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/sources"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/taobao/funds",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/taobao/funds"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/taobao/import",
+      "kind": "upload",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/taobao/import"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/taobao/import/:id/commit",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/taobao/import/:id/commit"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/taobao/movements",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/taobao/movements"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/taobao/movements-export",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/taobao/movements-export"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/taobao/movements/:id",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/taobao/movements/:id"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/taobao/statement",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/taobao/statement"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/task-center",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/task-center"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/template/:type",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/template/:type"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/app.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/app.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/freight-ui.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/freight-ui.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/funds-overview.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/funds-overview.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/index.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/index.html"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/integration-edits.html",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/integration-edits.html"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/integration-edits.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/integration-edits.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/integration-links.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/integration-links.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/integration-review.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/integration-review.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/loading-logo.png",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/loading-logo.png"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/loading-screen-auto.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/loading-screen-auto.mjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/loading-screen.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/loading-screen.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/loading-screen.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/loading-screen.mjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/pdd-ui.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/pdd-ui.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/personnel.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/personnel.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/personnel.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/personnel.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/sales-workspace.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/sales-workspace.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/skills/cainiao-freight-import.zip",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/skills/cainiao-freight-import.zip"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/skills/cainiao-freight-import/agents/openai.yaml",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/skills/cainiao-freight-import/agents/openai.yaml"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/skills/cainiao-freight-import/references/browser.md",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/skills/cainiao-freight-import/references/browser.md"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/skills/cainiao-freight-import/references/import.md",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/skills/cainiao-freight-import/references/import.md"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/skills/cainiao-freight-import/SKILL.md",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/skills/cainiao-freight-import/SKILL.md"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/style.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/style.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/task-center.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/task-center.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/task-center.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/task-center.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.cjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.cjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.cjs.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.cjs.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.umd.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.umd.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.umd.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.umd.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.umd.min.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.umd.min.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chart.umd.min.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chart.umd.min.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chunks/helpers.dataset.cjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chunks/helpers.dataset.cjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chunks/helpers.dataset.cjs.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chunks/helpers.dataset.cjs.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chunks/helpers.dataset.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chunks/helpers.dataset.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/chunks/helpers.dataset.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/chunks/helpers.dataset.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.bar.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.bar.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.bubble.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.bubble.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.doughnut.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.doughnut.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.line.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.line.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.pie.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.pie.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.polarArea.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.polarArea.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.radar.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.radar.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/controller.scatter.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/controller.scatter.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/controllers/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/controllers/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.adapters.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.adapters.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.animation.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.animation.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.animations.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.animations.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.animations.defaults.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.animations.defaults.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.animator.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.animator.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.config.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.config.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.controller.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.controller.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.datasetController.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.datasetController.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.defaults.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.defaults.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.element.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.element.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.interaction.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.interaction.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.layouts.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.layouts.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.layouts.defaults.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.layouts.defaults.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.plugins.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.plugins.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.registry.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.registry.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.scale.autoskip.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.scale.autoskip.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.scale.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.scale.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.scale.defaults.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.scale.defaults.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.ticks.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.ticks.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/core.typedRegistry.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/core.typedRegistry.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/core/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/core/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/elements/element.arc.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/elements/element.arc.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/elements/element.bar.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/elements/element.bar.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/elements/element.line.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/elements/element.line.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/elements/element.point.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/elements/element.point.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/elements/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/elements/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers.cjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers.cjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers.cjs.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers.cjs.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.canvas.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.canvas.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.collection.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.collection.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.color.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.color.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.config.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.config.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.config.types.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.config.types.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.core.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.core.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.curve.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.curve.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.dataset.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.dataset.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.dom.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.dom.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.easing.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.easing.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.extras.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.extras.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.interpolation.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.interpolation.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.intl.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.intl.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.math.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.math.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.options.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.options.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.rtl.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.rtl.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/helpers.segment.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/helpers.segment.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/helpers/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/helpers/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/index.umd.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/index.umd.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/platform/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/platform/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/platform/platform.base.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/platform/platform.base.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/platform/platform.basic.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/platform/platform.basic.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/platform/platform.dom.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/platform/platform.dom.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.colors.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.colors.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.decimation.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.decimation.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.drawing.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.drawing.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.helper.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.helper.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.options.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.options.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.segment.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.segment.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.target.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.target.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/filler.target.stack.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/filler.target.stack.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.filler/simpleArc.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.filler/simpleArc.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.legend.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.legend.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.subtitle.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.subtitle.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.title.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.title.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/plugins/plugin.tooltip.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/plugins/plugin.tooltip.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.category.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.category.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.linear.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.linear.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.linearbase.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.linearbase.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.logarithmic.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.logarithmic.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.radialLinear.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.radialLinear.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.time.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.time.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/scales/scale.timeseries.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/scales/scale.timeseries.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/animation.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/animation.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/basic.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/basic.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/color.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/color.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/geometric.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/geometric.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/index.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/index.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/layout.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/layout.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/chart/types/utils.d.ts",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/chart/types/utils.d.ts"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap3.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap3.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap3.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap3.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap3.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap3.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap3.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap3.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap4.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap4.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap4.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap4.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap4.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap4.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap4.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap4.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap5.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap5.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap5.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap5.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap5.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap5.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bootstrap5.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bootstrap5.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bulma.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bulma.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bulma.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bulma.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bulma.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bulma.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_bulma.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_bulma.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_materialize.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_materialize.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_materialize.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_materialize.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_materialize.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_materialize.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_materialize.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_materialize.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_midnight.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_midnight.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_midnight.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_midnight.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_midnight.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_midnight.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_midnight.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_midnight.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_modern.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_modern.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_modern.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_modern.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_modern.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_modern.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_modern.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_modern.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_semanticui.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_semanticui.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_semanticui.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_semanticui.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_semanticui.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_semanticui.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_semanticui.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_semanticui.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_simple.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_simple.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_simple.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_simple.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_simple.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_simple.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_simple.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_simple.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site_dark.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site_dark.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site_dark.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site_dark.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site_dark.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site_dark.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site_dark.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site_dark.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator_site.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator_site.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator.min.css",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator.min.css"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/css/tabulator.min.css.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/css/tabulator.min.css.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/jquery_wrapper.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/jquery_wrapper.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.min.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.min.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.min.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.min.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.min.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.min.mjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.min.mjs.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.min.mjs.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.mjs",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.mjs"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator_esm.mjs.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator_esm.mjs.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator.min.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator.min.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/vendor/tabulator/js/tabulator.min.js.map",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/vendor/tabulator/js/tabulator.min.js.map"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/warehouse-import-assistant.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/warehouse-import-assistant.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/workbench-base.js",
+      "kind": "ui",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/workbench-base.js"
+    }
+  ]
+}

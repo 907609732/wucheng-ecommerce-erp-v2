@@ -8,6 +8,9 @@
 .git/
 node_modules/
 dist/
+.codex-artifacts/
+.worktrees/
+.vendor-cache/
 build/private/
 desktop/invoice-module/
 downloads/
@@ -18,6 +21,7 @@ state/
 logs/
 backups/
 test-results/
+.test-output/
 tests/.auth/
 临时数据/
 *.log

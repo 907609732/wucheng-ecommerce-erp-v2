@@ -1,0 +1,35 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import {pathToFileURL} from 'node:url';
+import {ServiceManager} from '../shared/service-manager.mjs';
+import {createWorkbenchGateway,validatePolicy} from './gateway.mjs';
+
+export const defaultWorkbenchStore=()=>path.join(process.env.APPDATA||os.homedir(),'LingtuIntegrations','workbench');
+export async function runWorkbenchServer({storeDir=defaultWorkbenchStore(),publicOrigin,registryFile,port,registerRoutes,...options}={}){
+  const configFile=path.join(storeDir,'server-config.json');
+  let config={};if(fs.existsSync(configFile))config=JSON.parse(fs.readFileSync(configFile,'utf8'));
+  const gateway=await createWorkbenchGateway({services:new ServiceManager({registryFile:registryFile||config.registryFile}),storeDir,publicOrigin:publicOrigin||config.publicOrigin,port:port??config.port??17330,registerRoutes,...options});
+  await gateway.start();return gateway;
+}
+function argumentsOf(argv){const result={};for(let i=0;i<argv.length;i++){const key=argv[i];if(!key.startsWith('--')||!argv[i+1]||argv[i+1].startsWith('--'))throw Error('参数必须使用 --名称 值');result[key.slice(2)]=argv[++i];}return result;}
+export function configureWorkbench({storeDir=defaultWorkbenchStore(),publicOrigin,policyFile,registryFile,port=17330}={}){
+  const origin=new URL(publicOrigin);if(origin.protocol!=='https:'||origin.pathname!=='/'||origin.username||origin.password||origin.search||origin.hash)throw Error('必须填写 Tailscale HTTPS 源地址');
+  if(!Number.isInteger(Number(port))||Number(port)<1024||Number(port)>65535)throw Error('端口无效');
+  fs.mkdirSync(storeDir,{recursive:true});
+  if(policyFile){const policy=validatePolicy(JSON.parse(fs.readFileSync(policyFile,'utf8')));fs.writeFileSync(path.join(storeDir,'access-policy.json'),JSON.stringify(policy,null,2),{mode:0o600});}
+  const config={schemaVersion:1,publicOrigin:origin.origin,host:'127.0.0.1',port:Number(port),...(registryFile?{registryFile:path.resolve(registryFile)}:{})};
+  const file=path.join(storeDir,'server-config.json'),tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(config,null,2),{mode:0o600});fs.renameSync(tmp,file);return config;
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+  try{
+    const args=argumentsOf(process.argv.slice(2)),storeDir=args['store-dir']?path.resolve(args['store-dir']):defaultWorkbenchStore();
+    if(args.configure==='true'){configureWorkbench({storeDir,publicOrigin:args.origin,policyFile:args.policy,registryFile:args.registry,port:Number(args.port||17330)});process.stdout.write('工作台本机配置已保存；未修改 Tailscale，也未授予新成员权限。\n');}
+    else{
+      let config={};const file=path.join(storeDir,'server-config.json');if(fs.existsSync(file))config=JSON.parse(fs.readFileSync(file,'utf8'));
+      const gateway=await runWorkbenchServer({storeDir,publicOrigin:args.origin||config.publicOrigin,registryFile:args.registry||config.registryFile,port:Number(args.port||config.port||17330)});
+      process.stdout.write(JSON.stringify({ok:true,service:'wucheng-workbench',host:'127.0.0.1',port:Number(args.port||config.port||17330),serverId:gateway.serverId,dataSetId:gateway.dataSetId})+'\n');
+      for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>gateway.stop().then(()=>process.exit(0)));
+    }
+  }catch(error){process.stderr.write('工作台启动失败：'+error.message+'\n');process.exitCode=1;}
+}

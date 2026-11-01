@@ -13,7 +13,7 @@ test('removed modules have no files, preload methods, IPC handlers or UI entries
   const html = fs.readFileSync('desktop/renderer/index.html', 'utf8');
   assert.doesNotMatch(html, /data-(?:open-view|view-panel)="(?:business|finance|purchase|invoice|pdd-monthly)"/);
   for (const retained of ['dashboard', 'inventory', 'sales', 'settings']) assert.match(html, new RegExp(`data-view-panel="${retained}"`));
-  assert.match(html, /class="view-tabs hidden"/);
+  assert.match(html, /class="view-tabs"/);
   const main = fs.readFileSync('desktop/main.mjs', 'utf8');
   assert.doesNotMatch(main, /ipcMain\.handle\(['"](?:business|finance|purchase|invoice|invoice-shops|invoice-inspection|pdd-monthly):|tickFinance|localFinance|localBusiness|localPurchase/);
   let api;

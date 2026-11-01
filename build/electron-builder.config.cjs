@@ -30,6 +30,9 @@ module.exports = {
   files: [
     "desktop/**/*",
     "!desktop/launcher/**/*",
+    "!desktop/workbench-client/**/*",
+    "!desktop/workbench-migration/**/*",
+    "!desktop/workbench/{gateway,server,store,manifest,policy}.mjs",
     "!desktop/modules/{module-manager,package-format,service-lifecycle,electron-lifecycle}.mjs",
     "!desktop/invoice-module/**/*",
     "core/**/*",
@@ -45,8 +48,7 @@ module.exports = {
   win: {
     icon: "desktop/assets/lingtu-icon.png",
     target: [
-      { target: "nsis", arch: ["x64"] },
-      { target: "portable", arch: ["x64"] }
+      { target: "nsis", arch: ["x64"] }
     ]
   },
   nsis: {
@@ -56,8 +58,5 @@ module.exports = {
     createStartMenuShortcut: true,
     shortcutName: branding.productName,
     deleteAppDataOnUninstall: false
-  },
-  portable: {
-    artifactName: `CloudWarehouseInventorySync${branding.artifactMarker}-Portable-\${version}-\${arch}.\${ext}`
   }
 };

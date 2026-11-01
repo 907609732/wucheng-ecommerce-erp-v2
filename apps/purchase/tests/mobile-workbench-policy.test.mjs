@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import {createApp} from '../server.mjs';
+import express from 'express';
+import {fileURLToPath} from 'node:url';
+import {openStore} from '../lib/store.mjs';
+import {openAddresses} from '../lib/addresses.mjs';
+import {openSupplierManagement} from '../lib/supplier-management.mjs';
+import {createMobileAccess} from '../lib/mobile-access.mjs';
+test('existing phone Serve entry shares live policy while retaining pairing, CSRF and user-bound sessions',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'phone-workbench-policy-')),policyFile=path.join(dir,'policy.json'),origin='https://purchase.test.ts.net';
+ const grant=(role,modules=['purchase'],enabled=true)=>({role,modules,enabled,canRunTasks:true}),policy={schemaVersion:1,users:{'editor@test':grant('editor'),'viewer@test':grant('viewer'),'disabled@test':grant('editor',['purchase'],false),'other@test':grant('editor',['sales'])}};fs.writeFileSync(policyFile,JSON.stringify(policy));
+ const {app,store,mobile,integration}=createApp({dataDir:path.join(dir,'data'),mobilePolicyFile:policyFile});mobile.configure({enabled:true,origin});const listen=async a=>{const s=a.listen(0,'127.0.0.1');await new Promise(r=>s.once('listening',r));return s;},desktop=await listen(app),phone=await listen(mobile.app);
+ t.after(async()=>{await Promise.all([new Promise(r=>desktop.close(r)),new Promise(r=>phone.close(r))]);store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const token=(await(await fetch('http://127.0.0.1:'+desktop.address().port+'/api/bootstrap')).json()).token;
+ const pairing=async()=>{const r=await fetch('http://127.0.0.1:'+desktop.address().port+'/api/mobile-admin/pairing',{method:'POST',headers:{'Content-Type':'application/json','x-purchase-token':token},body:'{}'});return (await r.json()).code;};
+ const request=(route,{login,body,cookie='',csrf='',method=body?'POST':'GET'}={})=>new Promise((resolve,reject)=>{const payload=body?JSON.stringify(body):undefined,q=http.request({hostname:'127.0.0.1',port:phone.address().port,path:route,method,headers:{host:new URL(origin).host,origin,'content-type':'application/json',cookie,'x-mobile-csrf':csrf,...(login?{'Tailscale-User-Login':login}:{}),...(payload?{'content-length':Buffer.byteLength(payload)}:{})}},r=>{const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>resolve({status:r.statusCode,data:JSON.parse(Buffer.concat(chunks)),cookie:r.headers['set-cookie']?.[0]?.split(';')[0]}));});q.on('error',reject);q.end(payload);});
+ for(const login of [undefined,'unknown@test','disabled@test','other@test'])assert.equal((await request('/api/mobile/orders',{login})).status,403);
+ assert.equal((await request('/api/mobile/orders',{login:'editor@test'})).status,401);
+ const editor=await request('/api/mobile/pair',{login:'editor@test',body:{code:await pairing()}});assert.equal(editor.status,200);const e={login:'editor@test',cookie:editor.cookie,csrf:editor.data.csrf};
+ assert.equal((await request('/api/mobile/username',{...e,body:{username:'测试录入人'}})).status,200);
+ assert.equal((await request('/api/mobile/orders',{...e,login:'viewer@test'})).status,403);
+ const viewer=await request('/api/mobile/pair',{login:'viewer@test',body:{code:await pairing()}});assert.equal(viewer.status,200);const v={login:'viewer@test',cookie:viewer.cookie,csrf:viewer.data.csrf};assert.equal((await request('/api/mobile/orders',v)).status,200);assert.equal((await request('/api/mobile/addresses',{...v,body:{name:'禁止',phone:'1',address:'test'}})).status,403);
+ const body={name:'测试地址',phone:'13800000000',address:'测试用地址'};assert.equal((await request('/api/mobile/addresses',{...e,csrf:'bad',body})).status,403);assert.equal((await request('/api/mobile/addresses',{...e,body})).status,200);assert.ok(store.db.prepare('SELECT actor FROM workbench_request_audit').all().some(r=>JSON.parse(r.actor).id==='tailscale:editor@test'));
+ integration.setMaintenance(true);assert.equal((await request('/api/mobile/addresses',{...e,body})).status,503);assert.equal((await request('/api/mobile/orders',e)).status,200);integration.setMaintenance(false);
+ policy.users['editor@test'].enabled=false;fs.writeFileSync(policyFile,JSON.stringify(policy));assert.equal((await request('/api/mobile/orders',e)).status,403);fs.writeFileSync(policyFile,'broken');assert.equal((await request('/api/mobile/orders',v)).status,503);
+});
+
+test('business OCR admits a paired editor without collection permission while retaining CSRF and viewer restrictions',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'phone-business-ocr-')),policyFile=path.join(dir,'policy.json'),origin='https://purchase.test.ts.net';
+ fs.writeFileSync(policyFile,JSON.stringify({schemaVersion:1,users:{'editor@test':{role:'editor',modules:['purchase'],enabled:true,canRunTasks:false},'viewer@test':{role:'viewer',modules:['purchase'],enabled:true,canRunTasks:false}}}));
+ const store=openStore(path.join(dir,'data')),addresses=openAddresses(store),supplierManagement=openSupplierManagement(store,addresses),desktopApp=express(),jobs=new Map(),upload={array:()=>((_q,_r,next)=>next())};let calls=0;
+ desktopApp.use(express.json());
+ const mobile=createMobileAccess({store,addresses,supplierManagement,jobs,root:fileURLToPath(new URL('..',import.meta.url)),desktopApp,policyFile,ocrUpload:upload,attachmentUpload:upload,saveOrder:()=>{throw Error('本测试不保存账本');},recognize:(req,res)=>{calls++;assert.equal(req.workbenchActor.role,'editor');assert.equal(req.workbenchActor.canRunTasks,false);assert.ok(req.mobileSession);jobs.set('mock-ocr-job',{id:'mock-ocr-job',files:[],status:'done',progress:100,result:{text:'测试识别结果'}});res.json({id:'mock-ocr-job',status:'done'});}});
+ mobile.configure({enabled:true,origin});
+ const listen=async app=>{const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));return server;},desktop=await listen(desktopApp),phone=await listen(mobile.app);
+ t.after(async()=>{await Promise.all([new Promise(r=>desktop.close(r)),new Promise(r=>phone.close(r))]);store.close();fs.rmSync(dir,{recursive:true,force:true});});
+ const request=(server,route,{login,body,cookie='',csrf=''}={})=>new Promise((resolve,reject)=>{const payload=body?JSON.stringify(body):undefined,q=http.request({hostname:'127.0.0.1',port:server.address().port,path:route,method:body?'POST':'GET',headers:{host:new URL(origin).host,origin,'content-type':'application/json',cookie,'x-mobile-csrf':csrf,...(login?{'Tailscale-User-Login':login}:{}),...(payload?{'content-length':Buffer.byteLength(payload)}:{})}},r=>{const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>resolve({status:r.statusCode,data:JSON.parse(Buffer.concat(chunks)),cookie:r.headers['set-cookie']?.[0]?.split(';')[0]}));});q.on('error',reject);q.end(payload);});
+ const pair=async login=>{const code=(await request(desktop,'/api/mobile-admin/pairing',{body:{}})).data.code,result=await request(phone,'/api/mobile/pair',{login,body:{code}});assert.equal(result.status,200);return {login,cookie:result.cookie,csrf:result.data.csrf};};
+ assert.equal((await request(phone,'/api/mobile/ocr',{login:'editor@test',body:{}})).status,401);
+ const editor=await pair('editor@test');assert.equal((await request(phone,'/api/mobile/ocr',{...editor,csrf:'invalid',body:{}})).status,403);assert.equal(calls,0);
+ const result=await request(phone,'/api/mobile/ocr',{...editor,body:{}});assert.equal(result.status,200);assert.equal(result.data.id,'mock-ocr-job');assert.equal(calls,1);assert.equal((await request(phone,'/api/mobile/ocr/mock-ocr-job',editor)).status,200);
+ const viewer=await pair('viewer@test');assert.equal((await request(phone,'/api/mobile/ocr',{...viewer,body:{}})).status,403);assert.equal(calls,1);assert.equal(store.list().length,0);
+});

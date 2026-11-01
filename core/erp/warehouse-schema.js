@@ -3,7 +3,8 @@ export const WAREHOUSE_TABLES = new Set([
   'warehouses', 'skus', 'inventory_snapshots', 'inventory_movements',
   'import_records', 'imported_files', 'operation_logs', 'product_images',
   'monthly_outbound', 'inventory_data_validations', 'warehouse_monthly_sales',
-  'warehouse_monthly_sales_validations', 'monthly_report_deliveries'
+  'warehouse_monthly_sales_validations', 'monthly_report_deliveries',
+  'warehouse_sync_runs','warehouse_daily_config','warehouse_attendance','warehouse_reminders','warehouse_daily_audit'
 ]);
 const retired = new Set([
   'orders', 'order_items', 'order_unmatched_items', 'shipping_fees',

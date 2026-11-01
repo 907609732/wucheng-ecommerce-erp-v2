@@ -69,8 +69,6 @@ AI Debug 不提供 Shell、SQL、任意路径文件读取或密钥读取。`doct
 npm.cmd run ai:status
 npm.cmd run ai:doctor
 npm.cmd run ai:mcp
-npm.cmd run ai:inspect
-npm.cmd run ai:inspect:tools
 ```
 
-MCP 服务基于官方 `@modelcontextprotocol/server` v2，调试器使用固定版本的官方 `@modelcontextprotocol/inspector`。stdout 专用于协议数据，诊断信息只写入 stderr 或桌面日志。
+MCP 服务基于官方 `@modelcontextprotocol/server` v2。stdout 专用于协议数据，诊断信息只写入 stderr 或桌面日志。

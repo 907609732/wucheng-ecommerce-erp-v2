@@ -6,13 +6,6 @@
 
 同一套核心支持源码、JSON CLI、本地 stdio MCP、便携 EXE 和安装版。AI 应先调用 `inventory_runtime_capabilities` 或 `--cli capabilities`，再根据返回的版本、构建提交和扩展清单工作。
 
-官方 MCP Inspector 已固定为开发依赖：
-
-```powershell
-npm.cmd run ai:inspect
-npm.cmd run ai:inspect:tools
-```
-
 ## 扩展结构
 
 每个扩展放在诊断结果所示的 `workspace\extensions\<目录>` 中：

@@ -22,6 +22,12 @@ export async function sendDingTalkMarkdown({ title, text }) {
   return sendDingTalkMarkdownMessage({ title, text });
 }
 
+export function inventoryDeliveryAccepted(result) {
+  if(!result||result.skipped)return false;
+  if(typeof result.processQueryKey==='string'&&result.processQueryKey.trim())return true;
+  return result.errcode===0||result.report?.errcode===0;
+}
+
 export async function sendInventoryDingTalkMarkdown({ title, text, shouldNotify = true }) {
   if (!shouldNotify) {
     console.log("暂无预计一周内售罄的商品，跳过钉钉库存提醒。");
@@ -90,7 +96,7 @@ async function sendDingTalkWebhook(payload, webhook = process.env.DINGTALK_WEBHO
   }
 
   const url = buildWebhookUrl(webhook, secret);
-  const response = await axios.post(url, payload);
+  const response = await axios.post(url, payload, {timeout:15000});
 
   if (response.data?.errcode !== 0) {
     throw new Error(`钉钉发送失败：${JSON.stringify(response.data)}`);

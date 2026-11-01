@@ -34,6 +34,7 @@ test("CLI read-only commands need no confirmation", () => {
   assert.deepEqual(parseCliRequest(["debug-logs", "--level=error", "--query=登录", "--limit=500"]), {
     command: "debug-logs", limit: 100, level: "error", query: "登录"
   });
+  assert.throws(() => parseCliRequest(["workbench", "status"]), /未知 CLI 命令/);
 });
 
 test("extension CLI keeps trust and side effects behind explicit confirmation", () => {

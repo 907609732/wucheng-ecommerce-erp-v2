@@ -17,7 +17,7 @@ const packages = fs.readdirSync(directory).filter(name => name.endsWith('.descri
 for (const p of packages) if (await digest(path.join(directory, p.archive)) !== p.sha256) throw Error('Artifact changed after packaging: ' + p.id);
 const payload = Buffer.from(JSON.stringify({schemaVersion: 1, publishedAt: new Date().toISOString(), packages}));
 const envelope = {format: 'lingtu-catalog/v1', keyId: values['key-id'], payload: payload.toString('base64'), signature: sign(null, payload, privateKey).toString('base64')};
-verifyCatalog(envelope, JSON.parse(fs.readFileSync(values['public-keys'], 'utf8')), {hostVersion: '0.8.0', platform: 'win32', arch: 'x64'});
+verifyCatalog(envelope, JSON.parse(fs.readFileSync(values['public-keys'], 'utf8')), {hostVersion: JSON.parse(fs.readFileSync('desktop/launcher/package.json','utf8')).version, platform: 'win32', arch: 'x64'});
 const catalog = path.join(directory, 'catalog.json');
 fs.writeFileSync(catalog, JSON.stringify(envelope, null, 2));
 const zip = new yazl.ZipFile();

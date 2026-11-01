@@ -8,11 +8,11 @@ import {digest, safeRelative} from '../desktop/modules/package-format.mjs';
 
 const {values} = parseArgs({options: {
   id: {type: 'string'}, source: {type: 'string'}, output: {type: 'string'},
-  tag: {type: 'string'}, 'node-exe': {type: 'string'}, version: {type: 'string'}, entry: {type:'string'}
+  tag: {type: 'string'}, version: {type: 'string'}, entry: {type:'string'}
 }});
 const {id, source, tag} = values;
-if (!['purchase', 'sales', 'overview', 'node-runtime', 'browser-runtime', 'warehouse', 'exporter'].includes(id) || !source || !tag || !/^[\w.-]+$/.test(tag)) {
-  throw Error('Usage: node scripts/build-module-pack.mjs --id purchase|sales|overview|node-runtime --source ABSOLUTE_DIRECTORY --output DIRECTORY --tag RELEASE_TAG');
+if (!['purchase', 'sales', 'overview', 'warehouse', 'exporter'].includes(id) || !source || !tag || !/^[\w.-]+$/.test(tag)) {
+  throw Error('Usage: node scripts/build-module-pack.mjs --id purchase|sales|overview|warehouse|exporter --source ABSOLUTE_DIRECTORY --output DIRECTORY --tag RELEASE_TAG');
 }
 const output = path.resolve(values.output || 'dist/modules');
 const workspace = path.resolve(source);
@@ -21,40 +21,32 @@ const stage = fs.mkdtempSync(path.join(output, '.stage-' + id + '-'));
 const packageNames = {purchase: 'purchase-desk', sales: 'wucheng-sales-desk', overview: 'lingtu-business-overview'};
 let version, entry, kind, dependencies;
 try {
-  if (['browser-runtime','warehouse','exporter'].includes(id)) {
+  if (['warehouse','exporter'].includes(id)) {
     if (!values.version || !values.entry) throw Error('Prebuilt runtime packages require --version and --entry');
     version = values.version; entry = safeRelative(values.entry);
-    kind = id === 'browser-runtime' ? 'runtime' : 'electron';
-    dependencies = id === 'warehouse' ? [{id:'browser-runtime',range:'1.61.0'}] : [];
+    kind = 'electron';
+    dependencies = [];
     if (!fs.existsSync(path.join(workspace, entry))) throw Error('Prebuilt entry is missing');
     const updateToken = path.join(workspace, 'resources', 'update-token.txt');
     if (fs.existsSync(updateToken) && fs.readFileSync(updateToken,'utf8').trim()) throw Error('A public package must not contain an update token');
     fs.cpSync(workspace, stage, {recursive:true, filter:file => {
       if (fs.lstatSync(file).isSymbolicLink()) throw Error('Prebuilt package contains a link');
-      if (/\.(?:sqlite(?:-wal|-shm)?|db|pfx|pem|key)$/i.test(file)) throw Error('Prebuilt package contains private data');
+      if(id==='warehouse'&&/(?:^|[\\/])node_modules[\\/].*?[\\/](?:test|tests|__tests__|examples|benchmark|benchmarks)(?:[\\/]|$)/i.test(path.relative(workspace,file)))return false;
+      if (/\.(?:sqlite(?:-wal|-shm)?|db|pfx|pem|key)$/i.test(file)) throw Error('Prebuilt package contains private data: '+path.relative(workspace,file));
       return true;
     }});
     // NSIS detects running launchers by executable name. Give the background
     // cloud process its own image name so a launcher upgrade cannot terminate it.
-    if(id==='warehouse'&&entry!=='LingtuWarehouseModule.exe'){
+    if(id==='warehouse'&&entry!=='desktop/main.mjs'&&entry!=='LingtuWarehouseModule.exe'){
       fs.renameSync(path.join(stage,entry),path.join(stage,'LingtuWarehouseModule.exe'));
       entry='LingtuWarehouseModule.exe';
     }
-  } else if (id === 'node-runtime') {
-    const exe = values['node-exe'] || path.join(workspace, 'node.exe');
-    const result = spawnSync(exe, ['--version'], {encoding: 'utf8', windowsHide: true});
-    if (result.status !== 0 || !/^v24\./.test(result.stdout.trim())) throw Error('Require Node.js 24 runtime');
-    version = result.stdout.trim().slice(1); entry = 'node.exe'; kind = 'runtime'; dependencies = [];
-    fs.copyFileSync(exe, path.join(stage, 'node.exe'));
-    const license = path.join(workspace, 'LICENSE');
-    if (!fs.existsSync(license)) throw Error('Node runtime LICENSE is required');
-    fs.copyFileSync(license, path.join(stage, 'LICENSE'));
   } else {
     const manifest = JSON.parse(fs.readFileSync(path.join(workspace, 'package.json'), 'utf8'));
     if (manifest.name !== packageNames[id]) throw Error('Unexpected workspace package identity');
     version = manifest.version; entry = 'server.mjs'; kind = 'service';
-    dependencies = [{id: 'node-runtime', range: '>=24.18.0 <25'}];
-    const entries = ['package.json', 'package-lock.json', 'server.mjs', 'lib', 'public'];
+    dependencies = [];
+    const entries = ['package.json', 'package-lock.json', 'server.mjs', 'lib', 'public',...(fs.existsSync(path.join(workspace,'workbench-manifest.json'))?['workbench-manifest.json']:[])];
     // Source allowlist only: no data/, originals, attachments, config or credentials.
     for (const name of entries) fs.cpSync(path.join(workspace, name), path.join(stage, name), {
       recursive: true, dereference: false, filter: file => {
@@ -83,9 +75,16 @@ try {
         if(!fs.existsSync(file))throw Error('Build requires the public OCR model: '+language);
         fs.copyFileSync(file,path.join(target,language+'.traineddata'));
       }
-      const license=await fetch('https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE',{signal:AbortSignal.timeout(30000)});
-      if(!license.ok)throw Error('Cannot obtain OCR model redistribution license');
-      fs.writeFileSync(path.join(target,'LICENSE'),await license.text());
+      const cachedLicense=path.resolve('build/public/tessdata-fast-LICENSE'),proof=cachedLicense+'.provenance.json';
+      if(fs.existsSync(cachedLicense)&&fs.existsSync(proof)){
+        const provenance=JSON.parse(fs.readFileSync(proof,'utf8'));
+        if(provenance.repository!=='tesseract-ocr/tessdata_fast'||provenance.path!=='LICENSE'||await digest(cachedLicense)!==provenance.sha256)throw Error('Cached OCR license provenance mismatch');
+        fs.copyFileSync(cachedLicense,path.join(target,'LICENSE'));
+      }else{
+        const license=await fetch('https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE',{signal:AbortSignal.timeout(30000)});
+        if(!license.ok)throw Error('Cannot obtain OCR model redistribution license');
+        fs.writeFileSync(path.join(target,'LICENSE'),await license.text());
+      }
     }
     // Production dependencies are resolved from the lockfile in clean staging,
     // never copied from a developer's node_modules.
@@ -113,7 +112,7 @@ try {
   for (const file of files) zip.addFile(file.file, file.relative);
   zip.end();
   await pipeline(zip.outputStream, fs.createWriteStream(archivePath));
-  const spec = {id, version, hostRange: '>=0.8.0 <1.0.0', platform: 'win32', arch: 'x64', kind, entry, dependencies,
+  const spec = {id, version, hostRange: '>=0.9.0 <1.0.0', platform: 'win32', arch: 'x64', kind, entry, dependencies,
     archive, bytes: fs.statSync(archivePath).size, unpackedBytes: files.reduce((sum, file) => sum + file.size, 0),
     sha256: await digest(archivePath),
     url: `https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/${tag}/${archive}`};

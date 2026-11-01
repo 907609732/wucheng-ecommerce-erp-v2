@@ -5,9 +5,10 @@
   const body = document.getElementById('featureHelpBody');
   const title = document.getElementById('featureHelpTitle');
   const manual = document.getElementById('featureManualButton');
+  const topic = document.getElementById('featureHelpTopic');
   const modeButtons = [...document.querySelectorAll('[data-feature-help-mode]')];
-  let currentView = 'home';
-  let helpView = 'home';
+  let currentView = 'dashboard';
+  let helpView = 'dashboard';
   let helpMode = 'manual';
   let opener = null;
 
@@ -51,7 +52,7 @@
   }
 
   function open(mode = 'manual', view = currentView) {
-    if (!Object.hasOwn(content, view)) view = 'home';
+    if (!Object.hasOwn(content, view)) view = 'dashboard';
     helpView = view;
     helpMode = mode === 'principle' ? 'principle' : 'manual';
     if (!dialog.open) opener = document.activeElement;
@@ -59,13 +60,15 @@
     if (!dialog.open) dialog.showModal();
   }
 
-  manual.addEventListener('click', () => open('manual'));
+  manual.addEventListener('click', () => open('manual', topic.value));
+  topic.addEventListener('change', () => { manual.title = `${content[topic.value].title} · 使用说明与技术原理`; });
   document.getElementById('featureHelpClose').addEventListener('click', () => dialog.close());
   modeButtons.forEach(button => button.addEventListener('click', () => open(button.dataset.featureHelpMode, helpView)));
   dialog.addEventListener('close', () => { if (opener?.isConnected) opener.focus(); });
   window.addEventListener('erp:view', event => {
-    currentView = Object.hasOwn(content, event.detail) ? event.detail : 'home';
-    const name = content[currentView].title;
+    currentView = Object.hasOwn(content, event.detail) ? event.detail : 'dashboard';
+    if(currentView !== 'settings') topic.value = currentView;
+    const name = content[topic.value].title;
     manual.title = `${name} · 使用说明与技术原理`;
     if (dialog.open) open(helpMode, currentView);
   });

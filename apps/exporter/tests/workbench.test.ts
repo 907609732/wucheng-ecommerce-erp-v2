@@ -1,0 +1,89 @@
+import {afterEach,describe,expect,it} from 'vitest';
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type {Server} from 'node:http';
+import {createHash,createHmac,randomUUID} from 'node:crypto';
+import {Store} from '../src/core/store';
+import {installLocalIntegration} from '../src/main/local-integration.mjs';
+import {installExporterWorkbench} from '../src/main/workbench-server';
+import {createWorkbenchMigration} from '../src/main/workbench-migration';
+import {installWorkbenchMigration} from '../src/main/workbench-migration-routes.mjs';
+import {provisionWorkbenchKey,signWorkbenchActor,type WorkbenchActor} from '../src/main/workbench-auth.mjs';
+const express=createRequire(import.meta.url)('express');
+const resources:{dir:string;store:Store;server?:Server}[]=[];
+afterEach(async()=>{for(const r of resources.splice(0)){if(r.server)await new Promise<void>(resolve=>r.server!.close(()=>resolve()));r.store.close();fs.rmSync(r.dir,{recursive:true,force:true});}});
+function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-exporter-workbench-'));const store=new Store(path.join(dir,'orders.sqlite'));const resource={dir,store,server:undefined as Server|undefined};resources.push(resource);return resource;}
+async function api(){
+  const fixtureData=fixture(),{dir,store}=fixtureData,app=express(),calls:string[]=[];
+  const getDataSetIdentity=createWorkbenchMigration(store).getDataSetIdentity;
+  const integration=installLocalIntegration(app,{id:'lingtu-order-export',root:dir,dataDir:dir,version:'0.2.0',getDataSetIdentity});
+  const workbench=installExporterWorkbench(integration.router,store,{dataDir:dir,version:'0.2.0',getDataSetIdentity,handlers:{busy:()=>false,changed:()=>{},invoke:(name,...args)=>{calls.push(name);if(name==='start')return store.create(args[0] as any);if(name==='executionLogs')return [];},exportFile:async(_input,directory)=>{const file=path.join(directory,'orders.csv');fs.writeFileSync(file,'orderId\n12345678901234567890');return {path:file,count:1,missing:0};},transfer:async(id,actor)=>({batchId:'batch-'+id,route:'/apps/purchase/integration-review.html?batch=test',actor:actor.id})}});
+  integration.state.workbench=workbench;installWorkbenchMigration(integration,{db:store.db,dir},(_facade:any,options:any)=>createWorkbenchMigration(store,options),{dataDir:dir,sourceInstance:'target'});integration.finish();const server=app.listen(0,'127.0.0.1');fixtureData.server=server;await new Promise<void>(resolve=>server.once('listening',resolve));
+  const port=(server.address() as any).port,base='http://127.0.0.1:'+port,key=provisionWorkbenchKey(dir),token=fs.readFileSync(path.join(dir,'.integration-key'),'utf8').trim();
+  async function request(route:string,{method='GET',body,role='admin',channel='ui',canRunTasks=false,requestId=randomUUID(),actorPatch={}}:any={}){
+    const requestPath='/api/integration/v1/workbench'+route,now=Date.now();
+    const actor:WorkbenchActor={v:1,id:'tailscale:tester@example.test',login:'tester@example.test',role,modules:['exporter','purchase'],canRunTasks,channel,sessionId:'session-test',requestId,issuedAt:now,expiresAt:now+30000,module:'exporter',method,path:requestPath,...actorPatch};
+    const response=await fetch(base+requestPath,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',...signWorkbenchActor(actor,key)},body:body===undefined?undefined:JSON.stringify(body)});
+    const result=response.headers.get('content-type')?.includes('json')?await response.json():await response.text();return {status:response.status,result};
+  }
+  return {...fixtureData,calls,request,key};
+}
+describe('exporter authoritative-server bridge',()=>{
+  it('requires signed identity and exact route; never exposes cookie or host paths',async()=>{
+    const {store,request}=await api(),task=store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});store.update(task.id,{status:'needs_login',accountCookie:'secret-cookie-name',cursor:'credential-cursor',exportedPath:'C:/private/orders.csv',detailExport:{requestedAt:'now',previous:['C:/private']}});
+    const state=await request('/state');expect(state.status).toBe(200);expect(state.result.tasks[0].state).toBe('waiting-host-action');expect(JSON.stringify(state.result)).not.toContain('secret-cookie');expect(JSON.stringify(state.result)).not.toContain('C:/private');expect(JSON.stringify(state.result)).not.toContain('credential-cursor');
+    expect((await request('/state',{actorPatch:{path:'/other'}})).status).toBe(403);expect((await request('/state',{actorPatch:{expiresAt:Date.now()-1}})).status).toBe(403);
+  });
+  it('publishes stable ledger identity/revision and invalidates reviews for a same-content replacement ledger',async()=>{
+    const first=fixture(),second=fixture(),a=createWorkbenchMigration(first.store),b=createWorkbenchMigration(second.store);expect(a.getDataSetIdentity().dataSetId).not.toBe(b.getDataSetIdentity().dataSetId);expect(a.getDataSetIdentity().revision).not.toBe(b.getDataSetIdentity().revision);expect(a.getDataSetIdentity()).toEqual(createWorkbenchMigration(first.store).getDataSetIdentity());const {request,store}=await api(),before=(await request('/state')).result;expect(before.dataSetId).toMatch(/^[a-f0-9-]{36}$/);expect(before.revision).toMatch(/^[a-f0-9]{64}$/);store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});const after=(await request('/state')).result;expect(after.dataSetId).toBe(before.dataSetId);expect(after.revision).not.toBe(before.revision);
+  });
+  it('enforces read-only and explicit collection permissions',async()=>{
+    const {request,calls}=await api(),body={platform:'taobao',from:'2026-01-01',to:'2026-01-31'};
+    expect((await request('/tasks',{method:'POST',body,role:'viewer'})).status).toBe(403);expect((await request('/tasks',{method:'POST',body,role:'editor'})).status).toBe(403);expect(calls).toEqual([]);
+    expect((await request('/tasks',{method:'POST',body,role:'editor',canRunTasks:true})).status).toBe(200);expect(calls).toEqual(['start']);
+  });
+  it('retries the same request once and rejects changed input',async()=>{
+    const {request,calls,store}=await api(),requestId=randomUUID(),body={platform:'jd',from:'2026-01-01',to:'2026-01-31'};
+    const first=await request('/tasks',{method:'POST',body,requestId}),again=await request('/tasks',{method:'POST',body,requestId});expect(again.result.id).toBe(first.result.id);expect(calls).toEqual(['start']);expect(store.tasks()).toHaveLength(1);
+    expect((await request('/tasks',{method:'POST',body:{...body,to:'2026-02-01'},requestId})).status).toBe(409);
+  });
+  it('exports files by opaque ID and restricts another actor',async()=>{
+    const {request,store}=await api(),task=store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});const result=await request('/tasks/'+task.id+'/export',{method:'POST',body:{format:'csv'}});expect(result.status).toBe(200);expect(result.result.fileId).toBeTruthy();expect(result.result.path).toBeUndefined();expect((await request('/files/'+result.result.fileId)).status).toBe(200);expect((await request('/files/'+result.result.fileId,{role:'viewer',actorPatch:{id:'tailscale:other@example.test',login:'other@example.test'}})).status).toBe(404);
+  });
+  it('requests host interaction and rejects CLI history deletion',async()=>{
+    const {request,calls}=await api();const result=await request('/host-action',{method:'POST',body:{platform:'taobao'}});expect(result.result.state).toBe('waiting-host-action');expect(calls).toEqual(['login']);expect((await request('/platforms/taobao/clear',{method:'POST',body:{confirm:true},channel:'cli'})).status).toBe(403);
+  });
+  it('requires persisted maintenance and a short signed two-confirmation migration permit',async()=>{
+    const source=fixture(),task=source.store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});source.store.update(task.id,{status:'completed',listOutcome:'complete'});const {request,key,dir,store}=await api(),bundle=createWorkbenchMigration(source.store,{sourceInstance:'client-history'}).exportSnapshot();
+    const preview=await request('/migration/preview',{method:'POST',body:{bundle}}),plan={migrationId:'fixture-migration',bundle,revision:preview.result.revision,selections:[{kind:'task-history',sourceId:task.id,action:'add'}]};
+    expect((await request('/migration/commit',{method:'POST',body:{plan,permit:{}}})).status).toBe(409);expect(store.tasks()).toHaveLength(0);
+    expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true,migrationId:'fixture-migration'}})).status).toBe(200);expect(fs.existsSync(path.join(dir,'.workbench-maintenance.json'))).toBe(true);
+    const canonical=(v:any):any=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v,digest=createHash('sha256').update(JSON.stringify(canonical(plan))).digest('hex'),expiresAt=Date.now()+30000,signature=createHmac('sha256',key).update('workbench-migration/v1:'+digest+':'+expiresAt+':session-test').digest('hex');
+    const result=await request('/migration/commit',{method:'POST',body:{plan,permit:{digest,expiresAt,signature}}});expect(result.status).toBe(200);expect(result.result.verification.ok).toBe(true);expect(store.tasks()).toHaveLength(1);expect((await request('/migration/verify/'+result.result.migrationId)).result.ok).toBe(true);
+    expect((await request('/migration/commit',{method:'POST',body:{plan,permit:{digest,expiresAt,signature}},channel:'cli'})).status).toBe(409);
+    expect((await request('/migration/maintenance',{method:'POST',body:{enabled:false,migrationId:'fixture-migration'}})).status).toBe(200);expect(fs.existsSync(path.join(dir,'.workbench-maintenance.json'))).toBe(false);
+  });
+  it('binds maintenance to its batch, preserves the original actor, and permits signed admin recovery in a new session',async()=>{
+    const {request,store,key,dir}=await api(),migrationId='owned-batch-a';expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true}})).status).toBe(400);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true,migrationId}})).status).toBe(200);const first=JSON.parse(fs.readFileSync(path.join(dir,'.workbench-maintenance.json'),'utf8'));expect(first.migrationId).toBe(migrationId);expect(first.actor).toBe('tailscale:tester@example.test');
+    const other={id:'tailscale:other@example.test',login:'other@example.test',sessionId:'other-ui-session'};expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true,migrationId:'owned-batch-b'},actorPatch:other})).status).toBe(409);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:false,migrationId:'owned-batch-b'},actorPatch:other})).status).toBe(409);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true,migrationId},actorPatch:other})).status).toBe(200);expect(JSON.parse(fs.readFileSync(path.join(dir,'.workbench-maintenance.json'),'utf8')).actor).toBe(first.actor);
+    const bundle=createWorkbenchMigration(store).exportSnapshot(),plan={migrationId:'owned-batch-b',bundle,revision:createWorkbenchMigration(store).preview(bundle).revision,selections:[]},canonical=(v:any):any=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v,digest=createHash('sha256').update(JSON.stringify(canonical(plan))).digest('hex'),expiresAt=Date.now()+30000,signature=createHmac('sha256',key).update('workbench-migration/v1:'+digest+':'+expiresAt+':session-test').digest('hex');expect((await request('/migration/commit',{method:'POST',body:{plan,permit:{digest,expiresAt,signature}}})).status).toBe(409);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:false,migrationId},actorPatch:other})).status).toBe(200);expect(fs.existsSync(path.join(dir,'.workbench-maintenance.json'))).toBe(false);
+  });
+  it('honors a persisted local source-freeze owner and accepts only its own batch on retry',async()=>{
+    const {request,dir,calls}=await api(),clientId='fixture-client',migrationId='source-archive-'+clientId,local={id:'local-migration:'+clientId,login:'local-migration',sessionId:clientId};fs.writeFileSync(path.join(dir,'.workbench-maintenance.json'),JSON.stringify({maintenance:true,actor:local.id,migrationId,createdAt:new Date().toISOString()}));expect((await request('/tasks',{method:'POST',body:{platform:'jd',from:'2026-01-01',to:'2026-01-31'}})).status).toBe(503);expect(calls).toEqual([]);expect((await request('/migration/export',{actorPatch:local})).status).toBe(200);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:true,migrationId},actorPatch:local})).status).toBe(200);const held=JSON.parse(fs.readFileSync(path.join(dir,'.workbench-maintenance.json'),'utf8'));expect(held.actor).toBe(local.id);expect(held.migrationId).toBe(migrationId);expect((await request('/migration/maintenance',{method:'POST',body:{enabled:false,migrationId:'source-archive-other'},actorPatch:local})).status).toBe(409);
+  });
+});
+describe('exporter historical migration',()=>{
+  it('migrates controlled originals after all source disk paths are removed from the wire bundle',async()=>{
+    const source=fixture(),target=fixture(),original=Buffer.from('orderId\n12345678901234567890\n'),file=path.join(source.dir,'source.csv');fs.writeFileSync(file,original);const task=source.store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});source.store.update(task.id,{status:'completed',exportedPath:file});const bundle=createWorkbenchMigration(source.store).exportSnapshot();for(const descriptor of bundle.records[0].files){expect(descriptor.filename).toBe('source.csv');delete descriptor.sourcePath;descriptor.stagingId=descriptor.sha256;}expect(JSON.stringify(bundle)).not.toContain(source.dir);
+    const migration=createWorkbenchMigration(target.store,{dataDir:target.dir,canCommit:()=>true,resolveFile:async()=>original}),preview=migration.preview(bundle),result=await migration.commit({bundle,revision:preview.revision,selections:[{kind:'task-history',sourceId:task.id,action:'add'}]},{role:'admin',id:'fixture-admin'});expect(result.verification.ok).toBe(true);expect(fs.readFileSync(target.store.tasks()[0].exportedPath)).toEqual(original);
+  });
+  it('excludes credentials and imports history with provenance and fresh IDs',async()=>{
+    const source=fixture(),target=fixture(),task=source.store.create({platform:'taobao',from:'2026-01-01',to:'2026-01-31'});source.store.update(task.id,{status:'completed',listOutcome:'complete',accountCookie:'never-transfer',cursor:'never-copy'});
+    const sourceMigration=createWorkbenchMigration(source.store,{sourceInstance:'client-a'}),targetMigration=createWorkbenchMigration(target.store,{sourceInstance:'server',canCommit:()=>true}),bundle=sourceMigration.exportSnapshot();expect(bundle.sourceInstance).not.toBe(targetMigration.exportSnapshot().sourceInstance);expect(createWorkbenchMigration(source.store).exportSnapshot().sourceInstance).toBe(bundle.sourceInstance);expect(JSON.stringify(bundle)).not.toContain('never-transfer');expect(JSON.stringify(bundle)).not.toContain('never-copy');const preview=targetMigration.preview(bundle);expect(preview.rows[0].action).toBe('new');const result=await targetMigration.commit({bundle,revision:preview.revision,selections:[{kind:'task-history',sourceId:task.id,action:'add'}]},{role:'admin',id:'tailscale:admin@example.test'});expect(result.verification.ok).toBe(true);expect(result.verified).toHaveLength(1);const inserted=target.store.tasks()[0];expect(inserted.id).not.toBe(task.id);expect(inserted.historicalOnly).toBe(true);expect(inserted.sourceProvenance?.id).toBe(task.id);expect(targetMigration.preview(bundle).rows[0].action).toBe('duplicate');expect(targetMigration.verify(result.migrationId).ok).toBe(true);target.store.update(inserted.id,{message:'later manual edit'});expect(targetMigration.preview(bundle).rows[0].action).toBe('conflict');expect(targetMigration.verify(result.migrationId).ok).toBe(false);
+  });
+  it('rejects stale revisions and rolls back failed count verification',async()=>{
+    const source=fixture(),target=fixture(),task=source.store.create({platform:'jd',from:'2026-01-01',to:'2026-01-31'});source.store.update(task.id,{count:99,status:'paused'});const migration=createWorkbenchMigration(target.store,{canCommit:()=>true}),bundle=createWorkbenchMigration(source.store).exportSnapshot(),preview=migration.preview(bundle),input={bundle,revision:preview.revision,selections:[{kind:'task-history',sourceId:task.id,action:'add'}]};await expect(migration.commit({...input,revision:'stale'},{role:'admin',id:'tester'})).rejects.toThrow('变化');await expect(migration.commit(input,{role:'admin',id:'tester'})).rejects.toThrow('数量');expect(target.store.tasks()).toHaveLength(0);await expect(createWorkbenchMigration(target.store).commit(input,{role:'admin',id:'tester'})).rejects.toThrow('确认凭据');
+  });
+});

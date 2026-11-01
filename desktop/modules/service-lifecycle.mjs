@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const runFile=promisify(execFile);
+const copyData=(source,target,filter=()=>true)=>fs.promises.cp(source,target,{recursive:true,filter:async file=>{
+  if((await fs.promises.lstat(file)).isSymbolicLink())throw fail('UNSAFE_DATA_PATH','数据目录包含链接，需要先核对真实位置');
+  return filter(file);
+}});
 import {randomUUID} from 'node:crypto';
 import {atomicJson} from './module-manager.mjs';
 import {fail, inside} from './package-format.mjs';
@@ -8,12 +14,8 @@ import {fail, inside} from './package-format.mjs';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const readRegistry = file => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
 
-export function createServiceLifecycle({services, dataRoot, backupRoot, getInstalled}) {
-  const runtime = () => {
-    const node = getInstalled('node-runtime');
-    if (!node) throw fail('MISSING_DEPENDENCY', '请先安装共享 Node.js 运行环境');
-    return inside(node.root, node.entry);
-  };
+export function createServiceLifecycle({services, dataRoot, backupRoot}) {
+  const runtime = () => process.execPath;
   const supported = id => {
     if (!['purchase', 'sales', 'overview'].includes(id)) throw fail('MODULE_NOT_READY', '此扩展的启动适配尚未完成');
   };
@@ -28,11 +30,11 @@ export function createServiceLifecycle({services, dataRoot, backupRoot, getInsta
     }
     throw fail('STOP_TIMEOUT', '后台未能停止，已中止更新');
   }
-  function checkDatabase(file) {
-    const result = spawnSync(runtime(), ['--input-type=module', '-e',
+  async function checkDatabase(file) {
+    try{await runFile(runtime(), ['--input-type=module', '-e',
       "import {DatabaseSync} from 'node:sqlite';const d=new DatabaseSync(process.argv[1],{readOnly:true});const r=d.prepare('PRAGMA integrity_check').get();d.close();if(r.integrity_check!=='ok')process.exit(2);",
-      file], {windowsHide: true, encoding: 'utf8', timeout: 30000});
-    if (result.status !== 0) throw fail('DATABASE_CHECK_FAILED', '账本完整性检查失败，已中止更新');
+      file], {env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},windowsHide: true, encoding: 'utf8', timeout: 30000});}
+    catch{throw fail('DATABASE_CHECK_FAILED', '账本完整性检查失败，已中止更新');}
   }
   return {
     async checkIdle(id) {
@@ -50,15 +52,12 @@ export function createServiceLifecycle({services, dataRoot, backupRoot, getInsta
       if (explicit && !existing && !old.allowInitialize) throw fail('MISSING_LEDGER', '原账本不存在，已阻止创建空账本');
       await stopped(id);
       const directory = path.join(backupRoot, id + '-' + randomUUID());
-      fs.mkdirSync(directory, {recursive: true});
+      await fs.promises.mkdir(directory, {recursive: true});
       const targetData = existing || explicit ? old.dataDir : path.join(dataRoot, id);
       if (existing) {
-        checkDatabase(path.join(old.dataDir, old.db));
-        fs.cpSync(old.dataDir, path.join(directory, 'data'), {recursive: true, filter: file => {
-          if (fs.lstatSync(file).isSymbolicLink()) throw fail('UNSAFE_DATA_PATH', '数据目录包含链接，需要先核对真实位置');
-          return !['.integration-start.lock', '.integration-runtime.json'].includes(path.basename(file));
-        }});
-        checkDatabase(path.join(directory, 'data', old.db));
+        await checkDatabase(path.join(old.dataDir, old.db));
+        await copyData(old.dataDir, path.join(directory, 'data'),file=>!['.integration-start.lock', '.integration-runtime.json'].includes(path.basename(file)));
+        await checkDatabase(path.join(directory, 'data', old.db));
       }
       const backup = {directory, dataDir: targetData, previousRegistry: registry[id] || null,
         previousConfig: existing ? old : null, hadData: existing, createdAt: new Date().toISOString()};
@@ -78,24 +77,20 @@ export function createServiceLifecycle({services, dataRoot, backupRoot, getInsta
       await services.ensure(candidate.id);
     },
     async health(candidate) {
-      if (candidate.kind === 'runtime') {
-        if (candidate.id === 'node-runtime') {
-          const result = spawnSync(inside(candidate.root, candidate.entry), ['--version'], {encoding: 'utf8', windowsHide: true, timeout: 10000});
-          if (result.status !== 0 || result.stdout.trim() !== 'v' + candidate.version) throw fail('RUNTIME_CHECK_FAILED', '共享运行环境版本校验失败');
-        }
-        return;
-      }
+      if (candidate.kind === 'runtime') return;
       const cap = await services.capabilities(candidate.id);
       if (!cap || cap.maintenance !== true || cap.version !== candidate.version) throw fail('HEALTH_CHECK_FAILED', '新模块未能进入安全检查状态');
       const config = services.config(candidate.id);
-      checkDatabase(path.join(config.dataDir, config.db));
+      await checkDatabase(path.join(config.dataDir, config.db));
     },
     async complete(candidate) {
       if (candidate.kind === 'runtime') return;
-      const cap = await services.capabilities(candidate.id);
-      if (!cap) await services.ensure(candidate.id);
-      await services.request(candidate.id, '/maintenance/activate', {method: 'POST', body: {confirm: true}});
       const registry = readRegistry(services.registryFile);
+      const current=await services.capabilities(candidate.id);
+      if(!current&&registry[candidate.id]?.root===candidate.root&&registry[candidate.id]?.maintenance===false)return;
+      const cap = current||await services.ensure(candidate.id);
+      if(cap.version!==candidate.version)throw fail('HEALTH_CHECK_FAILED','待放行的功能版本发生变化');
+      if(cap.maintenance!==false)await services.request(candidate.id, '/maintenance/activate', {method: 'POST', body: {confirm: true}});
       registry[candidate.id].maintenance = false;
       registry[candidate.id].allowInitialize = false;
       atomicJson(services.registryFile, registry);
@@ -112,7 +107,7 @@ export function createServiceLifecycle({services, dataRoot, backupRoot, getInsta
           path.resolve(b.dataDir) !== path.resolve(services.config(journal.id).dataDir)) throw fail('INVALID_RECOVERY_PATH', '恢复路径与已登记的数据目录不符');
       // Preserve the failed candidate's data for investigation. Never delete a ledger.
       if (fs.existsSync(b.dataDir)) fs.renameSync(b.dataDir, b.dataDir + '.failed-' + randomUUID());
-      if (b.hadData) fs.cpSync(path.join(b.directory, 'data'), b.dataDir, {recursive: true});
+      if (b.hadData) await copyData(path.join(b.directory, 'data'), b.dataDir);
       const registry = readRegistry(services.registryFile);
       if (b.previousRegistry) registry[journal.id] = b.previousRegistry;
       else if (b.previousConfig) registry[journal.id] = b.previousConfig;

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import {sanitizeDiagnosticText} from './shared/diagnostics.mjs';
 
 function result(value, isError = false) {
   return {
@@ -10,8 +11,7 @@ function result(value, isError = false) {
 }
 
 function safeError(error) {
-  return String(error?.message || error || "未知错误")
-    .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[REDACTED]");
+  return sanitizeDiagnosticText(error?.message || error || '未知错误');
 }
 
 export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagnostics, searchDebugLogs, getCapabilities, exportDebugBundle, listExtensions, callExtension, runSync, refreshLogin, onClose }) {
@@ -104,7 +104,7 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
     if (!confirmSend) return result({ error: "需要 confirmSend=true 才能执行同步和钉钉发送" }, true);
     try {
       const task = await runSync();
-      return result({ ...task, logs: task.logs.slice(-100) }, !task.success);
+      return result({ ...task, logs: (Array.isArray(task.logs)?task.logs:[]).slice(-100) }, task.success === false || task.ok === false);
     } catch (error) {
       return result({ error: safeError(error) }, true);
     }
@@ -119,7 +119,7 @@ export function createInventoryMcpServer({ version, getStatus, getLogs, getDiagn
     if (!confirmOpenBrowser) return result({ error: "需要 confirmOpenBrowser=true 才能打开登录窗口" }, true);
     try {
       const task = await refreshLogin();
-      return result({ ...task, logs: task.logs.slice(-100) }, !task.success);
+      return result({ ...task, logs: (Array.isArray(task.logs)?task.logs:[]).slice(-100) }, task.success === false || task.ok === false);
     } catch (error) {
       return result({ error: safeError(error) }, true);
     }

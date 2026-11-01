@@ -5,14 +5,17 @@ import {spawnSync} from 'node:child_process';
 import yauzl from 'yauzl';
 import asar from '@electron/asar';
 import {createHash} from 'node:crypto';
-const output=path.resolve('dist/module-verification');
+import {parseArgs} from 'node:util';
+const {values}=parseArgs({options:{directory:{type:'string'},output:{type:'string'}}});
+const directory=path.resolve(values.directory||'dist/modules');
+const output=path.resolve(values.output||'dist/module-verification');
 fs.mkdirSync(output,{recursive:true});
 const stage=fs.mkdtempSync(path.join(output,'public-payload-'));
 const reports=[];
-for(const descriptor of fs.readdirSync('dist/modules').filter(n=>n.endsWith('.descriptor.json'))){
-  const spec=JSON.parse(fs.readFileSync(path.join('dist/modules',descriptor),'utf8'));
+for(const descriptor of fs.readdirSync(directory).filter(n=>n.endsWith('.descriptor.json'))){
+  const spec=JSON.parse(fs.readFileSync(path.join(directory,descriptor),'utf8'));
   let entries=0,texts=0;
-  const zip=await new Promise((resolve,reject)=>yauzl.open(path.join('dist/modules',spec.archive),{lazyEntries:true},(e,z)=>e?reject(e):resolve(z)));
+  const zip=await new Promise((resolve,reject)=>yauzl.open(path.join(directory,spec.archive),{lazyEntries:true},(e,z)=>e?reject(e):resolve(z)));
   await new Promise((resolve,reject)=>{
     zip.on('error',reject);zip.on('end',resolve);
     zip.on('entry',entry=>{(async()=>{

@@ -1,0 +1,61 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import assert from 'node:assert/strict';
+import {_electron as electron} from 'playwright';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'lingtu-connection-status-')),registry=path.join(root,'registry.json');
+fs.writeFileSync(registry,'{}');
+const env={...process.env,LINGTU_ISOLATED_TEST:'1',LINGTU_SKIP_BUNDLED_ACTIVATION:'1',LINGTU_REGISTRY_PATH:registry};delete env.ELECTRON_RUN_AS_NODE;
+const packaged=!!process.env.LAUNCHER_TEST_EXE;
+const desktop=await electron.launch({executablePath:path.resolve(process.env.LAUNCHER_TEST_EXE||'node_modules/electron/dist/electron.exe'),args:[...(packaged?[]:[path.resolve('desktop/launcher')]),'--user-data-dir='+root],env});
+const errors=[],version=await desktop.evaluate(({app})=>app.getVersion()),report={version,scope:'Isolated native UI; server/client states are injected IPC fixtures; no real Tailnet login or business data'};
+try{
+  const page=await desktop.firstWindow();page.on('pageerror',error=>errors.push(error.message));
+  await page.locator('#connectionIndicator[data-state=local]').waitFor();
+  assert.match(await page.locator('#connectionIndicator').innerText(),/单机/);
+  const live=await page.evaluate(()=>window.launcher.connectionStatus());assert.equal(live.state,'local');
+  await page.locator('#settings').click();await page.locator('#settingsPanel').waitFor({state:'visible'});
+  const scenario=async(mode,status,configurationId='synthetic-1')=>{
+    await desktop.evaluate(({ipcMain},{mode,status,configurationId})=>{
+      globalThis.__healthScenario={mode,configurationId,state:{mode,configurationId,serverUrl:'https://synthetic.example.ts.net:8443',networkProvider:'system',canWrite:false,connected:status.state==='connected'},status:{...status,mode,configurationId,checkedAt:new Date().toISOString(),latencyMs:12}};
+      ipcMain.removeHandler('connection:get');ipcMain.handle('connection:get',()=>globalThis.__healthScenario.state);
+      ipcMain.removeHandler('connection:status');ipcMain.handle('connection:status',()=>globalThis.__healthScenario.status);
+      ipcMain.removeHandler('modules:list');ipcMain.handle('modules:list',()=>[]);
+    },{mode,status,configurationId});
+    await page.evaluate(async()=>{await loadConnection();await pollConnectionStatus({force:true});});
+  };
+  await scenario('server',{state:'ready',label:'主服务器已就绪',detail:'本机网关及私网 HTTPS 检查通过。'});
+  assert.equal(await page.locator('#connectionStatus').innerText(),'主服务器已就绪');
+  assert.match(await page.locator('#connectionDetails').innerText(),/最近检查.*检查耗时/);
+  await page.evaluate(()=>message('已检查官方扩展目录。'));
+  assert.equal(await page.locator('#connectionStatus').innerText(),'主服务器已就绪','toast must not replace persistent status');
+  await page.locator('#home').click();await page.locator('#homePanel').waitFor({state:'visible'});
+  assert(await page.locator('#connectionIndicator[data-state=ready]').isVisible());
+  const indicator=await page.locator('#connectionIndicator').boundingBox(),nav=await page.locator('header nav').boundingBox();assert(indicator.x+indicator.width<=nav.x);
+  fs.mkdirSync('dist/module-verification',{recursive:true});
+  await page.screenshot({path:`dist/module-verification/launcher-connection-ready-${version}.png`});
+  await page.locator('#settings').click();
+  await scenario('server',{state:'warning',label:'私网入口异常',detail:'本机网关正常；私网 HTTPS 连接失败或超时。'});
+  assert.equal(await page.locator('#connectionIndicator').getAttribute('data-state'),'warning');
+  assert.match(await page.locator('#connectionDetails').innerText(),/本机网关正常/);
+  await scenario('client',{state:'connected',label:'已连接主服务器',detail:'系统 Tailscale · 已验证当前成员与账本身份。'},'synthetic-2');
+  assert.match(await page.locator('#connectionIndicator').innerText(),/客户端.*已连接/);
+  await scenario('client',{state:'offline',label:'主服务器连接中断',detail:'请检查主机与网络。'},'synthetic-2');
+  assert.equal(await page.locator('#connectionStatus').innerText(),'主服务器连接中断');
+  await scenario('client',{state:'paused',label:'私网连接已暂停',detail:'请重新连接。'},'synthetic-3');
+  assert.equal(await page.locator('#connectionIndicator').getAttribute('data-state'),'paused');
+  // A delayed old server success must not turn a newly selected client green.
+  await scenario('server',{state:'ready',label:'旧服务器成功',detail:'must not be displayed'},'old-generation');
+  await desktop.evaluate(({ipcMain})=>{globalThis.__pendingHealthResolvers=[];globalThis.__oldHealth=globalThis.__healthScenario.status;ipcMain.removeHandler('connection:status');ipcMain.handle('connection:status',()=>new Promise(resolve=>{globalThis.__pendingHealthResolvers.push(()=>resolve(globalThis.__oldHealth));}));});
+  await page.evaluate(()=>{void pollConnectionStatus({force:true});});
+  await desktop.evaluate(()=>{globalThis.__healthScenario.state={mode:'client',configurationId:'new-generation',networkProvider:'system',serverUrl:'https://new-synthetic.example.ts.net:8443'};});
+  await page.evaluate(()=>loadConnection());
+  await desktop.evaluate(({ipcMain})=>{ipcMain.removeHandler('connection:status');ipcMain.handle('connection:status',()=>({mode:'client',configurationId:'new-generation',state:'unverified',label:'尚未连接主服务器',detail:'新连接待核对'}));globalThis.__pendingHealthResolvers.forEach(resolve=>resolve());});
+  await page.evaluate(()=>pollConnectionStatus({force:true}));
+  assert.doesNotMatch(await page.locator('#connectionIndicator').innerText(),/旧服务器成功/);
+  assert.match(await page.locator('#connectionIndicator').innerText(),/客户端.*尚未连接/);
+  assert(!fs.existsSync(path.join(root,'workspace/data/erp.sqlite')));
+  assert.deepEqual(errors,[]);
+  Object.assign(report,{ok:true,persistentHomeAndSettings:true,toastDoesNotOverwrite:true,serverReadyAndEntryFailure:true,clientConnectedOfflinePaused:true,oldGenerationResponseDiscarded:true,noBusinessDatabaseCreated:true});
+  fs.writeFileSync(`dist/module-verification/launcher-connection-status-${version}.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+}finally{await desktop.close();}

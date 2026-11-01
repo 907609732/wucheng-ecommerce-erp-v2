@@ -36,7 +36,7 @@ try{
     assert.equal(response.status,200);manager.setCatalog(await response.json());
   }else{
     bundle=await manager.inspectOffline('C:\\Bundle\\LingtuModules-Complete-Offline.zip');
-    assert.equal(bundle.packages.length,7);
+    assert.equal(bundle.packages.length,5);
   }
   for(const id of ['overview','purchase','sales','warehouse','exporter']){
     if(online)await manager.install(id);else await manager.installOffline(bundle.token,id);
@@ -54,8 +54,7 @@ try{
   mark('validating bundled browser and pages');
   const cloud=manager.state().packages.warehouse;
   const playwright=await import(pathToFileURL(path.join(cloud.root,'resources/app.asar/node_modules/playwright/index.mjs')));
-  const runtime=manager.state().packages['browser-runtime'];
-  browser=await playwright.chromium.launch({executablePath:path.join(runtime.root,runtime.entry),headless:true});
+  browser=await playwright.chromium.launch({channel:'msedge',headless:true});
   const page=await browser.newPage();
   for(const id of ['purchase','sales','overview']){
     const cap=await services.ensure(id);await page.goto(cap.url);assert.ok((await page.locator('body').innerText()).length>30);

@@ -20,30 +20,23 @@ try {
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForLoadState('domcontentloaded');
-  await page.locator('[data-setup-mode="standalone"]').click();
-  await page.locator('#finishFirstRun').click();
-  await page.locator('#firstRunSetup').waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('#featureManualButton').count(), 1, '页面右上角应有说明书入口');
-  assert.equal(await page.locator('#featurePrincipleButton').count(), 0, '右上角只保留合并后的入口');
+  assert.equal(await page.locator('#firstRunSetup,#runtimeSettingsForm').count(),0);
+  assert.equal(await page.locator('#featureManualButton').count(), 1, '使用说明入口仅保留一处');
+  assert.equal(await page.locator('.hero-actions #featureManualButton').count(), 0, '右上角不再显示使用说明');
+  assert.equal(await page.locator('[data-view-panel="settings"] #featureManualButton').count(), 1, '使用说明位于云仓设置');
+  assert.equal(await page.locator('#featureManualButton').isVisible(), false, '运行概览隐藏设置中的帮助入口');
   assert.equal(await page.locator('#featureManualButton').textContent(), '使用说明');
   const dialog = page.locator('#featureHelpDialog');
   const modes = [['manual', '说明书'], ['principle', '技术原理']];
   const views = [
-    ['home', '功能主页'], ['dashboard', '云仓库存同步'],
-    ['inventory', '云仓库存同步 · 库存明细'], ['sales', '云仓库存同步 · 月度销量'],
-    ['settings', '公共设置']
+    ['dashboard', '云仓同步'],
+    ['inventory', '云仓同步 · 库存明细'], ['sales', '云仓同步 · 月度销量'],
+    ['settings', '云仓设置'],['attendance','云仓同步 · 签到管理']
   ];
   for (const [view, title] of views) {
-    if (view !== 'home') {
-      if (['inventory', 'sales'].includes(view)) {
-        await page.locator('#backHome').click();
-        await page.locator('[data-open-view="dashboard"]').click();
-        await page.locator(`[data-view="${view}"]`).click();
-      } else {
-        if (await page.locator('#backHome').isVisible()) await page.locator('#backHome').click();
-        await page.locator(`[data-open-view="${view}"]`).click();
-      }
-    }
+    await page.locator(`.view-tab[data-view="${view}"]`).click();
+    await page.locator('.view-tab[data-view="settings"]').click();
+    await page.locator('#featureHelpTopic').selectOption(view);
     for (const [mode, label] of modes) {
       await page.locator('#featureManualButton').click();
       if (mode === 'principle') await page.locator('[data-feature-help-mode="principle"]').click();
@@ -63,18 +56,18 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await dialog.isVisible(), false);
   }
-  await page.locator('#backHome').click();
+  await page.locator('.view-tab[data-view="settings"]').click();
   for (const width of [1280, 760]) {
     await page.setViewportSize({ width, height: 850 });
     assert.equal(await page.locator('#featureManualButton').isVisible(), true);
     const layout = await page.evaluate(() => {
-      const hero = document.querySelector('.hero').getBoundingClientRect();
+      const hero = document.querySelector('#featureHelpSettings').getBoundingClientRect();
       const a = document.querySelector('#featureManualButton').getBoundingClientRect();
       return { heroRight: hero.right, heroLeft: hero.left, left: a.left, right: a.right, scroll: document.documentElement.scrollWidth, width: innerWidth };
     });
     assert.ok(layout.left >= layout.heroLeft && layout.right <= layout.heroRight + 1);
     assert.ok(layout.scroll <= layout.width + 1, '说明入口不应造成水平溢出');
-    await page.screenshot({path:path.join(output,`home-${width}.png`)});
+    await page.screenshot({path:path.join(output,`settings-${width}.png`)});
     await page.locator('#featureManualButton').click();
     assert.ok(await page.locator('#featureHelpBody').evaluate(el => el.scrollHeight > 0));
     await page.locator('#featureHelpClose').click();

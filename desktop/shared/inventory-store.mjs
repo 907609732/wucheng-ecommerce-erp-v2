@@ -1,9 +1,15 @@
 import fs from "node:fs";
+import {createHash} from 'node:crypto';
 import { DatabaseSync } from "node:sqlite";
 import { calculateInventoryAvailability, inventoryAlertLabel } from "../../core/erp/inventory-alert.js";
 
 function plainRow(row) {
   return row == null ? row : { ...row };
+}
+
+export function inventorySnapshotFingerprint(report) {
+  const rows=(report?.items||[]).map(row=>[row.sku,row.quantity,row.monthlyOutbound,row.near30DaysSales]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+  return createHash('sha256').update(JSON.stringify([report?.sourceDate,rows])).digest('hex');
 }
 
 export function readCainiaoInventory(databasePath) {
@@ -46,7 +52,7 @@ export function readCainiaoInventory(databasePath) {
     ).get();
     const validation = validationTable
       ? plainRow(database.prepare(
-        `SELECT source_date AS sourceDate, status, row_count AS rowCount,
+        `SELECT id, source_date AS sourceDate, status, row_count AS rowCount,
                 total_quantity AS totalQuantity, created_at AS createdAt
            FROM inventory_data_validations
           WHERE warehouse_id = ?
@@ -100,6 +106,9 @@ export function readCainiaoInventory(databasePath) {
         importedAt: String(row.importedAt || "")
       };
     });
+    const rank={critical:0,urgent:1,warning:2,ok:3};
+    items.sort((a,b)=>(rank[a.stockAlert.level]??4)-(rank[b.stockAlert.level]??4)||
+      (Number.isFinite(a.sellableDays)?a.sellableDays:Infinity)-(Number.isFinite(b.sellableDays)?b.sellableDays:Infinity)||a.quantity-b.quantity||a.sku.localeCompare(b.sku,'zh-CN'));
     const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
     const validationMatches = Boolean(
       validation &&
@@ -117,6 +126,7 @@ export function readCainiaoInventory(databasePath) {
       totalQuantity,
       lowStockCount: items.filter((item) => item.stockAlert.level !== "ok").length,
       validation: {
+        id: validation?.id || null,
         status: validationMatches ? "valid" : String(validation?.status || "unknown"),
         matchesSnapshot: validationMatches,
         createdAt: String(validation?.createdAt || "")

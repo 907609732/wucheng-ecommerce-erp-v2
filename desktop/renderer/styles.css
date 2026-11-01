@@ -196,7 +196,5 @@ legend { padding: 0 8px; font-weight: 700; color: var(--ink); }
 @media (max-width: 900px) { .sales-chart-grid { grid-template-columns: 1fr; } .sales-controls { grid-template-columns: 1fr 1fr; } .sales-sku-field { grid-column: span 2; } .sales-backfill-panel { align-items: stretch; flex-direction: column; } }
 @media (max-width: 760px) { .summary-grid, .maintenance-grid, .inventory-summary-grid, .sales-summary-grid, .form-grid, .role-choice-grid, .first-run-fields { grid-template-columns: 1fr; } .hero, .form-footer, .section-heading { align-items: stretch; flex-direction: column; } .section-intro { text-align: left; } .shell { width: calc(100% - 24px); padding-top: 24px; } .sales-controls { grid-template-columns: 1fr; } .sales-sku-field { grid-column: auto; } .backfill-controls { align-items: stretch; flex-direction: column; } .sales-due-banner { align-items: stretch; flex-direction: column; } .first-run-overlay { padding: 12px; } .first-run-dialog { padding: 22px; } }
 
-/* Match the source AI table: flat headers{background:#f6f7f9;}
-@media(max-width:900px){.feature-grid{grid-template-columns:1fr;}}
-/* The spreadsheet owns an isolated{ display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 18px; }
 .changelog-heading { margin-top: 24px; }
+.managed-cloud [data-standalone-update] { display: none !important; }

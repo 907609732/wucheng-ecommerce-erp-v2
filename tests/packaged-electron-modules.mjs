@@ -6,7 +6,7 @@ const report=JSON.parse(fs.readFileSync('dist/module-verification/services.json'
 assert.ok(report.ok);
 const configs=JSON.parse(fs.readFileSync(report.registryFile,'utf8')),results=[];
 const out=path.resolve('dist/module-verification');
-const browser=await chromium.launch({executablePath:configs.warehouse.browserPath,headless:true});
+const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
   const page=await browser.newPage();await page.setContent('<h1>离线浏览器验收</h1>');
   assert.equal(await page.locator('h1').textContent(),'离线浏览器验收');
@@ -15,7 +15,8 @@ try{
 for(const id of ['warehouse','exporter']){
   const c=configs[id],errors=[];
   const env={...process.env,LINGTU_MANAGED_MODULE:'1',LINGTU_MAINTENANCE:'0',LINGTU_REGISTRY_PATH:report.registryFile,
-    LINGTU_EXPORTER_DATA_DIR:c.dataDir,LINGTU_BROWSER_PATH:configs.warehouse.browserPath};
+    LINGTU_EXPORTER_DATA_DIR:c.dataDir};
+  if(id==='warehouse'&&c.hostElectron)env.LINGTU_WAREHOUSE_MODULE_ROOT=c.root;
   delete env.ELECTRON_RUN_AS_NODE;
   const app=await electron.launch({executablePath:c.exe,args:id==='warehouse'?['--user-data-dir='+c.dataDir]:[],env});
   try{

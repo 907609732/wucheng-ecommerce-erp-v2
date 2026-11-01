@@ -102,7 +102,7 @@ test('platform compatibility, dependency graph and download origin are checked',
   f.manager.setCatalog(envelope([{...f.spec, arch: 'arm64'}]));
   assert.throws(() => f.manager.plan('purchase'), {code: 'INCOMPATIBLE_PACKAGE'});
   assert.throws(() => f.manager.setCatalog(envelope([{...f.spec, dependencies: [{id: 'purchase', range: '*'}]}])), {code: 'DEPENDENCY_CYCLE'});
-  assert.throws(() => f.manager.setCatalog(envelope([{...f.spec, dependencies: [{id: 'node-runtime', range: '^24'}]}])), {code: 'MISSING_DEPENDENCY'});
+  assert.throws(() => f.manager.setCatalog(envelope([{...f.spec, dependencies: [{id: 'sales', range: '^1'}]}])), {code: 'MISSING_DEPENDENCY'});
   assert.throws(() => f.manager.setCatalog(envelope([{...f.spec, url: 'http://127.0.0.1/private'}])), {code: 'INVALID_URL'});
 });
 test('Windows path traversal, device paths, alternate streams and duplicate ZIP paths are rejected', async t => {
