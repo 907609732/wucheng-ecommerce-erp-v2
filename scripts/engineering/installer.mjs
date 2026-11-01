@@ -8,6 +8,7 @@ import {buildPreview,createPreviewInstallerInclude,previewInstallerOptions} from
 import {PRODUCT_MODULES} from '../../desktop/product/modules.mjs';
 import {verifyCatalog,digest} from '../../desktop/modules/package-format.mjs';
 import {zipFiles} from './zip.mjs';
+import {deferredWarehouseFile,hostDependencyPaths} from './warehouse-extension.mjs';
 import {trimShell,assertSlimShell} from './trim-shell.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
@@ -26,19 +27,22 @@ export async function buildOnDemandInstaller(receipt){
   const output=fs.mkdtempSync(path.join(root,'.codex-artifacts/engineering/release-')),assets=path.join(output,'assets');fs.mkdirSync(assets);
   const tag=`preview-${version}-${receipt.manifestSha256.slice(0,12)}`;
   const releaseUrl='https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/'+tag+'/';
+  const extensionTag='warehouse-'+version+'-'+receipt.manifestSha256.slice(0,12);
+  const extensionUrl='https://github.com/907609732/cainiao-inventory/releases/download/'+extensionTag+'/';
+  const hostDependencies=hostDependencyPaths(JSON.parse(fs.readFileSync(path.join(receipt.stage,'package-lock.json'))));
   const packages=[];
   for(const module of PRODUCT_MODULES){
     const files=Object.keys(manifest.payloadHashes).filter(rel=>rel.startsWith('apps/'+module.id+'/'));
     const archive=module.id+'-'+version+'-'+receipt.manifestSha256.slice(0,12)+'.zip',file=path.join(assets,archive);
     const unpackedBytes=await zipFiles(receipt.stage,files,file);
-    packages.push({id:module.id,version:manifest.modules[module.id].version,platform:'win32',arch:'x64',hostRange:'='+version,kind:module.surface==='window'?'electron':'service',entry:module.id==='warehouse'?'apps/warehouse/runtime/resources/app.asar':'apps/'+module.id+'/'+module.entry,archive,bytes:fs.statSync(file).size,unpackedBytes,sha256:await digest(file),url:releaseUrl+archive,dependencies:module.dependencies.map(id=>({id,range:'='+manifest.vendor.components.find(c=>c.id===id).version}))});
+    packages.push({id:module.id,version:manifest.modules[module.id].version,platform:'win32',arch:'x64',hostRange:'='+version,kind:module.surface==='window'?'electron':'service',entry:module.id==='warehouse'?'apps/warehouse/runtime/resources/app.asar':'apps/'+module.id+'/'+module.entry,archive,bytes:fs.statSync(file).size,unpackedBytes,sha256:await digest(file),url:(module.id==='warehouse'?extensionUrl:releaseUrl)+archive,dependencies:module.dependencies.map(id=>({id,range:'='+manifest.vendor.components.find(c=>c.id===id).version}))});
   }
   const vendorEnvelope=JSON.parse(fs.readFileSync(path.join(receipt.stage,'vendor/catalog.json')));
   const keys=JSON.parse(fs.readFileSync(path.join(receipt.stage,'desktop/launcher/public-keys.json')));
   const vendor=verifyCatalog(vendorEnvelope,keys,{hostVersion:version,platform:'win32',arch:'x64'});
   for(const component of manifest.vendor.components){
     const original=vendor.packages.find(p=>p.id===component.id);
-    const spec={...original,hostRange:'='+version,url:releaseUrl+component.archive};
+    const spec={...original,hostRange:'='+version,url:(component.id==='browser-runtime'?extensionUrl:releaseUrl)+component.archive};
     fs.copyFileSync(path.join(receipt.stage,'vendor',component.archive),path.join(assets,component.archive));packages.push(spec);
   }
   const keyFile=process.env.LINGTU_MODULE_SIGNING_KEY||path.join(os.homedir(),'.codex/module-signing/lingtu-release-ed25519.pem');
@@ -51,14 +55,20 @@ export async function buildOnDemandInstaller(receipt){
   // NSIS's direct-file branch needs a short physical path. No junctions.
   const stagingRoot=path.join(os.homedir(),'.codex/installer-staging');fs.mkdirSync(stagingRoot,{recursive:true});
   const shell=fs.mkdtempSync(path.join(stagingRoot,'lite-'));
+  const size={frozenPayloadBytes:0,basePayloadBytes:0,omittedWarehouseSourceBytes:0};
   for(const item of JSON.parse(fs.readFileSync(prepared.file,'utf8')).inventory){
+    size.frozenPayloadBytes+=item.bytes??fs.statSync(path.join(prepared.prepackaged,...item.path.split('/'))).size;
     if(/^resources\/agent-runtime\/(?:apps|vendor|dependency-layers)\//.test(item.path))continue;
+    const rel=item.path.replace(/^resources\/agent-runtime\//,'');
+    if(deferredWarehouseFile(rel)){size.omittedWarehouseSourceBytes+=item.bytes??fs.statSync(path.join(prepared.prepackaged,...item.path.split('/'))).size;continue;}
+    if(rel.startsWith('node_modules/')&&!hostDependencies.some(key=>rel.startsWith(key+'/')&&!('/'+rel.slice(key.length+1)).includes('/node_modules/')))continue;
     const source=path.join(prepared.prepackaged,...item.path.split('/'));
     if(await digest(source)!==item.sha256)throw Error('Frozen shell changed');
+    size.basePayloadBytes+=fs.statSync(source).size;
     const target=path.join(shell,...item.path.split('/'));fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);
   }
   const runtime=path.join(shell,'resources/agent-runtime');fs.copyFileSync(catalog,path.join(runtime,'component-catalog.json'));
-  fs.writeFileSync(path.join(runtime,'on-demand.json'),JSON.stringify({format:'lingtu-on-demand/v1',version,manifestSha256:receipt.manifestSha256,catalogSha256:await digest(catalog)},null,2));
+  fs.writeFileSync(path.join(runtime,'on-demand.json'),JSON.stringify({format:'lingtu-on-demand/v1',version,manifestSha256:receipt.manifestSha256,catalogSha256:await digest(catalog),optionalModules:['warehouse'],hostDependencyPaths:hostDependencies},null,2));
   const trim=trimShell(shell);assertSlimShell(shell);
   const artifactName=`WuchengAgentPreview-Setup-${version}-lite-x64.exe`,include=createPreviewInstallerInclude(output,shell);
   const config={appId:'com.wucheng.ecommerce.erp.v2.agentpreview',productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:manifest.sharedElectron.version,directories:{output:assets},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions(include)};
@@ -70,7 +80,7 @@ export async function buildOnDemandInstaller(receipt){
   const installer=path.join(assets,artifactName),files=[];
   for(const name of fs.readdirSync(assets).sort()){const file=path.join(assets,name);if(fs.statSync(file).isFile())files.push({name,bytes:fs.statSync(file).size,sha256:await digest(file)});}
   fs.writeFileSync(path.join(assets,'SHA256SUMS.txt'),files.map(f=>f.sha256+'  '+f.name).join('\n')+'\n');
-  const report={ok:true,installer,shell,assets,tag,version,manifestSha256:receipt.manifestSha256,source:receipt.source,files,trim,elapsedMs:Date.now()-started,published:false,installed:false,integrationVerified:false,strictScan:path.join(proof.evidenceDirectory,'summary.json')};
+  const report={ok:true,installer,shell,assets,tag,version,manifestSha256:receipt.manifestSha256,source:receipt.source,files,trim,size,elapsedMs:Date.now()-started,extensionTag,extensionRepository:'907609732/cainiao-inventory',extensionAssets:packages.filter(p=>p.url.startsWith(extensionUrl)).map(p=>p.archive),published:false,installed:false,integrationVerified:false,strictScan:path.join(proof.evidenceDirectory,'summary.json')};
   fs.writeFileSync(path.join(root,'.codex-artifacts/engineering/installer-current.json'),JSON.stringify(report,null,2));
   fs.writeFileSync(path.join(output,'installer-result.json'),JSON.stringify(report,null,2));return report;
 }

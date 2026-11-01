@@ -8,7 +8,7 @@ import {_electron as electron} from 'playwright';
 import {ServiceManager} from '../desktop/shared/service-manager.mjs';
 const exe=path.resolve(process.argv[2]||'');
 assert.equal(path.basename(exe),'WuchengAgentPreview.exe');assert(fs.existsSync(exe));
-const output=path.resolve('.codex-artifacts/business-build-20261101');fs.mkdirSync(output,{recursive:true});
+const output=path.resolve(process.argv.find(value=>value.startsWith('--output='))?.slice('--output='.length)||'.codex-artifacts/business-build-20261101');fs.mkdirSync(output,{recursive:true});
 // Fail closed instead of replacing an existing preview's services.
 for(const port of [27432,27433,27434,27480]){const used=await new Promise(resolve=>{const s=net.createServer();s.once('error',()=>resolve(true));s.listen(port,'127.0.0.1',()=>s.close(()=>resolve(false)));});assert(!used,'Preview port already occupied: '+port);}
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'wucheng-installed-ui-')),local=path.join(fixture,'local'),roaming=path.join(fixture,'roaming'),root=path.join(local,'WuchengAgentBeta-preview'),registryFile=path.join(root,'registry.json');
@@ -30,6 +30,12 @@ try{
   page.on('pageerror',e=>report.errors.push({module:id,message:e.message}));const text=await page.locator('body').innerText();assert(text.length>200);assert(!text.includes('Cannot GET /'));await page.waitForTimeout(1000);await capture(host,id);report.checks.push({module:id,url:page.url(),visible:await page.evaluate(()=>window.lingtuShell.isVisible()),text:text.slice(0,700)});save();
  }
  await shell.locator('[data-view="settings"]').click();await capture(host,'settings');
+ const optional=await shell.evaluate(()=>window.launcher.extensionStatus?.('warehouse'));
+ if(optional&&!optional.installed){
+  await shell.evaluate(()=>window.launcher.extensionInstall('warehouse'));
+  assert.equal((await shell.evaluate(()=>window.launcher.extensionStatus('warehouse'))).installed,true);
+  report.checks.push({module:'warehouse',optionalInstall:true});save();
+ }
  for(const id of ['warehouse','exporter']){
   native=await electron.launch({executablePath:exe,args:['--agent-component='+id],env:{...env,LINGTU_REGISTRY_PATH:registryFile,LINGTU_MANAGED_MODULE:'1',LINGTU_ALLOW_INITIALIZE:'0'},timeout:120000});
   const page=await native.firstWindow();page.on('pageerror',e=>report.errors.push({module:id,message:e.message}));await page.waitForLoadState('domcontentloaded');await page.waitForTimeout(1500);

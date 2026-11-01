@@ -614,5 +614,8 @@
       ],
       "outputLogs": "errors-only"
     }
-  }
+  },
+  "globalEnv": [
+    "WAREHOUSE_EXTENSION_SOURCE_SHA256"
+  ]
 }

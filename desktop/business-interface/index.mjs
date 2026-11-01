@@ -29,7 +29,7 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
  const validApproval=claims=>{const row=store.get('review',claims.resultId);return !!row&&row.state==='committing'&&row.approvedBy===claims.actorId&&row.approvalId===claims.approvalId&&row.approvedVersion===claims.resultVersion&&row.requestId===claims.taskId&&row.module===claims.module&&row.capabilityId===claims.capabilityId&&row.prepared.changeDigest===claims.changeDigest&&row.prepared.binding.dataSetId===claims.dataSetId&&canonicalJson(row.prepared.binding.revision)===canonicalJson(claims.revision)&&row.idempotencyKey===claims.idempotencyKey;};
  const transport=providedTransport||createBusinessModuleTransport({services,resolveActor:id=>identity.resolveActor(id),validateApproval:validApproval,artifactRoot:path.join(storeDir,'requests')});
  const factories={
-  warehouse:async()=>{await services.prepareComponent?.('warehouse');return (await import('../workbench/warehouse-agent.mjs')).createWarehouseAgentAdapter({transport});},
+  warehouse:async()=>{if(services.prepareComponent)return loadActivatedBusinessAdapter('warehouse',services,transport);return (await import('../workbench/warehouse-agent.mjs')).createWarehouseAgentAdapter({transport});},
   purchase:()=>loadActivatedBusinessAdapter('purchase',services,transport),
   sales:()=>loadActivatedBusinessAdapter('sales',services,transport),
   overview:()=>loadActivatedBusinessAdapter('overview',services,transport),

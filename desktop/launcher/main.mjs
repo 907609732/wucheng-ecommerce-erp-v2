@@ -542,6 +542,17 @@ if (acquired) app.whenReady().then(async () => {
     return updater.install();
   }));
   handle('modules:refresh', () => {requireHost();return refresh();});
+  const requireWarehouse=id=>{if(id!=='warehouse')throw Error('未知可选扩展');};
+  handle('extension:status',async id=>{
+    requireWarehouse(id);
+    if(remote())return {id,installed:true,state:'remote',remote:true};
+    if(onDemand)return onDemand.status(id);
+    const c=services.config(id),installed=fs.existsSync(path.join(c.root,'resources/app.asar'))||(!app.isPackaged&&fs.existsSync(path.join(here,'../main.mjs')));
+    return {id,installed,state:installed?'installed':'not-installed',available:false};
+  });
+  handle('extension:plan',id=>{requireWarehouse(id);requireHost();if(!onDemand)throw Error('当前工作台不支持在线安装扩展，请安装新版工作台');return onDemand.plan(id);});
+  handle('extension:install',async id=>{requireWarehouse(id);requireHost();hostIdentity.requireMember(hostIdentity.localActor('ui'),true);if(!onDemand)throw Error('当前工作台不支持在线安装扩展');return onDemand.ensure(id,{install:true});});
+  handle('extension:cancel',id=>{requireWarehouse(id);requireHost();return onDemand?.cancel(id)||{cancelled:false};});
   handle('modules:plan', id => {requireHost();return modules.plan(id);});
   handle('modules:install', id => {requireHost();return modules.install(id);});
   handle('modules:cancel', id => {requireHost();return onDemand?onDemand.cancel(id):modules.cancel(id);});

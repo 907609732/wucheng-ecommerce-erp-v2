@@ -3,6 +3,7 @@ const invoke = name => (...args) => ipcRenderer.invoke(name, ...args);
 const on = name => callback => { const listener = (_event, value) => callback(value); ipcRenderer.on(name, listener); return () => ipcRenderer.removeListener(name, listener); };
 contextBridge.exposeInMainWorld('launcher', {
   businessStatus: invoke('business:status'),
+  extensionStatus:invoke('extension:status'),extensionPlan:invoke('extension:plan'),extensionInstall:invoke('extension:install'),extensionCancel:invoke('extension:cancel'),
   backup:invoke('business:backup'),
   businessReview: invoke('business:review'),
   openLink: invoke('links:open'),

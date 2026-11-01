@@ -12,13 +12,13 @@ import {downloadPackage,digest} from '../desktop/modules/package-format.mjs';
 
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function archive(file,entries){const z=new ZipFile();for(const [rel,bytes]of Object.entries(entries))z.addBuffer(Buffer.from(bytes),rel);z.end();await pipeline(z.outputStream,fs.createWriteStream(file));}
-async function fixture(t){
+async function fixture(t,{warehouse=false}={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'erp-demand-')),old=process.env.LOCALAPPDATA;process.env.LOCALAPPDATA=dir;
  t.after(()=>{if(old===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=old;fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
  const paths=agentBetaPaths({localAppData:dir,preview:true});prepareAgentProfile(paths);
  const resources=path.join(dir,'shell');fs.mkdirSync(path.join(resources,'desktop/business-host'),{recursive:true});
  const executable=path.join(dir,'host.exe');fs.writeFileSync(executable,'test host');Object.assign(paths,{sharedElectronExecutable:executable,sharedElectronVersion:'44.7.0'});
- const moduleEntries={'apps/purchase/server.mjs':'export {};','apps/purchase/lib/agent-adapter.mjs':'export {};'};
+ const moduleEntries=warehouse?{'apps/warehouse/runtime/resources/app.asar':'warehouse'}:{'apps/purchase/server.mjs':'export {};','apps/purchase/lib/agent-adapter.mjs':'export {};'};
  const archiveFile=path.join(dir,'purchase.zip'),nodeFile=path.join(dir,'node.zip');await archive(archiveFile,moduleEntries);await archive(nodeFile,{'node.exe':'test node'});
  const host='export {};';fs.mkdirSync(path.join(resources,'desktop/launcher'),{recursive:true});fs.writeFileSync(path.join(resources,'desktop/launcher/main.mjs'),host);
  const hashes=Object.fromEntries(Object.entries(moduleEntries).map(([rel,b])=>[rel,sha(b)]));hashes['desktop/launcher/main.mjs']=sha(host);hashes['vendor/node.zip']=await digest(nodeFile);
@@ -28,11 +28,18 @@ async function fixture(t){
  const manifestBytes=JSON.stringify(manifest),manifestSha256=sha(manifestBytes);fs.writeFileSync(path.join(resources,'agent-beta-resources.json'),manifestBytes);fs.writeFileSync(path.join(resources,'desktop/business-host/packaged-manifest.json'),JSON.stringify({sha256:manifestSha256}));
  const base={platform:'win32',arch:'x64',hostRange:'=0.11.8',dependencies:[]};
  const specs=[{...base,...vendor,kind:'runtime',entry:'node.exe',unpackedBytes:9},{...base,id:'purchase',kind:'service',version:'1.0.0',archive:'purchase.zip',bytes:fs.statSync(archiveFile).size,unpackedBytes:Object.values(moduleEntries).reduce((n,b)=>n+Buffer.byteLength(b),0),sha256:await digest(archiveFile),entry:'apps/purchase/server.mjs',dependencies:[{id:'node-runtime',range:'=24.18.0'}]}].map(spec=>({...spec,url:'https://github.com/907609732/wucheng-ecommerce-erp-v2/releases/download/test/'+spec.archive}));
+ if(warehouse){
+  const browserFile=path.join(dir,'browser.zip');await archive(browserFile,{'chrome.exe':'test browser'});
+  const browser={...base,id:'browser-runtime',version:'1.0.0',archive:'browser.zip',kind:'runtime',entry:'chrome.exe',bytes:fs.statSync(browserFile).size,unpackedBytes:12,sha256:await digest(browserFile),url:'https://github.com/907609732/cainiao-inventory-codex/releases/download/test/browser.zip'};
+  specs[1]={...specs[1],id:'warehouse',kind:'electron',entry:'apps/warehouse/runtime/resources/app.asar',url:'https://github.com/907609732/cainiao-inventory-codex/releases/download/test/warehouse.zip',dependencies:[{id:'node-runtime',range:'=24.18.0'},{id:'browser-runtime',range:'=1.0.0'}]};specs.push(browser);manifest.modules.warehouse.version='1.0.0';manifest.vendor.components.push(browser);manifest.payloadHashes['vendor/browser.zip']=browser.sha256;
+  const updated=JSON.stringify(manifest);fs.writeFileSync(path.join(resources,'agent-beta-resources.json'),updated);
+ }
+ const actualManifestSha256=sha(fs.readFileSync(path.join(resources,'agent-beta-resources.json')));fs.writeFileSync(path.join(resources,'desktop/business-host/packaged-manifest.json'),JSON.stringify({sha256:actualManifestSha256}));
  const {publicKey,privateKey}=generateKeyPairSync('ed25519'),keys={test:publicKey.export({format:'pem',type:'spki'})};
- const payload=Buffer.from(JSON.stringify({schemaVersion:1,preview:true,version:'0.11.8',releaseManifestSha256:manifestSha256,packages:specs}));
+ const payload=Buffer.from(JSON.stringify({schemaVersion:1,preview:true,version:'0.11.8',releaseManifestSha256:actualManifestSha256,packages:specs}));
  const envelope={format:'lingtu-catalog/v1',keyId:'test',payload:payload.toString('base64'),signature:sign(null,payload,privateKey).toString('base64')},catalogBytes=JSON.stringify(envelope);
- fs.writeFileSync(path.join(resources,'component-catalog.json'),catalogBytes);fs.writeFileSync(path.join(resources,'on-demand.json'),JSON.stringify({format:'lingtu-on-demand/v1',version:'0.11.8',manifestSha256,catalogSha256:sha(catalogBytes)}));
- const calls=[],fetchImpl=async(url,options)=>{calls.push({url,range:options.headers?.Range});const file=url.endsWith('node.zip')?nodeFile:archiveFile;return new Response(fs.readFileSync(file),{status:200});};
+ fs.writeFileSync(path.join(resources,'component-catalog.json'),catalogBytes);fs.writeFileSync(path.join(resources,'on-demand.json'),JSON.stringify({format:'lingtu-on-demand/v1',version:'0.11.8',manifestSha256:actualManifestSha256,catalogSha256:sha(catalogBytes)}));
+ const calls=[],fetchImpl=async(url,options)=>{calls.push({url,range:options.headers?.Range});const file=url.endsWith('browser.zip')?path.join(dir,'browser.zip'):url.endsWith('node.zip')?nodeFile:archiveFile;return new Response(fs.readFileSync(file),{status:200});};
  return {dir,paths,resources,manifestSha256,keys,fetchImpl,calls,archiveFile,nodeFile,specs};
 }
 
@@ -69,4 +76,18 @@ test('Range resumes partial bytes; a server ignoring Range restarts safely; inva
  fs.writeFileSync(file,'abc');await downloadPackage(spec,file,{fetchImpl:async(_url,options)=>{assert.equal(options.headers.Range,'bytes=3-');return new Response('def',{status:206,headers:{'content-range':'bytes 3-5/6'}});}});assert.equal(fs.readFileSync(file,'utf8'),'abcdef');
  fs.writeFileSync(file,'abc');await downloadPackage(spec,file,{fetchImpl:async()=>new Response('abcdef',{status:200})});assert.equal(fs.readFileSync(file,'utf8'),'abcdef');
  fs.writeFileSync(file,'abc');await assert.rejects(downloadPackage(spec,file,{fetchImpl:async()=>new Response('def',{status:206,headers:{'content-range':'bytes 0-2/6'}})}),{code:'INVALID_RANGE'});assert.equal(fs.readFileSync(file,'utf8'),'abc');
+});
+
+
+test('optional warehouse never downloads on startup/open; explicit install survives restart and detects corruption',async t=>{
+ const f=await fixture(t,{warehouse:true});const ledger=path.join(f.paths.data,'warehouse/workspace/data/erp.sqlite');fs.mkdirSync(path.dirname(ledger),{recursive:true});fs.writeFileSync(ledger,'existing synthetic ledger');
+ const options={paths:f.paths,resourcesDir:f.resources,hostVersion:'0.11.8',publicKeys:f.keys,fetchImpl:f.fetchImpl,isBusy:()=>false};
+ const manager=await createOnDemandComponents(options);
+ assert.equal((await manager.status('warehouse')).installed,false);assert.equal(f.calls.length,0);
+ await assert.rejects(manager.ensure('warehouse'),{code:'MODULE_NOT_INSTALLED'});assert.equal(f.calls.length,0);
+ assert.ok(manager.plan('warehouse').bytes>0);
+ await manager.ensure('warehouse',{install:true});assert.equal(f.calls.length,3);assert.equal((await manager.status('warehouse')).installed,true);
+ const restarted=await createOnDemandComponents(options);assert.equal((await restarted.status('warehouse')).installed,true);await restarted.ensure('warehouse');assert.equal(f.calls.length,3);
+ const registry=JSON.parse(fs.readFileSync(f.paths.registryFile));fs.writeFileSync(path.join(registry.warehouse.root,'resources/app.asar'),'corrupted');
+ assert.equal((await restarted.status('warehouse')).installed,false);await assert.rejects(restarted.ensure('warehouse'),{code:'MODULE_NOT_INSTALLED'});assert.equal(fs.readFileSync(ledger,'utf8'),'existing synthetic ledger');
 });

@@ -1,6 +1,7 @@
 import {hostError} from './common.mjs';
 import {WORKBENCH_MODULES} from '../workbench/actor.mjs';
 const allowed=new Set([
+  'extension:status','extension:plan','extension:install','extension:cancel',
   'business:status','business:backup','business:review','launcher:ready','launcher:preferences','launcher:preferences-save','launcher:integration-config','launcher:copy-integration','launcher:update-check',
   'diagnostics:read','diagnostics:copy','diagnostics:export','diagnostics:open-folder','diagnostics:event','links:open',
   'connection:get','connection:status','connection:check','connection:network-plan','connection:save','connection:cached',

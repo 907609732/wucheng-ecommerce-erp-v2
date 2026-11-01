@@ -59,7 +59,7 @@ export function verifyCatalog(envelope, publicKeys, {hostVersion, platform = pro
     if (!['service', 'electron', 'runtime'].includes(p.kind)) throw fail('INVALID_CATALOG', '扩展类型无效');
     const url = new URL(p.url);
     if (url.protocol !== 'https:' || url.hostname !== 'github.com' ||
-        !url.pathname.startsWith('/907609732/wucheng-ecommerce-erp-v2/releases/download/') ||
+        !['/907609732/wucheng-ecommerce-erp-v2/releases/download/', ...(p.id==='warehouse'||p.id==='browser-runtime'?['/907609732/cainiao-inventory-codex/releases/download/','/907609732/cainiao-inventory/releases/download/']:[])].some(prefix=>url.pathname.startsWith(prefix)) ||
         url.username || url.password) throw fail('INVALID_URL', '扩展下载地址不属于官方发布仓库');
     for (const d of p.dependencies) {
       if (!MODULE_IDS.includes(d.id) || !semver.validRange(d.range)) throw fail('INVALID_CATALOG', '扩展依赖信息无效');

@@ -1,4 +1,5 @@
 import {loadingMarkup} from '../shared/loading-screen.mjs';
+import {createExtensionInstaller} from './extension-installer.mjs';
 import {BUSINESS_MODULES,TAB_MODULE_IDS} from './business-modules.mjs';
 const labels={...Object.fromEntries(BUSINESS_MODULES.map(module=>[module.id,module.short])),exporter:'订单导出'};
 const primary=[...TAB_MODULE_IDS];
@@ -11,6 +12,7 @@ export function createBusinessWorkspace({launcher=window.launcher,loading,showEr
   let active='overview',visible=false,nativeVisible=false,opening=false,failed=false,epoch=0,measureEpoch=0,lastBounds='',disposed=false,suspended=false;
   try{const last=localStorage.getItem('wucheng.workbench.lastPrimary');if(primary.includes(last))active=last;}catch{}
   const covered=()=>suspended||document.hidden||$('business-review-dialog').open;
+  const extension=typeof launcher.extensionStatus==='function'?createExtensionInstaller({launcher,beforeShow:async()=>{suspended=true;await hideNative();},afterClose:async()=>{suspended=false;await measure();}}):null;
 
   function updateLabels(){for(const tab of tabs){const selected=tab.dataset.desk===active;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;}if(primary.includes(active)){surface.setAttribute('aria-labelledby','desk-tab-'+active);surface.removeAttribute('aria-label');}else{surface.removeAttribute('aria-labelledby');surface.setAttribute('aria-label',labels[active]);}}
   function changeActive(id){active=id;if(primary.includes(id))try{localStorage.setItem('wucheng.workbench.lastPrimary',id);}catch{}updateLabels();}
@@ -27,6 +29,7 @@ export function createBusinessWorkspace({launcher=window.launcher,loading,showEr
 
   async function openDesk(id,route){
     if(!Object.hasOwn(labels,id)||disposed)return;
+    if(id==='warehouse'&&extension){try{if(!(await extension.request()))return {cancelled:true};}catch(error){showError(error);return {cancelled:true};}}
     if(id===active&&nativeVisible&&!opening&&!failed&&!route){await measure();return {opened:true,id,cached:true};}
     if(route&&active===id&&nativeVisible&&!confirm('即将定位到新的'+labels[id]+'页面。请先确认当前表单已经保存，再继续。'))return;
     const mine=++epoch;preparingId=id;opening=true;failed=false;
@@ -64,5 +67,5 @@ export function createBusinessWorkspace({launcher=window.launcher,loading,showEr
   const visibilityChanged=()=>{if(visible)scheduleMeasure();};document.addEventListener('visibilitychange',visibilityChanged);
   async function suspend(){suspended=true;++epoch;opening=false;await launcher.hide();nativeVisible=false;lastBounds='';$('business-loading').replaceChildren();}
   async function resume(){suspended=false;await measure();}
-  updateLabels();return {show,leave,measure,suspend,resume,active:()=>active,dispose(){disposed=true;observer.disconnect();if(measurementFrame!==null)cancelAnimationFrame(measurementFrame);document.removeEventListener('visibilitychange',visibilityChanged);unsubscribe?.();unsubscribeInvalidated?.();unsubscribeProgress?.();}};
+  updateLabels();return {show,leave,measure,suspend,resume,active:()=>active,dispose(){disposed=true;extension?.dispose();observer.disconnect();if(measurementFrame!==null)cancelAnimationFrame(measurementFrame);document.removeEventListener('visibilitychange',visibilityChanged);unsubscribe?.();unsubscribeInvalidated?.();unsubscribeProgress?.();}};
 }

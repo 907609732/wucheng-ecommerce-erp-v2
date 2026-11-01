@@ -5,12 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {digest} from '../../desktop/modules/package-format.mjs';
 import {suiteSourceDigests,suiteSourceDigest} from '../suite-source-digests.mjs';
 import {globalSourceHash} from '../agent-beta-coverage.mjs';
+import {warehouseSource} from './warehouse-extension.mjs';
 import {affectedUnits,TEST_UNITS} from './verification-config.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..'),level=process.argv[2];
 if(!['quick','integration','release'].includes(level))throw Error('Use quick, integration or release');
 const directory=path.join(root,'.codex-artifacts/engineering','verify-'+level+'-'+Date.now());fs.mkdirSync(directory,{recursive:true});
-const source={business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()};
+const source={warehouseExtension:warehouseSource().sha256,business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()};
 const report={level,source,startedAt:new Date().toISOString(),phases:[],ok:false};
 function phase(name,command,args){
  const started=Date.now(),log=path.join(directory,name+'.log'),fd=fs.openSync(log,'wx');let result;
@@ -37,7 +38,7 @@ try{
   for(const name of ['cleanInstall','upgrade','rollback','fiveModules','ledgerReadWrite','mcp','cli','downloadFailures','publicAssets'])if(evidence.checks?.[name]!==true)throw Error('Required release acceptance missing: '+name);
   report.installer=candidate.installer;
  }
- const finalSource={business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()};
+ const finalSource={warehouseExtension:warehouseSource().sha256,business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()};
  if(JSON.stringify(finalSource)!==JSON.stringify(source))throw Error('Source changed during verification; rerun for current source');
  report.ok=true;
 }catch(error){report.error=error.message;process.exitCode=1;}

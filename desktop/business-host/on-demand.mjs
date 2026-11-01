@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {PRODUCT_MODULE_IDS,productModule} from '../product/modules.mjs';
+import {PRODUCT_MODULE_IDS,OPTIONAL_MODULE_IDS,productModule} from '../product/modules.mjs';
+import {deferredWarehouseFile} from '../product/extension-layout.mjs';
 import {digest,verifyCatalog,downloadPackage,extractZip,inside,fail} from '../modules/package-format.mjs';
 import {atomicJson} from './common.mjs';
 import {assertPreviewPaths} from './isolation.mjs';
@@ -35,7 +36,7 @@ export async function createOnDemandComponents({paths,resourcesDir,hostVersion,p
   physical(root);physical(archives);physical(res);fs.mkdirSync(archives,{recursive:true});fs.mkdirSync(res,{recursive:true});
   physical(manifestFile);physical(path.join(res,'agent-beta-resources.json'));fs.copyFileSync(manifestFile,path.join(res,'agent-beta-resources.json'));
   // Verify only shipped host files here. Unused modules are absent by design.
-  const hostManifest={...manifest,payloadHashes:Object.fromEntries(Object.entries(manifest.payloadHashes).filter(([rel])=>!rel.startsWith('apps/')&&!rel.startsWith('vendor/')&&!rel.startsWith('dependency-layers/')))};
+  const hostManifest={...manifest,payloadHashes:Object.fromEntries(Object.entries(manifest.payloadHashes).filter(([rel])=>!rel.startsWith('apps/')&&!rel.startsWith('vendor/')&&!rel.startsWith('dependency-layers/')&&!deferredWarehouseFile(rel)&&!(descriptor.hostDependencyPaths&&rel.startsWith('node_modules/')&&!descriptor.hostDependencyPaths.some(key=>rel.startsWith(key+'/')&&!('/'+rel.slice(key.length+1)).includes('/node_modules/')))))};
   await verifyActivationResources(resourcesDir,hostManifest,{signal,onProgress});
   let queue=Promise.resolve();const pending=new Map(),controllers=new Map(),ready=new Set();
   async function materialize(spec,id,abort){
@@ -77,9 +78,51 @@ export async function createOnDemandComponents({paths,resourcesDir,hostVersion,p
       physical(stage);fs.rmSync(stage,{recursive:true,force:true});
     }
   }
-  function ensure(id){
+  async function installed(id){
+    if(!PRODUCT_MODULE_IDS.includes(id))throw fail('UNKNOWN_MODULE','未知业务模块');
+    const spec=catalog.packages.find(value=>value.id===id);
+    try{
+      const receiptFile=path.join(paths.profile,'agent-beta-activation-'+id+'.json');physical(receiptFile);
+      const receipt=JSON.parse(fs.readFileSync(receiptFile,'utf8'));
+      const registry=JSON.parse(fs.readFileSync(paths.registryFile,'utf8'));
+      if(receipt.manifestSha256!==descriptor.manifestSha256||registry[id]?.version!==spec?.version||
+        JSON.stringify({[id]:registry[id]})!==JSON.stringify(receipt.registryRecords))return false;
+      const programs=Object.entries(receipt.programs||{});if(!programs.length)return false;
+      for(const [rel,files]of programs){
+        const directory=inside(paths.programs,rel.replaceAll('\\','/'));physical(directory);
+        for(const [file,sha]of Object.entries(files)){
+          const target=inside(directory,file);physical(target);if(await digest(target)!==sha)return false;
+        }
+      }
+      const runtime=manifest.modules[id]?.runtime;
+      if(runtime&&await digest(path.join(registry[id].root,'resources/app.asar'))!==runtime.sha256)return false;
+      if(runtime){
+        const prefix='apps/'+id+'/';
+        for(const [rel,sha]of Object.entries(manifest.payloadHashes).filter(([rel])=>rel.startsWith(prefix))){
+          const target=inside(path.dirname(registry[id].root),rel.slice(prefix.length));physical(target);
+          if(await digest(target)!==sha)return false;
+        }
+      }
+      return true;
+    }catch(error){if(signal?.aborted)throw error;return false;}
+  }
+  async function status(id){
+    const valid=await installed(id);if(valid)ready.add(id);else ready.delete(id);
+    const spec=catalog.packages.find(value=>value.id===id);
+    const record=JSON.parse(fs.readFileSync(paths.registryFile,'utf8'))[id];
+    const needsUpdate=!valid&&!!record?.version;
+    return {id,installed:valid,needsUpdate,state:pending.has(id)?'installing':valid?'installed':needsUpdate?'update-required':'not-installed',version:spec?.version,available:!!spec};
+  }
+  function plan(id){
+    const keys=[...productModule(id).dependencies,id];
+    const packages=keys.map(key=>catalog.packages.find(value=>value.id===key));
+    if(packages.some(value=>!value))throw fail('MODULE_UNAVAILABLE','尚无兼容的扩展版本');
+    return {id,version:packages.at(-1).version,packages,bytes:packages.reduce((sum,p)=>sum+p.bytes,0)};
+  }
+  function ensure(id,{install=false}={}){
     if(!PRODUCT_MODULE_IDS.includes(id))return Promise.reject(fail('UNKNOWN_MODULE','未知业务模块'));
     if(ready.has(id))return Promise.resolve({ready:true,reused:true,installed:[id]});
+    if(OPTIONAL_MODULE_IDS.includes(id)&&!install)return Promise.reject(fail('MODULE_NOT_INSTALLED','菜鸟云仓扩展待安装，请在左侧云仓入口下载并安装'));
     if(pending.has(id))return pending.get(id);
     const controller=new AbortController();controllers.set(id,controller);
     const abort=AbortSignal.any([controller.signal,...(signal?[signal]:[])]);
@@ -102,5 +145,6 @@ export async function createOnDemandComponents({paths,resourcesDir,hostVersion,p
     }).catch(error=>{onProgress({id,phase:abort.aborted?'cancelled':'error',error:error.message,code:error.code});throw error;}).finally(()=>{pending.delete(id);controllers.delete(id);});
     queue=job.catch(()=>{});pending.set(id,job);return job;
   }
-  return {ensure,pending,cancel(id){controllers.get(id)?.abort();},catalog,descriptor,ready};
+  for(const id of OPTIONAL_MODULE_IDS)await status(id);
+  return {ensure,status,plan,pending,cancel(id){controllers.get(id)?.abort();return {cancelled:controllers.has(id)};},catalog,descriptor,ready};
 }
