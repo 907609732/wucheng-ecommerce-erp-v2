@@ -14,7 +14,7 @@ for(const item of inputs.inventory){if(!item.path.startsWith(prefix))continue;co
 // than an ordinary import from the visible window. Missing roots fail closed.
 for(const rel of ['desktop/business-interface/index.mjs','desktop/shared/workbench-mcp-runtime.mjs','desktop/shared/business-service-client.mjs','desktop/shared/business-service-host.mjs','desktop/shared/business-service-worker.mjs','apps/purchase/lib/agent-adapter.mjs','apps/sales/lib/agent-adapter.mjs','apps/overview/lib/agent-adapter.mjs','apps/exporter/src/main/agent-adapter.mjs']){const file=path.join(base,rel);if(!fs.existsSync(file))throw Error('Required business trace root missing: '+rel);if(!entries.includes(file))entries.push(file);}
 const started=Date.now();console.log(JSON.stringify({tool:'@vercel/nft',version:'1.11.0',entries:entries.length}));
-const trace=await nft.nodeFileTrace(entries,{base,processCwd:base,mixedModules:true,moduleSyncCatchall:true,fileIOConcurrency:128,resolve:(id,parent,job,cjs)=>id==='electron'?'node:electron':nft.resolve(id,parent,job,cjs)});
+const trace=await nft.nodeFileTrace(entries,{base,processCwd:base,mixedModules:true,moduleSyncCatchall:true,fileIOConcurrency:128,ignore:rel=>path.isAbsolute(rel),resolve:(id,parent,job,cjs)=>id==='electron'?'node:electron':nft.resolve(id,parent,job,cjs)});
 const files=new Set([...trace.fileList].map(file=>file.replaceAll('\\','/'))),kept=[],removed=[],groups={};
 for(const item of inputs.inventory){const rel=item.path.startsWith(prefix)?item.path.slice(prefix.length):null;const dependency=rel?.split('/').includes('node_modules');const license=/(?:^|\/)(?:licen[cs]e|notice|copying|copyright)(?:[.-][^/]*)?$/i.test(item.path);
  const retain=!dependency||files.has(rel)||license;(retain?kept:removed).push(item);
