@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {loadActivatedBusinessAdapter} from './activated-adapters.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {fromJsonSchema} from '@modelcontextprotocol/server';
 import {WORKBENCH_MODULES} from '../workbench/actor.mjs';
@@ -29,9 +30,9 @@ export async function createBusinessInterface({paths,services,identity,storeDir=
  const transport=providedTransport||createBusinessModuleTransport({services,resolveActor:id=>identity.resolveActor(id),validateApproval:validApproval,artifactRoot:path.join(storeDir,'requests')});
  const adapters=providedAdapters||await Promise.all([
   import('../workbench/warehouse-agent.mjs').then(m=>m.createWarehouseAgentAdapter({transport})),
-  import('../../apps/purchase/lib/agent-adapter.mjs').then(m=>m.createPurchaseAgentAdapter({transport})),
-  import('../../apps/sales/lib/agent-adapter.mjs').then(m=>m.createSalesAgentAdapter({transport})),
-  import('../../apps/overview/lib/agent-adapter.mjs').then(m=>m.createOverviewAgentAdapter({transport})),
+  loadActivatedBusinessAdapter('purchase',services,transport),
+  loadActivatedBusinessAdapter('sales',services,transport),
+  loadActivatedBusinessAdapter('overview',services,transport),
   import('../../apps/exporter/src/main/agent-adapter.mjs').then(m=>m.createExporterAgentAdapter({transport}))
  ]);
  const modules=new Map(adapters.map(adapter=>[adapter.id,adapter]));
