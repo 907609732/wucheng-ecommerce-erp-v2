@@ -23,7 +23,7 @@ export async function createAgentHost({paths,services,safeStorage,principal,iden
     return result.prepared.some(step=>step.module===id&&step.capabilityId===claims.capabilityId&&step.changeDigest===claims.changeDigest&&step.binding.dataSetId===claims.dataSetId&&JSON.stringify(step.binding.revision)===JSON.stringify(claims.revision));
   }
   const transport=createAgentModuleTransport({services,resolveActor,validateApproval:approved,artifactRoot:path.join(storeDir,'tasks')});
-  const dependencies=runtimeFactory?{runtimeFactory,adapters:adapters||[],engines:engines||{},createBackups}:await loadDependencies({transport,engineResourceDir});
+  const dependencies=runtimeFactory?{runtimeFactory,adapters:adapters||[],engines:engines||{},createBackups}:await loadDependencies({transport,engineResourceDir,componentRoots:Object.fromEntries(['purchase','sales','overview'].map(id=>[id,services.config(id).root]))});
   const adapterMap=new Map(dependencies.adapters.map(adapter=>[adapter.id,adapter]));
   const backupHooks=dependencies.createBackups?.({paths:{...paths,registry:paths.registryFile},services,storeDir,resolveActor,getCompanyIdentity,binding:async(id,ctx)=>{const adapter=adapterMap.get(id);if(!adapter)throw hostError('MODULE_UNAVAILABLE','此模块尚未接入备份绑定',503);return adapter.binding(ctx);}})||{};
   const systemKeyFile=path.join(hostDir,'.agent-approval-key');

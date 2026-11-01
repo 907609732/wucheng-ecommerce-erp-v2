@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 
 function installedExecutables(name){
@@ -11,11 +12,12 @@ export async function selectCompatibleCodex({createEngine,nodeExecutable,appData
   for(const candidate of candidates){const engine=createEngine({...candidate,nodeExecutable,...engineOptions});let status;try{status=await engine.check();}catch{status={available:false,code:'CODEX_CHECK_FAILED'};}checks.push({source:candidate.source,...status});if(status.available)return engine;}
   const unavailable=createEngine({nodeExecutable,...engineOptions}),check=unavailable.check;unavailable.check=async()=>({...await check(),candidates:checks});return unavailable;
 }
-export async function composeAgentDependencies({transport,nodeExecutable=process.execPath,engineResourceDir}={}){
+export async function composeAgentDependencies({transport,nodeExecutable=process.execPath,engineResourceDir,componentRoots}={}){
+  const adapter=(id,relative,fallback)=>componentRoots?.[id]?import(pathToFileURL(path.join(componentRoots[id],relative)).href):import(fallback);
   const [runtime,codex,hermes,warehouse,purchase,sales,overview,exporter,backups]=await Promise.all([
     import('../agent-runtime/index.mjs'),import('../agent-runtime/codex-engine.mjs'),import('../agent-runtime/hermes-engine.mjs'),
-    import('../workbench/warehouse-agent.mjs'),import('../../apps/purchase/lib/agent-adapter.mjs'),import('../../apps/sales/lib/agent-adapter.mjs'),
-    import('../../apps/overview/lib/agent-adapter.mjs'),import('../../apps/exporter/src/main/agent-adapter.mjs'),import('./backups.mjs')
+    import('../workbench/warehouse-agent.mjs'),adapter('purchase','lib/agent-adapter.mjs','../../apps/purchase/lib/agent-adapter.mjs'),adapter('sales','lib/agent-adapter.mjs','../../apps/sales/lib/agent-adapter.mjs'),
+    adapter('overview','lib/agent-adapter.mjs','../../apps/overview/lib/agent-adapter.mjs'),import('../../apps/exporter/src/main/agent-adapter.mjs'),import('./backups.mjs')
   ]);
   const engineOptions=engineResourceDir?{mcpEntryPath:path.join(engineResourceDir,'mcp-entry.mjs')}:{},codexEngine=await selectCompatibleCodex({createEngine:codex.createCodexEngine,nodeExecutable,engineOptions});
   const hermesRoot=path.join(process.env.LOCALAPPDATA||'','hermes','hermes-agent'),python=path.join(hermesRoot,'venv','Scripts','python.exe');

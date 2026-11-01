@@ -23,7 +23,7 @@ export function initializePreviewLedgers({paths,resourcesDir,manifest={format:AG
     if(fs.existsSync(target)){if(!fs.statSync(target).isDirectory()||fs.readdirSync(target).length)throw Error('预览目录已有文件但缺少账本，已保留现场：'+id);fs.rmdirSync(target);}
     const staging=fs.mkdtempSync(path.join(paths.data,'.preview-'+id+'-'));
     let code;
-    if(['purchase','sales','overview'].includes(id)){const entry=resource(res,executionPrefix+'apps/'+id+'/lib/'+(id==='sales'?'db.mjs':'store.mjs'));code=`const {openStore}=await import(${JSON.stringify(entry)});const store=openStore(process.env.LINGTU_PREVIEW_LEDGER_DIR);store.close();`;}
+    if(['purchase','sales','overview'].includes(id)){const entry=manifest.dependencyLayers?resource(registry[id].root,'lib/'+(id==='sales'?'db.mjs':'store.mjs')):resource(res,executionPrefix+'apps/'+id+'/lib/'+(id==='sales'?'db.mjs':'store.mjs'));code=`const {openStore}=await import(${JSON.stringify(entry)});const store=openStore(process.env.LINGTU_PREVIEW_LEDGER_DIR);store.close();`;}
     else if(id==='warehouse'){const entry=resource(res,executionPrefix+'core/erp/db.js');code=`const {getDb,closeDb}=await import(${JSON.stringify(entry)});getDb();closeDb();`;}
     else{const entry=resource(res,'apps/exporter/out/main/preview-ledger.js');code=`const {initializeEmptyPreviewExporter}=await import(${JSON.stringify(entry)});initializeEmptyPreviewExporter(process.env.LINGTU_PREVIEW_LEDGER_DIR);`;}
     const result=spawnSync(node,['--input-type=module','-e',code],{cwd:res,env:{...process.env,LINGTU_AGENT_PREVIEW:'1',LINGTU_PREVIEW_LEDGER_DIR:staging,CAINIAO_APP_DATA_DIR:path.join(staging,'workspace'),ERP_DATA_DIR:path.join(staging,'workspace','data')},encoding:'utf8',windowsHide:true,shell:false,timeout:60000,maxBuffer:1024*1024});

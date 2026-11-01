@@ -14,6 +14,7 @@ test('preview direct transport avoids the legacy ZIP32 limit and retains the nor
  const options=previewInstallerOptions('reviewed-direct-files.nsh');
  assert.equal(options.useZip,false);assert.equal(options.differentialPackage,false);assert.equal(options.include,'reviewed-direct-files.nsh');
  assert.equal(options.deleteAppDataOnUninstall,false);assert.equal(options.perMachine,false);
+ assert.equal(options.runAfterFinish,false);assert.equal(options.allowElevation,false);
 });
 
 test('preview requires a successful strict scan bound to the exact source and stage',()=>{
@@ -49,6 +50,7 @@ test('preview layout retains all business pages, production dependencies, actual
 test('direct installer uses the upstream file branch and rejects NSIS path injection',t=>{
  const input=fixture(t),file=createPreviewInstallerInclude(path.dirname(input.stage),input.prepackaged);
  assert.match(fs.readFileSync(file,'utf8'),/!define APP_BUILD_DIR/);
+ assert.match(fs.readFileSync(file,'utf8'),/!macro customInit[\s\S]*\$\{Silent\}[\s\S]*setInstallModePerUser/);
  assert.throws(()=>createPreviewInstallerInclude(path.dirname(input.stage),input.prepackaged+'$injected'),/Invalid direct installer path/);
 });
 test('legacy layouts and gateway clones cannot be silently omitted from a new runtime',t=>{

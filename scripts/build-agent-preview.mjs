@@ -111,13 +111,21 @@ export function thinHostLock(pkg){return {name:pkg.name,version:pkg.version,lock
 // ZIP32 entry limit once directory entries are counted. Use the upstream
 // installApplicationFiles APP_BUILD_DIR branch instead (native NSIS File /r).
 // It writes each file directly while retaining the normal upgrade/uninstaller.
-export function previewInstallerOptions(include){return {oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,useZip:false,differentialPackage:false,include};}
+export function previewInstallerOptions(include){return {oneClick:false,perMachine:false,allowElevation:false,allowToChangeInstallationDirectory:false,deleteAppDataOnUninstall:false,useZip:false,differentialPackage:false,runAfterFinish:false,include};}
 export function createPreviewInstallerInclude(output,prepackaged){
  if(!path.isAbsolute(output)||!path.isAbsolute(prepackaged)||/[\r\n"$]/.test(prepackaged))throw Error('Invalid direct installer path');
  const upstream=fs.readFileSync(path.join(root,'node_modules/app-builder-lib/templates/nsis/include/installer.nsh'),'utf8');
  if(!upstream.includes('!ifdef APP_BUILD_DIR')||!upstream.includes('File /r "${APP_BUILD_DIR}\\*.*"'))throw Error('Upstream direct NSIS installation branch requires review');
+ let longestFile=0,longestDirectory=0;
+ function measure(directory,relative=''){for(const entry of fs.readdirSync(directory,{withFileTypes:true})){if(entry.isSymbolicLink())throw Error('Linked NSIS source forbidden');const rel=relative?relative+'/'+entry.name:entry.name;if(entry.isDirectory()){longestDirectory=Math.max(longestDirectory,rel.length);measure(path.join(directory,entry.name),rel);}else if(entry.isFile())longestFile=Math.max(longestFile,rel.length);}}
+ measure(prepackaged);
+ // This NSIS runtime can silently omit files beneath an overlong /D override.
+ // Reject such destinations before writing anything, including in silent mode.
+ const maxRoot=Math.min(249-longestFile,239-longestDirectory);
+ if(maxRoot<30)throw Error('NSIS payload paths are too deep for a safe installation');
  const file=path.join(output,'preview-direct-files.nsh');
- fs.writeFileSync(file,'; Native NSIS file installation, without temporary archive extraction.\n!define APP_BUILD_DIR "'+prepackaged.replaceAll('\\','/')+'"\n',{flag:'wx'});return file;
+ const guard='\n!ifndef BUILD_UNINSTALLER\nFunction PreviewCheckInstallPath\n  Push $0\n  StrLen $0 "$INSTDIR"\n  IntCmp $0 '+maxRoot+' preview_path_ok preview_path_ok preview_path_long\n  preview_path_long:\n    SetErrorLevel 3\n    IfSilent preview_path_abort\n    MessageBox MB_ICONSTOP|MB_OK "Installation path is too long. Use the default preview folder or a shorter /D= path."\n  preview_path_abort:\n    Quit\n  preview_path_ok:\n    Pop $0\nFunctionEnd\n!endif\n';
+ fs.writeFileSync(file,'; Native NSIS file installation, without temporary archive extraction.\n!define APP_BUILD_DIR "'+prepackaged.replaceAll('\\','/')+'"\n'+guard+'\n; A plain /S must never wait for an install-mode page or request elevation.\n!macro customInit\n  ${If} ${Silent}\n    StrCpy $hasPerMachineInstallation "0"\n    StrCpy $hasPerUserInstallation "1"\n  ${EndIf}\n  !insertmacro setInstallModePerUser\n  Call PreviewCheckInstallPath\n!macroend\n',{flag:'wx'});return file;
 }
 function copyTree(source,dest){
  fs.cpSync(source,dest,{recursive:true,filter:file=>{
