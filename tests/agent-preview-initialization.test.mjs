@@ -55,3 +55,16 @@ test('activation verifies external gateway bytes before first or reused initiali
  await assert.doesNotReject(verifyActivationResources(resources,manifest));fs.writeFileSync(file,'export const store=2;');await assert.rejects(verifyActivationResources(resources,manifest),/资源摘要不符/);
  await assert.rejects(verifyActivationResources(resources,{payloadHashes:{'workbench-gateway/../../outside.mjs':'0'.repeat(64)}}),/资源路径无效/);
 });
+
+test('compact fresh ledgers import activated stores with dependencies absent from installation',t=>{
+ const {local,paths}=fixture(t);prepareAgentProfile(paths);const registry=assertAgentRegistry(paths),resources=path.join(local,'resources');fs.mkdirSync(resources);const node=path.join(paths.programs,'node-runtime','node.exe');fs.mkdirSync(path.dirname(node),{recursive:true});fs.copyFileSync(process.execPath,node);
+ for(const id of ['warehouse','exporter']){const file=path.join(paths.data,id,id==='warehouse'?'workspace/data/erp.sqlite':'orders.sqlite');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'existing-fixture');}
+ for(const id of ['purchase','sales','overview']){
+  const root=registry[id].root;fs.mkdirSync(path.join(root,'lib'),{recursive:true});fs.mkdirSync(path.join(root,'node_modules','activated-only'),{recursive:true});fs.writeFileSync(path.join(root,'package.json'),'{"type":"module"}');fs.writeFileSync(path.join(root,'node_modules/activated-only/package.json'),'{"type":"module","main":"index.js"}');fs.writeFileSync(path.join(root,'node_modules/activated-only/index.js'),'export const value=123;');
+  const name=id==='sales'?'db.mjs':'store.mjs',db=id==='purchase'?'purchases.sqlite':id+'.sqlite';fs.writeFileSync(path.join(root,'lib',name),`import {value} from 'activated-only';import {DatabaseSync} from 'node:sqlite';import path from 'node:path';export function openStore(dir){const db=new DatabaseSync(path.join(dir,${JSON.stringify(db)}));db.exec('CREATE TABLE probe(value INTEGER)');db.prepare('INSERT INTO probe VALUES (?)').run(value);return db;}`);
+  const installed=path.join(resources,'apps',id,'lib');fs.mkdirSync(installed,{recursive:true});fs.writeFileSync(path.join(installed,name),"throw Error('unexpanded installation store must not load')");assert(!fs.existsSync(path.join(resources,'apps',id,'node_modules')));
+ }
+ for(const c of Object.values(registry))c.nodePath=node;fs.writeFileSync(paths.registryFile,JSON.stringify(registry));
+ const result=initializePreviewLedgers({paths,resourcesDir:resources,manifest:{format:AGENT_RESOURCE_FORMAT_V2,dependencyLayers:{format:1}}});assert.deepEqual(result.created,['purchase','sales','overview']);
+ for(const id of result.created){const db=new DatabaseSync(path.join(paths.data,id,id==='purchase'?'purchases.sqlite':id+'.sqlite'),{readOnly:true});assert.equal(db.prepare('SELECT value FROM probe').get().value,123);db.close();}
+});
