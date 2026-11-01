@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from '../desktop/agent-host/business-surface.mjs';
-import {assertLauncherOperationAllowed} from '../desktop/agent-host/launcher-policy.mjs';
+import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from '../desktop/business-host/business-surface.mjs';
+import {assertLauncherOperationAllowed} from '../desktop/business-host/launcher-policy.mjs';
 
 const draft=()=>({dirty:true,busy:false,canSave:false,persistence:'memory-only',openForms:[{id:'bill-form',kind:'bill-form',recordId:null,open:true,dirty:true}]});
 const context=()=>({module:'overview',route:'overview',period:'2026-10',basis:'来源记录日期',confirmed:true,selectionMode:'current-filter',selectedIds:[],recordCount:0,filters:{grain:'month',bucket:'all',search:'',allPeriods:false},sourceLocator:null});

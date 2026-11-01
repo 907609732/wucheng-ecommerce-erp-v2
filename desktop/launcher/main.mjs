@@ -27,30 +27,29 @@ import {runRemoteCommand} from '../workbench-client/cli.mjs';
 import {tailscaleHost} from '../workbench-client/gateway-lifecycle.mjs';
 import {collectMigrationSource,freezeMigrationSource,releaseMigrationSource} from '../workbench-client/migration-source.mjs';
 import {prepareServe,enableServe} from '../workbench-client/tailscale-serve.mjs';
-import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress,assertPreviewLocalMode} from '../agent-host/isolation.mjs';
-import {createHostIdentity} from '../agent-host/identity.mjs';
-import {createAgentHost} from '../agent-host/index.mjs';
-import {assertLauncherSender,agentEnvelope} from '../agent-host/trust.mjs';
-import {saveArtifactDownload} from '../agent-host/artifacts.mjs';
-import {assertLauncherOperationAllowed,assertLegacyAgentReadOnly} from '../agent-host/launcher-policy.mjs';
-import {createDesktopUiSessions} from '../agent-host/desktop-ui-sessions.mjs';
-import {betaProcessesRunning} from '../agent-host/startup.mjs';
+import {agentBetaPaths,prepareAgentProfile,guardAgentServices,assertBetaServerAddress,assertPreviewLocalMode} from '../business-host/isolation.mjs';
+import {createHostIdentity} from '../business-host/identity.mjs';
+import {createBusinessInterface} from '../business-interface/index.mjs';
+import {assertLauncherSender} from '../business-host/trust.mjs';
+import {assertLauncherOperationAllowed} from '../business-host/launcher-policy.mjs';
+import {createDesktopUiSessions} from '../business-host/desktop-ui-sessions.mjs';
+import {betaProcessesRunning} from '../business-host/startup.mjs';
 import {createPreparationWindow,createPreparationShutdown,formatPreparationProgress} from './preparation-window.mjs';
-import {packagedAgentResources} from '../agent-host/resource-layout.mjs';
+import {packagedAgentResources} from '../business-host/resource-layout.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
-let location,agentPaths,agentHost,agentGateway,hostIdentity,agentHostStarting,packagedResources;
+let location,workbenchPaths,businessInterface,businessGateway,hostIdentity,businessInterfaceStarting,packagedResources;
 try{
   packagedResources=app.isPackaged?packagedAgentResources({resourcesPath:process.resourcesPath,launcherDirectory:here}):null;
-  agentPaths=agentBetaPaths();
-  if(packagedResources?.layout==='agent-beta-resources/v2')Object.assign(agentPaths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
+  workbenchPaths=agentBetaPaths();
+  if(packagedResources?.layout==='business-resources/v1')Object.assign(workbenchPaths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
   const registryArgument=process.argv.find(value=>value.startsWith('--registry-file='))?.slice('--registry-file='.length);
   if(registryArgument&&!path.isAbsolute(registryArgument))throw Error('注册表必须使用完整路径');
-  if(registryArgument&&path.resolve(registryArgument)!==agentPaths.registryFile)throw Error('测试版不能使用正式账本注册表');
+  if(registryArgument&&path.resolve(registryArgument)!==workbenchPaths.registryFile)throw Error('测试版不能使用正式账本注册表');
   const requestedProfile=requestedUserDataPath(process.argv);
-  if(requestedProfile&&path.resolve(requestedProfile)!==agentPaths.profile)throw Error('测试版必须使用独立用户配置');
-  location=prepareAgentProfile(agentPaths);
+  if(requestedProfile&&path.resolve(requestedProfile)!==workbenchPaths.profile)throw Error('测试版必须使用独立用户配置');
+  location=prepareAgentProfile(workbenchPaths);
 }
 catch(error){
   if(process.argv.includes('--cli')||process.argv.includes('--mcp-stdio'))process.stderr.write('工作台数据位置需要核对：'+error.message+'\n');
@@ -87,7 +86,7 @@ function launcherPreferences(){
 }
 function persistPreferences(value){fs.mkdirSync(profile,{recursive:true});const temp=preferencesFile+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2));fs.renameSync(temp,preferencesFile);}
 function configureLauncherLogin(value){
-  if(agentPaths||headless||!app.isPackaged||process.env.LINGTU_ISOLATED_TEST==='1')return;
+  if(workbenchPaths||headless||!app.isPackaged||process.env.LINGTU_ISOLATED_TEST==='1')return;
   // Normal launches resolve the authoritative Documents binding themselves. Keep
   // the Windows Run command below its documented 260-character limit instead of
   // repeating the long physical MSIX authentication profile in the command line.
@@ -108,7 +107,7 @@ function configureLauncherLogin(value){
 }
 function integrationConfiguration(){
   const args=[...(!app.isPackaged?[here]:[]),'--mcp-stdio','--user-data-dir='+profile,'--registry-file='+location.registryFile];
-  return {version:hostVersion,mcp:{mcpServers:{wucheng:{command:process.execPath,args}}},cli:{command:process.execPath,args:[...(!app.isPackaged?[here]:[]),'--cli','workbench','capabilities','--user-data-dir='+profile,'--registry-file='+location.registryFile]}};
+  return {version:hostVersion,mcp:{mcpServers:{wucheng:{command:process.execPath,args}}},cli:{command:process.execPath,args:[...(!app.isPackaged?[here]:[]),'--cli','business','capabilities','--user-data-dir='+profile,'--registry-file='+location.registryFile]}};
 }
 const connection=new ConnectionStore(profile);
 const diagnostics=createDiagnostics({profile,services:{config:id=>services.config(id),status:options=>services.status(options)},mode:()=>connection.read().mode,version:hostVersion});
@@ -137,7 +136,7 @@ const safeDecrypt=async bytes=>{
   const value=safeStorage.decryptStringAsync?await safeStorage.decryptStringAsync(bytes):safeStorage.decryptString(bytes);return typeof value==='string'?value:value.result;
 };
 function embeddedRuntime(){
-  assertPreviewLocalMode(agentPaths,{mode:'client'});
+  assertPreviewLocalMode(workbenchPaths,{mode:'client'});
   if(!embedded())throw Error('请先选择客户端与内置私网连接');
   const origin=serverAddress(connection.read().serverUrl);
   let runtime=tailnetRuntimes.get(origin);
@@ -181,7 +180,7 @@ async function changePrivateConnection(operation){
   try{return await networkChangeContext.run(networkConfigurationToken,operation);}finally{networkConfigurationToken=undefined;networkConfigurationBusy=false;}
 }
 function assertPrivateRequestAllowed(){
-  assertPreviewLocalMode(agentPaths,connection.read());
+  assertPreviewLocalMode(workbenchPaths,connection.read());
   if(networkConfigurationBusy&&networkChangeContext.getStore()!==networkConfigurationToken)throw Object.assign(Error('连接设置正在更新，请稍后重新打开模块'),{code:'CONNECTION_CHANGED'});
 }
 async function resetPrivateConnection(){
@@ -196,16 +195,16 @@ function guardPrivateSession(target){
   target.webRequest.onBeforeRequest((details,callback)=>{
     const state=connection.read(),write=!['GET','HEAD','OPTIONS'].includes(details.method);
     const migration=details.url.startsWith(state.serverUrl+'/api/workbench/v1/migrations/');
-    const agent=details.url===state.serverUrl+'/api/workbench/v1/agent/request';
+    const businessRequest=['/business/review','/business/invoke'].some(route=>details.url===state.serverUrl+'/api/workbench/v1'+route);
     const foreign=embedded()&&/^https?:/.test(details.url)&&new URL(details.url).origin!==state.serverUrl;
-    const cancel=foreign||remote()&&(state.networkSuspended||!connection.canWrite()&&write&&!migration&&!agent);
+    const cancel=foreign||remote()&&(state.networkSuspended||!connection.canWrite()&&write&&!migration&&!businessRequest);
     if(!cancel&&write)writes.add(details.id);callback({cancel});
   });
   const finished=details=>writes.delete(details.id);
   target.webRequest.onCompleted(finished);target.webRequest.onErrorOccurred(finished);
 }
 function remoteConnection(channel='ui'){
-  assertPreviewLocalMode(agentPaths,{mode:'client'});
+  assertPreviewLocalMode(workbenchPaths,{mode:'client'});
   assertPrivateRequestAllowed();
   assertBetaServerAddress(connection.read().serverUrl);
   if(transport&&transport.channel===channel)return transport;
@@ -229,23 +228,23 @@ function remoteConnection(channel='ui'){
   remoteManager=new RemoteServiceManager(transport);return transport;
 }
 function requireHost(){if(remote())throw Error('此操作仅能在主服务器执行');hostIdentity?.requireAdmin(hostIdentity.localActor(),true);}
-function betaTailnetHost(){assertPreviewLocalMode(agentPaths,{mode:'server'});const ts=tailscaleHost(),url=new URL(ts.origin);url.port='9443';return {...ts,origin:url.origin};}
-const betaServeOptions=()=>({httpsPort:9443,targetPort:agentPaths.gatewayPort});
+function betaTailnetHost(){assertPreviewLocalMode(workbenchPaths,{mode:'server'});const ts=tailscaleHost(),url=new URL(ts.origin);url.port='9443';return {...ts,origin:url.origin};}
+const betaServeOptions=()=>({httpsPort:9443,targetPort:workbenchPaths.gatewayPort});
 async function ensureGateway(){
-  requireHost();if(agentGateway)return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
+  requireHost();if(businessGateway)return {ok:true,serverId:businessGateway.serverId,dataSetId:businessGateway.dataSetId,port:workbenchPaths.gatewayPort};
   const ts=betaTailnetHost();
-  const {runWorkbenchServer}=await import('../workbench/server.mjs'),host=await getAgentHost();
-  agentGateway=await runWorkbenchServer({storeDir:path.join(profile,'workbench-server'),publicOrigin:ts.origin,registryFile:services.registryFile,port:agentPaths.gatewayPort,agentPaths,agentRuntime:host.runtime});return {ok:true,serverId:agentGateway.serverId,dataSetId:agentGateway.dataSetId,port:agentPaths.gatewayPort};
+  const {runWorkbenchServer}=await import('../workbench/server.mjs'),businessInterface=await getBusinessInterface();
+  businessGateway=await runWorkbenchServer({storeDir:path.join(profile,'workbench-server'),publicOrigin:ts.origin,registryFile:services.registryFile,port:workbenchPaths.gatewayPort,workbenchPaths,businessInterface});return {ok:true,serverId:businessGateway.serverId,dataSetId:businessGateway.dataSetId,port:workbenchPaths.gatewayPort};
 }
-async function getAgentHost(){
-  if(agentHost)return agentHost;
-  if(!agentHostStarting)agentHostStarting=createAgentHost({paths:agentPaths,services,safeStorage,identity:hostIdentity,...(packagedResources?{engineResourceDir:packagedResources.engineResourceDir}:{}),onError:error=>diagnostics.write('error','workbench','定时任务检查未完成 · '+error.code)}).then(value=>agentHost=value).finally(()=>{agentHostStarting=null;});
-  return agentHostStarting;
+async function getBusinessInterface(){
+  if(businessInterface)return businessInterface;
+  if(!businessInterfaceStarting)businessInterfaceStarting=Promise.resolve(createBusinessInterface({paths:workbenchPaths,services,identity:hostIdentity})).then(value=>businessInterface=value).finally(()=>{businessInterfaceStarting=null;});
+  return businessInterfaceStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};
 const publicKeysFile = path.join(here, 'public-keys.json');
 function trusted(event) {
-  assertLauncherSender(event,win,[path.join(here,'agent-index.html'),path.join(here,'index.html')]);
+  assertLauncherSender(event,win,[path.join(here,'business-index.html')]);
 }
 function external(id) {
   if (!['purchase', 'sales', 'overview', 'exporter'].includes(id)) return null;
@@ -265,7 +264,7 @@ async function list(){
 }
 async function refresh(){throw Error('测试版使用本包冻结组件，不连接稳定版组件目录');}
 if (acquired) app.whenReady().then(async () => {
-  app.setAppUserModelId(agentPaths.appId);
+  app.setAppUserModelId(workbenchPaths.appId);
   hostIdentity=createHostIdentity({storeDir:path.join(profile,'agent-host')});
   let activation,activationError;
   if(app.isPackaged){
@@ -273,17 +272,17 @@ if (acquired) app.whenReady().then(async () => {
       reportPreparation({phase:'verify'});
       await preparationUi?.ready;
       activationAbort.signal.throwIfAborted();
-      const pin=JSON.parse(fs.readFileSync(path.join(here,'../agent-host/packaged-manifest.json'),'utf8'));
-      const {createAgentActivation}=await import('../agent-host/activation.mjs');
+      const pin=JSON.parse(fs.readFileSync(path.join(here,'../business-host/packaged-manifest.json'),'utf8'));
+      const {createAgentActivation}=await import('../business-host/activation.mjs');
       activationAbort.signal.throwIfAborted();
-      const pending=createAgentActivation({paths:agentPaths,resourcesDir:packagedResources.resourcesDir,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(agentPaths),signal:activationAbort.signal,onProgress:reportPreparation})();
+      const pending=createAgentActivation({paths:workbenchPaths,resourcesDir:packagedResources.resourcesDir,expectedManifestSha256:pin.sha256,isBusy:()=>betaProcessesRunning(workbenchPaths),signal:activationAbort.signal,onProgress:reportPreparation})();
       activationPromise=pending;
       try{activation=await pending;}finally{if(activationPromise===pending)activationPromise=undefined;}
       activationAbort.signal.throwIfAborted();
       reportPreparation({phase:'ready'});
     }catch(error){if(quitting||activationAbort.signal.aborted)return;activationError=error;recoveryError='测试组件尚未就绪：'+error.message;diagnostics.write('error','workbench',recoveryError);}
   }
-  services = guardAgentServices(new ServiceManager({registryFile:location.registryFile}),agentPaths);
+  services = guardAgentServices(new ServiceManager({registryFile:location.registryFile,sharedElectronExecutable:workbenchPaths.sharedElectronExecutable,sharedElectronVersion:workbenchPaths.sharedElectronVersion}),workbenchPaths);
   if(activationError){const blocked=()=>{throw Object.assign(Error(recoveryError),{code:'BETA_COMPONENTS_NOT_READY'});};services.ensure=blocked;services.start=blocked;}
   previousCloudExecutable=services.config('warehouse').exe;
   cache=new SnapshotCache({root:path.join(profile,'client-cache'),encrypt:async plain=>{
@@ -307,7 +306,7 @@ if (acquired) app.whenReady().then(async () => {
     onProgress: progress => {if(progress.phase==='installed')desks?.invalidate(progress.id);send('modules:progress', progress);}
   });
   const lifecycleOptions = {
-    services, dataRoot: agentPaths.data, backupRoot: path.join(profile, 'module-backups'),
+    services, dataRoot: workbenchPaths.data, backupRoot: path.join(profile, 'module-backups'),
     getInstalled: id => modules.state().packages[id]
   };
   modules.lifecycle = withElectronLifecycle(createServiceLifecycle(lifecycleOptions), lifecycleOptions);
@@ -318,7 +317,6 @@ if (acquired) app.whenReady().then(async () => {
     const {createWorkbenchDispatcher,legacyCliArgs}=await import('../shared/workbench-dispatcher.mjs');
     let localAgentActions;
     const executeLegacy=async request=>{
-      assertLegacyAgentReadOnly(request);
       if(request.command==='debug-logs'){const result=await diagnostics.read({query:request.query,level:request.level,limit:request.limit});return {ok:true,lines:result.entries.map(r=>'['+r.source+'] '+r.text)};}
       if(request.command==='debug-bundle'){const bundle=await diagnostics.bundle(),text=JSON.stringify(bundle,null,2),directory=path.join(diagnostics.directory,'reports');await fs.promises.mkdir(directory,{recursive:true});const file=path.join(directory,'diagnostic-'+Date.now()+'-'+crypto.randomUUID()+'.json');await fs.promises.writeFile(file,text,{encoding:'utf8',mode:0o600,flag:'wx'});return {ok:true,bundle,path:file,size:Buffer.byteLength(text),sha256:crypto.createHash('sha256').update(text).digest('hex')};}
       if(suiteState.setupRequired&&!['help','status','capabilities','extensions'].includes(request.command)&&!(request.command==='extension-call'&&request.action==='status'))throw Object.assign(Error('请先打开工作台完成本机程序初始化'),{code:'SUITE_SETUP_REQUIRED'});
@@ -326,25 +324,34 @@ if (acquired) app.whenReady().then(async () => {
       if(fs.existsSync(modules.journalFile)&&!['status','capabilities','extensions'].includes(request.command))throw Object.assign(Error('程序正在更新或等待恢复检查'),{code:'MODULE_UPDATING'});
       if(request.command==='help')return {ok:true,help:'使用 workbench capabilities 查看五个业务功能；正式写入仍需相应确认。'};
       if(request.command==='status')return {ok:true,status:{modules:localList(),mode:connection.read().mode}};
-      if(request.command==='capabilities')return {ok:true,capabilities:{apiVersion:'1.0.0',modules:localList(),moduleApiVersion:1,importConfirmation:'agent-result-review-required'}};
+      if(request.command==='capabilities')return {ok:true,capabilities:{apiVersion:'1.0.0',modules:localList(),moduleApiVersion:1,importConfirmation:'business-result-review-required'}};
       if(request.command==='extensions')return {ok:true,extensions:[{id:'lingtu.desks',trusted:true,actions:['status','query']}]};
       if(request.command==='extension-call'){
         if(request.id!=='lingtu.desks'||!['status','query','prepare','start','stop'].includes(request.action))throw Error('不支持的扩展操作');
         if(!['status','query'].includes(request.action)&&!request.confirmSideEffect)throw Error('修改操作需要本次明确确认');
-        if(request.action!=='status'&&!modules.state().packages[request.params.desk]&&!external(request.params.desk))throw Object.assign(Error('工作台程序文件不完整，请更新或修复工作台'),{code:'MODULE_NOT_INSTALLED'});
+        if(request.action!=='status'&&!services.config(request.params.desk).managed&&!modules.state().packages[request.params.desk]&&!external(request.params.desk))throw Object.assign(Error('工作台程序文件不完整，请更新或修复工作台'),{code:'MODULE_NOT_INSTALLED'});
         if(request.params?.desk)verifyProfile(request.params.desk);
         const {createActions}=await import('../extensions/lingtu-desks/extension.mjs');
         const {createLocalWorkbenchManager}=await import('../shared/local-workbench-adapter.mjs');
         localAgentActions??=createActions(createLocalWorkbenchManager(services,{channel:mcpMode?'mcp':'cli'}));
         return {ok:true,response:await localAgentActions[request.action](request.params)};
       }
-      if(!modules.state().packages.warehouse)throw Object.assign(Error('云仓程序文件缺失，请更新或修复工作台'),{code:'MODULE_NOT_INSTALLED'});
+      if(!services.config('warehouse').managed&&!modules.state().packages.warehouse)throw Object.assign(Error('云仓程序文件缺失，请更新或修复工作台'),{code:'MODULE_NOT_INSTALLED'});
       verifyProfile('warehouse');
       const env={...process.env,LINGTU_MANAGED_MODULE:'1'};delete env.ELECTRON_RUN_AS_NODE;
       const child=spawn(services.config('warehouse').exe,[...(services.componentArgs?.('warehouse')||[]),'--cli',...legacyCliArgs(request),'--user-data-dir='+services.config('warehouse').dataDir],{env,stdio:['ignore','pipe','pipe'],windowsHide:true});
       return readCliChildResult(child);
     };
-    const dispatch=createWorkbenchDispatcher({executeLegacy,version:hostVersion});
+    const executeBusiness=async request=>{
+      if(suiteState.setupRequired)throw Object.assign(Error('请先打开工作台完成本机业务组件初始化'),{code:'SUITE_SETUP_REQUIRED'});
+      assertPrivateRequestAllowed();
+      const payload={...request.params,...(request.module?{module:request.module}:{})};
+      const channel=mcpMode?'mcp':'cli';
+      if(remote())return remoteConnection(channel).request('/business/invoke',{method:'POST',body:{operation:request.action,payload},migration:true});
+      const endpoint=await getBusinessInterface();
+      return endpoint.request(request.action,payload,{actor:hostIdentity.localActor(channel),trustedUi:false});
+    };
+    const dispatch=createWorkbenchDispatcher({executeLegacy,executeBusiness,version:hostVersion});
     if(mcpMode){const {startWorkbenchMcpRuntime}=await import('../shared/workbench-mcp-runtime.mjs');await startWorkbenchMcpRuntime({version:hostVersion,dispatch,onClose:()=>app.exit(0)});return;}
     try{const args=process.argv.slice(cliIndex+1).filter(x=>!x.startsWith('--user-data-dir')&&!x.startsWith('--registry-file='));const result=await dispatch(parseCliRequest(args));console.log(JSON.stringify(result));app.exit(result?.ok===false?1:0);}
     catch(error){console.log(JSON.stringify({ok:false,code:error.code||'REQUEST_FAILED',error:error.message}));app.exit(1);}
@@ -374,9 +381,9 @@ if (acquired) app.whenReady().then(async () => {
   const legacyHandlers=new Map();
   const handle = (name, fn) => {legacyHandlers.set(name,fn);ipcMain.handle(name, async (event, ...args) => {
     trusted(event);assertLauncherOperationAllowed(name,{moduleId:name==='modules:open'?args[0]:undefined});const started=Date.now(),requestId=crypto.randomUUID().slice(0,8),logSource=name.startsWith('modules:')&&['warehouse','purchase','sales','overview','exporter'].includes(args[0])?args[0]:name.startsWith('connection:')||name.startsWith('tailnet:')?'network':'workbench';
-    if(name!=='agent:request'&&/^(?:launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireMember(hostIdentity.localActor(),true);
+    if(/^(?:business:review|launcher:preferences-save|connection:(?:save|network-plan)|tailnet:(?:login|logout|connect))/.test(name))hostIdentity.requireMember(hostIdentity.localActor(),true);
     try{const result=await fn(...args);if(!/^(?:diagnostics:|connection:(?:get|status|cached)|tailnet:status|modules:list|desks:bounds|launcher:(?:ready|preferences|integration-config))/.test(name))diagnostics.write('info',logSource,name+' 完成 · '+(Date.now()-started)+'ms · '+requestId);return result;}
-    catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='agent:request')return {ok:false,code:error.code||'AGENT_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
+    catch(error){diagnostics.write('error',logSource,name+' 失败 · '+requestId+' · '+(error.stack||error.message));if(name==='business:review')return {ok:false,code:error.code||'BUSINESS_REQUEST_FAILED',error:safeLogText(error.message)};throw Error(safeLogText(error.message));}
   });};
   handle('diagnostics:read',options=>diagnostics.read(options));
   handle('diagnostics:copy',async options=>{const result=await diagnostics.read(options);clipboard.writeText(result.entries.map(r=>'['+r.source+'] '+r.text).join('\n'));return {copied:result.entries.length};});
@@ -397,7 +404,7 @@ if (acquired) app.whenReady().then(async () => {
     else if(state.mode==='standalone')result={state:'local',label:'单机模式',detail:'使用本机账本，无需连接主服务器。'};
     else if(state.mode==='server'){
       let identity;try{identity=JSON.parse(fs.readFileSync(path.join(profile,'workbench-server','identity.json'),'utf8'));}catch{}
-      result=await serverConnectionHealth({state,identity,fetchImpl:(url,options)=>fetch(url.replace('http://127.0.0.1:17330','http://127.0.0.1:'+agentPaths.gatewayPort),options)});
+      result=await serverConnectionHealth({state,identity,fetchImpl:(url,options)=>fetch(url.replace('http://127.0.0.1:17330','http://127.0.0.1:'+workbenchPaths.gatewayPort),options)});
     }else if(state.networkSuspended)result={state:'paused',label:'私网连接已暂停',detail:'请在设置中重新连接或登录。'};
     else if(!transport?.identity)result={state:'unverified',label:'尚未连接主服务器',detail:'请检查连接或在设置中完成私网登录和设备批准。'};
     else{
@@ -418,11 +425,11 @@ if (acquired) app.whenReady().then(async () => {
     networkProposal={...plan,token:crypto.randomUUID(),expiresAt:Date.now()+300000};return {token:networkProposal.token,difference:plan.difference,backup:plan.file};
   });
   async function saveConnectionValue(value,{connect=true}={}){
-    assertPreviewLocalMode(agentPaths,value);
+    assertPreviewLocalMode(workbenchPaths,value);
     if(value.serverUrl)assertBetaServerAddress(value.serverUrl);
-    if(agentHostStarting)await agentHostStarting.catch(()=>{});
+    if(businessInterfaceStarting)await businessInterfaceStarting.catch(()=>{});
     const previousMode=connection.read().mode;
-    if(value.mode!==previousMode&&agentHost?.runtime.store.list('task').some(task=>['queued','running','committing'].includes(task.status)))throw Error('请先暂停或完成正在执行的任务，再切换连接模式');
+    if(value.mode!==previousMode&&await businessInterface?.isBusy?.())throw Error('请等待正在提交的业务变更完成，再切换连接模式');
     if(modules.pending.size)throw Error('请等待当前模块安装完成');
     if(activeNetworkRequests||[...privateSessionWrites.values()].some(set=>set.size))throw Error('主服务器请求尚未结束，请稍后切换连接');
     if(value.mode==='client')serverAddress(value.serverUrl);
@@ -436,8 +443,8 @@ if (acquired) app.whenReady().then(async () => {
       if(JSON.stringify(fresh.before)!==JSON.stringify(networkProposal.before))throw Error('网络配置已变化，请重新审查');
     }
     await resetPrivateConnection();
-    if(value.mode!==previousMode&&agentGateway){await agentGateway.stop();agentGateway=null;}
-    if(value.mode==='client'&&agentHost){await agentHost.close();agentHost=null;}
+    if(value.mode!==previousMode&&businessGateway){await businessGateway.stop();businessGateway=null;}
+    if(value.mode==='client'&&businessInterface){await businessInterface.close();businessInterface=null;}
     const state=connection.configure(value,inventory);
     if(state.mode==='server'){await ensureGateway();enableServe({...betaServeOptions(),origin:state.serverUrl,backupRoot:path.join(profile,'workbench-server','network-backups')});networkProposal=null;}
     if(state.mode==='client'&&connect)await remoteConnection().connect();
@@ -510,7 +517,7 @@ if (acquired) app.whenReady().then(async () => {
   handle('migration:archive',async id=>{if(!remote())throw Error('旧账本只能在来源客户端封存');const result=await migrationRequest('/'+encodeURIComponent(id)+'/result');if(result.status!=='completed')throw Error('服务器迁移尚未完整完成，不能封存旧账本');await freezeMigrationSource(services,connection,profile);return connection.archiveMigration(result.receipt);});
   handle('migration:release-source',()=>{if(!remote())throw Error('请在来源客户端处理封存准备');return releaseMigrationSource(services,connection,profile);});
   handle('links:open', name => shell.openExternal(externalLink(name)));
-  updater={check:async()=>({status:'disabled',channel:'agent-beta'}),getState:()=>({status:'disabled'})};
+  updater={check:async()=>({status:'disabled',channel:'business-preview'}),getState:()=>({status:'disabled'})};
   handle('launcher:update-check',()=>updater.check());
   handle('launcher:update-install',()=>changePrivateConnection(async()=>{
     if(modules.pending.size)throw Error('请等待模块安装完成后更新工作台');
@@ -573,32 +580,33 @@ if (acquired) app.whenReady().then(async () => {
   win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   tray=new Tray(path.join(here,'../assets/lingtu-icon.png'));
   tray.setToolTip('五成电子商务工作台');
-  tray.setContextMenu(Menu.buildFromTemplate([{label:'打开工作台',click:showWindow},{label:'日志与诊断',click:()=>{showWindow();send('desks:navigate',{id:'logs'});}},{label:'设置',click:()=>{showWindow();send('desks:navigate',{id:'settings'});}},{label:'使用说明',click:()=>{showWindow();send('desks:navigate',{id:'help'});}},{type:'separator'},{label:'退出工作台并暂停任务主机',click:()=>{if(modules.pending.size){showWindow();send('modules:message','正在准备程序文件，请等待完成后退出。');return;}quitting=true;app.quit();}}]));
+  tray.setContextMenu(Menu.buildFromTemplate([{label:'打开工作台',click:showWindow},{label:'日志与诊断',click:()=>{showWindow();send('desks:navigate',{id:'logs'});}},{label:'设置',click:()=>{showWindow();send('desks:navigate',{id:'settings'});}},{label:'使用说明',click:()=>{showWindow();send('desks:navigate',{id:'help'});}},{type:'separator'},{label:'退出工作台',click:()=>{if(modules.pending.size){showWindow();send('modules:message','正在准备程序文件，请等待完成后退出。');return;}quitting=true;app.quit();}}]));
   tray.on('double-click',showWindow);tray.on('click',showWindow);
   win.on('close',event=>{if(!quitting){event.preventDefault();win.hide();}});
   const preferences=launcherPreferences();configureLauncherLogin(preferences);persistPreferences(preferences);
   win.webContents.on('will-navigate', event => event.preventDefault());
-  handle('agent:request',async value=>{
-    const {operation,payload}=agentEnvelope(value);
-    if(operation==='connection.get'){const state=await legacyHandlers.get('connection:get')();return {connection:{...state,canConfigure:true,detail:state.mode==='standalone'?'使用独立测试账本':'测试版私网入口必须为 9443'}};}
-    if(operation==='connection.check')return legacyHandlers.get('connection:check')();
-    if(operation==='connection.plan'){hostIdentity.requireAdmin(hostIdentity.localActor(),true);return legacyHandlers.get('connection:network-plan')();}
-    if(operation==='connection.save'){hostIdentity.requireAdmin(hostIdentity.localActor(),true);return legacyHandlers.get('connection:save')(payload);}
-    let result;
-    if(remote())result=await remoteConnection().request('/agent/request',{method:'POST',body:{operation,payload},migration:true});
-    else{const host=await getAgentHost();result=await host.request(operation,payload,{actor:host.identity.localActor(),trustedUi:true});}
-    if(operation==='status'&&result.environment?.mode!=='test')throw Error('服务器不是独立测试环境，已阻止连接');
-    return operation==='artifacts.open'?saveArtifactDownload(result,{dialog,window:win,downloads:app.getPath('downloads')}):result;
+  handle('business:status',async()=>{
+    const state=await legacyHandlers.get('connection:status')();
+    return {ready:suiteState.ready,environment:workbenchPaths.environment,actor:hostIdentity.localActor('ui'),connection:state,embeddedAgent:false};
   });
-  await win.loadFile(path.join(here, 'agent-index.html'));
+  handle('business:review',async value=>{
+    if(!value||typeof value!=='object'||Array.isArray(value)||!['list','get','approve','reject'].includes(value.operation))throw Error('业务复核请求无效');
+    const {operation,...payload}=value;
+    if(['actor','trustedUi','approval','confirmed','role','sessionId'].some(key=>Object.hasOwn(payload,key)))throw Error('业务复核不能自选身份或提供批准凭据');
+    if(Buffer.byteLength(JSON.stringify(payload))>65536)throw Error('业务复核参数过大');
+    if(remote())return remoteConnection().request('/business/review',{method:'POST',body:{operation,payload},migration:true});
+    const businessInterface=await getBusinessInterface();
+    return businessInterface.request('reviews.'+operation,payload,{actor:hostIdentity.localActor('ui'),trustedUi:true});
+  });
+  await win.loadFile(path.join(here, 'business-index.html'));
   preparationUi?.destroy();
   if(!process.argv.includes('--hidden')||moduleArgument(process.argv))showWindow();
-  if(!remote())try{await getAgentHost();}catch(error){send('modules:message','任务主机尚未就绪：'+error.message);}
+  if(!remote())try{await getBusinessInterface();}catch(error){send('modules:message','外部 AI 业务接口尚未就绪：'+error.message);}
   if(connection.read().mode==='server')try{await ensureGateway();}catch(error){send('modules:message',error.message);}
   if(recoveryError)send('modules:message','上次模块更新需要恢复检查：'+recoveryError);
 }).catch(error=>{if(quitting||activationAbort.signal.aborted)return;diagnostics.write('error','workbench','启动失败 · '+(error.stack||error.message));if(headless)console.log(JSON.stringify({ok:false,code:error.code||'STARTUP_FAILED',error:error.message}));else dialog.showErrorBox('工作台准备未完成','请重新打开工作台重试。若仍然失败，请保留原数据并联系管理员处理。\n\n'+error.message);app.exit(1);});
 app.on('second-instance',(_event,args)=>{const id=moduleArgument(args);if(id){requestedModule=id;deliverRequestedModule();}if(id||!args.includes('--hidden'))showWindow();});
-const shutdownPreparation=createPreparationShutdown({controller:activationAbort,getActivation:()=>activationPromise,getHost:()=>agentHost,getGateway:()=>agentGateway,quit:()=>app.quit(),onError:error=>diagnostics.write('error','workbench','任务主机退出未完成 · '+error.code)});
+const shutdownPreparation=createPreparationShutdown({controller:activationAbort,getActivation:()=>activationPromise,getHost:()=>businessInterface,getGateway:()=>businessGateway,quit:()=>app.quit(),onError:error=>diagnostics.write('error','workbench','业务接口退出未完成 · '+error.code)});
 app.on('before-quit',event=>{
   quitting=true;tray?.destroy();shutdownPreparation(event);
 });

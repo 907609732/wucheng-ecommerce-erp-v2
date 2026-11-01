@@ -20,21 +20,18 @@ function assertModule(id){
 }
 for(const id of ids)assertModule(id);
 const load=relative=>import(pathToFileURL(path.join(root,relative)).href);
-const [{installDeskViews},{ServiceManager},{createDesktopUiSessions},{createHostIdentity},{assertLauncherSender,agentEnvelope},{assertLauncherOperationAllowed},{createAgentRuntime},purchase,sales,overview]=await Promise.all([
-  load('desktop/local-desks.mjs'),load('desktop/shared/service-manager.mjs'),load('desktop/agent-host/desktop-ui-sessions.mjs'),load('desktop/agent-host/identity.mjs'),load('desktop/agent-host/trust.mjs'),load('desktop/agent-host/launcher-policy.mjs'),load('desktop/agent-runtime/index.mjs'),load('apps/purchase/lib/agent-adapter.mjs'),load('apps/sales/lib/agent-adapter.mjs'),load('apps/overview/lib/agent-adapter.mjs')
+const [{installDeskViews},{ServiceManager},{createDesktopUiSessions},{createHostIdentity},{assertLauncherSender},{assertLauncherOperationAllowed},{createBusinessInterface},purchase,sales,overview]=await Promise.all([
+  load('desktop/local-desks.mjs'),load('desktop/shared/service-manager.mjs'),load('desktop/business-host/desktop-ui-sessions.mjs'),load('desktop/business-host/identity.mjs'),load('desktop/business-host/trust.mjs'),load('desktop/business-host/launcher-policy.mjs'),load('desktop/business-interface/index.mjs'),load('apps/purchase/lib/agent-adapter.mjs'),load('apps/sales/lib/agent-adapter.mjs'),load('apps/overview/lib/agent-adapter.mjs')
 ]);
 app.setName('五成 ERP 三合一源码隔离验收');app.setPath('userData',path.join(fixtureRoot,'electron-profile'));
 let runtime,win,closing=false;
 const principal=createHostIdentity({storeDir:path.join(fixtureRoot,'identity')});
 const serviceManager=new ServiceManager({registryFile:manifest.registryFile,agentManaged:true});
 const manager={registryFile:manifest.registryFile,config:id=>{assertModule(id);return serviceManager.config(id);},ensure:id=>{assertModule(id);return serviceManager.ensure(id);},status:async()=>Promise.all([...ids].map(async id=>({extension:id,...assertModule(id),status:(await serviceManager.capabilities(id))?'running':'stopped'}))),stop:async()=>{throw Error('此夹具的服务只由启动器在退出后清理');}};
-const transport=async()=>{throw Error('此原生/人工夹具不提供 Agent 业务执行；真实模型验收须在正常 ERP 中进行');};
+const transport=async()=>{throw Error('此原生界面夹具只允许操作临时合成账本；外部接口须由独立契约用例验收');};
 const actors=()=>principal.requireMember(principal.localActor('ui'),true);
-const noEngine={check:async()=>({available:false,configured:false,reason:'SOURCE_NATIVE_FIXTURE_NO_MODEL'})};
-runtime=createAgentRuntime({storeDir:path.join(fixtureRoot,'agent-runtime'),resolveActor:principal.resolveActor,
-  adapters:[purchase.createPurchaseAgentAdapter({transport}),sales.createSalesAgentAdapter({transport}),overview.createOverviewAgentAdapter({transport})],engines:{codex:noEngine,hermes:noEngine},
-  secretStore:{has:()=>false,get:async()=>undefined,set:async()=>{throw Error('隔离验收夹具禁止保存公司密钥');}},
-  environment:{mode:'test',label:'隔离合成账本 · 源码验收'},extensions:{'connection.get':async()=>({connection:{mode:'standalone',canConfigure:false,detail:'仅连接本次临时三台服务，不接公司私网'}})}
+runtime=await createBusinessInterface({paths:{profile:path.join(fixtureRoot,'business-profile'),environment:{mode:'test',label:'隔离合成账本 · 源码验收'}},services:manager,identity:principal,startBridge:false,
+  adapters:[purchase.createPurchaseAgentAdapter({transport}),sales.createSalesAgentAdapter({transport}),overview.createOverviewAgentAdapter({transport})],transport
 });
 const report=(type,value={})=>fs.appendFileSync(path.join(manifest.output,'native-events.jsonl'),JSON.stringify({type,at:new Date().toISOString(),...value})+'\n');
 report('fixture.created',{sourceFixture:true,packagedBeta:false,identityType:'windows',identitySha256:createHash('sha256').update(actors().id).digest('hex'),companyCredentialsLoaded:false});
@@ -42,7 +39,7 @@ report('fixture.created',{sourceFixture:true,packagedBeta:false,identityType:'wi
 // A top-level readiness await can prevent ready from firing, leaving no window or error.
 app.whenReady().then(async()=>{
 report('fixture.ready');
-const title='五成 ERP · 三合一隔离验收',page=path.join(root,'desktop','launcher','agent-index.html');
+const title='五成 ERP · 三合一隔离验收',page=path.join(root,'desktop','launcher','business-index.html');
 win=new BrowserWindow({title,width:1480,height:940,minWidth:900,minHeight:650,show:true,webPreferences:{preload:path.join(here,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
 report('window.created',{webContentsId:win.webContents.id});
 win.setMenu(null);win.webContents.on('page-title-updated',event=>{event.preventDefault();win.setTitle(title);});
@@ -55,10 +52,14 @@ const desks=installDeskViews(win,{manager,partitionFor:id=>'persist:source-hybri
 });
 ipcMain.handle('launcher:ready',event=>{trusted(event);return{ready:true};});
 ipcMain.handle('modules:open',async(event,id,route)=>{trusted(event);assertModule(id);return desks.open(id,route);});
-ipcMain.handle('agent:request',async(event,value)=>{
-  try{trusted(event);const {operation,payload}=agentEnvelope(value);if(operation==='settings.save'||operation.startsWith('connection.')&&operation!=='connection.get')throw Error('此夹具不保存公司配置或修改私网；请在正常 ERP 中验收');return await runtime.request(operation,payload,{actor:actors(),trustedUi:true});}
-  catch(error){return{ok:false,code:error.code||'SOURCE_FIXTURE_OPERATION_UNAVAILABLE',error:error.message};}
-});
+ipcMain.handle('business:status',event=>{trusted(event);return {ready:true,environment:{mode:'test',label:'隔离合成账本 · 源码验收'},actor:actors(),connection:{state:'local',label:'临时隔离服务'},embeddedAgent:false};});
+ipcMain.handle('business:review',async(event,value)=>{trusted(event);if(!value||!['list','get','approve','reject'].includes(value.operation))throw Error('未知复核操作');const {operation,...payload}=value;return runtime.request('reviews.'+operation,payload,{actor:actors(),trustedUi:true});});
+ipcMain.handle('connection:get',event=>{trusted(event);return {mode:'standalone',networkProvider:'system',detail:'本夹具仅连接临时合成账本，禁止修改公司连接'};});
+ipcMain.handle('connection:check',event=>{trusted(event);return {state:'local',detail:'本次临时服务'};});
+ipcMain.handle('connection:save',event=>{trusted(event);throw Error('隔离夹具禁止修改公司连接');});
+ipcMain.handle('launcher:integration-config',event=>{trusted(event);return {version:'source-fixture',scope:'temporary-books-only',externalInterface:'Not published by this fixture; validate with dedicated business-interface tests'};});
+ipcMain.handle('launcher:copy-integration',event=>{trusted(event);throw Error('隔离夹具不发布外部接入配置');});
+ipcMain.handle('diagnostics:read',event=>{trusted(event);return {entries:[{source:'fixture',text:fs.readFileSync(path.join(manifest.output,'native-events.jsonl'),'utf8')}]};});
 win.webContents.on('will-navigate',event=>event.preventDefault());win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
 win.on('resize',()=>report('window.resized',{bounds:win.getContentBounds(),zoom:win.webContents.getZoomFactor()}));
 await win.loadFile(page);

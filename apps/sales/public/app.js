@@ -2,15 +2,15 @@ import {loadingMarkup} from './loading-screen.mjs';
 import {createFreightUI} from './freight-ui.js';
 import {renderFundsOverview} from './funds-overview.js';
 import {createPddUI} from './pdd-ui.js';
-import {createTaskCenter,monthlyTaskModel} from './task-center.js';
+import {monthlyTaskModel} from './monthly-close-model.js';
 import {selectedSalesRole,canOpenSalesView,personnelCoverageDatasets,salesIdentityFromURL,personnelChoiceMarkup,identityNames} from './personnel.js';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>n==null?'—':((Object.is(n,-0)?0:n)/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}),number=n=>n==null?'—':n.toLocaleString('zh-CN'),pct=n=>n==null?'—':(n*100).toFixed(1)+'%';
-const labels={tasks:'任务中心',freight:'运费',operations:'运营总览',reconciliation:'资金对账',manual:'线下与代发',sources:'店铺与数据',imports:'账单导入',close:'月报确认',settings:'设置','pdd-details':'逐笔流水','tb-details':'淘宝货款明细'};
+const labels={freight:'运费',operations:'运营总览',reconciliation:'资金对账',manual:'线下与代发',sources:'店铺与数据',imports:'账单导入',close:'月报确认',settings:'设置','pdd-details':'逐笔流水','tb-details':'淘宝货款明细'};
 const settingsItems=[['manual','线下与代发'],['sources','店铺与数据'],['imports','账单导入'],['close','月报确认'],['settings','自动任务与备份']];
 const settingsViews=new Set(settingsItems.map(([view])=>view));
 $('#settings-nav').innerHTML=settingsItems.map(([view,label])=>`<a href="${view==='settings'?'#settings':'#settings?section='+view}" data-settings-view="${view}">${label}</a>`).join('');
-let boot,state={view:'operations',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI,taskCenter;
+let boot,state={view:'operations',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI;
 let personnelRefresh,choosingPersonnel=false;
 const isBoss=()=>['member','boss'].includes(selectedSalesRole(boot?.personnel));
 const shopName=id=>boot.shops.find(s=>s.id===id)?.name||id;
@@ -56,13 +56,13 @@ function refreshPendingLink(){
  const count=isBoss()?Number(boot.pendingEdits)||0:0;$('#pending-edits-link').hidden=count===0;$('#pending-edits-count').textContent=String(count);
 }
 async function refreshPendingCount(){if(!isBoss())return;try{const current=await api('/api/bootstrap');boot.pendingEdits=current.pendingEdits;refreshPendingLink();}catch{/* Keep the last confirmed count when offline. */}}
-function clearPersonnelContent(){++loadId;resetWidgets();pddUI?.destroy();taskCenter?.destroy();lastLedger=[];closeInfo=null;if($('#dialog').open)$('#dialog').close();$('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在确认工作身份…',logo:'./loading-logo.png'});}
+function clearPersonnelContent(){++loadId;resetWidgets();pddUI?.destroy();lastLedger=[];closeInfo=null;if($('#dialog').open)$('#dialog').close();$('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在确认工作身份…',logo:'./loading-logo.png'});}
 async function refreshPersonnelSession(force=false){
  if(!boot||choosingPersonnel&&!force)return;if(personnelRefresh)return personnelRefresh;
  if(force)clearPersonnelContent();
  personnelRefresh=(async()=>{try{
    const before=selectedSalesRole(boot.personnel),current=await api('/api/bootstrap'),after=selectedSalesRole(current.personnel);
-   if(force||before!==after){if(!force)clearPersonnelContent();Object.assign(boot,current);syncShopOptions();createRoleInterfaces();if(force){state.view='operations';history.replaceState(null,'',contextRoute('operations'));}readRoute();applyPersonnelUI();await render();}
+   if(force||before!==after){if(!force)clearPersonnelContent();Object.assign(boot,current);syncShopOptions();if(force){state.view='operations';history.replaceState(null,'',contextRoute('operations'));}readRoute();applyPersonnelUI();await render();}
    else{boot.pendingEdits=current.pendingEdits;refreshPendingLink();}
   }catch(error){if(force)$('#content').innerHTML=`<div class="notice warning" role="alert">${esc(error.message)}</div>`;}finally{personnelRefresh=null;}})();
  return personnelRefresh;
@@ -75,21 +75,20 @@ function applyPersonnelUI(){
  refreshPendingLink();
 }
 function showPersonnelPicker(){
- choosingPersonnel=true;++loadId;resetWidgets();pddUI?.destroy();taskCenter?.destroy();applyPersonnelUI();$('#page-title').textContent='选择工作身份';$('#content').innerHTML=personnelChoiceMarkup();
+ choosingPersonnel=true;++loadId;resetWidgets();pddUI?.destroy();applyPersonnelUI();$('#page-title').textContent='选择工作身份';$('#content').innerHTML=personnelChoiceMarkup();
 }
-function createRoleInterfaces(){taskCenter?.destroy();taskCenter=createTaskCenter({$,esc,money,number,api,toast,boot,state,render});}
 async function selectPersonnel(role){
- await api('/api/personnel/session',{role});Object.assign(boot,await api('/api/bootstrap'));choosingPersonnel=false;syncShopOptions();createRoleInterfaces();state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));applyPersonnelUI();await render();
+ await api('/api/personnel/session',{role});Object.assign(boot,await api('/api/bootstrap'));choosingPersonnel=false;syncShopOptions();state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));applyPersonnelUI();await render();
 }
 async function render(){
  if(!selectedSalesRole(boot.personnel)){showPersonnelPicker();return;}
  if(!canOpenSalesView(boot.personnel,state.view)){state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));toast('该项由老板处理，已返回我的任务。');}
  applyPersonnelUI();
- const seq=++loadId,isDetail=['pdd-details','tb-details'].includes(state.view),isAccount=state.view==='reconciliation'&&!state.accountSettlements,isTasks=state.view==='tasks';
+ const seq=++loadId,isDetail=['pdd-details','tb-details'].includes(state.view),isAccount=state.view==='reconciliation'&&!state.accountSettlements;
  document.body.classList.toggle('pdd-mode',isDetail||isAccount);document.body.classList.toggle('overview-mode',['operations','freight'].includes(state.view));document.body.classList.toggle('freight-mode',state.view==='freight');document.body.classList.toggle('detail-mode',isDetail);$('#dialog').classList.remove('record-drawer');
  const isFreight=state.view==='freight';
- $('#freight-channel-label').hidden=!isFreight;document.body.classList.toggle('tasks-mode',isTasks);
- $('.toolbar').hidden=isTasks;$('#task-return').hidden=true;$('#task-return').href=contextRoute('operations');
+ $('#freight-channel-label').hidden=!isFreight;
+ $('.toolbar').hidden=false;$('#task-return').hidden=true;$('#task-return').href=contextRoute('operations');
  $('.segmented').hidden=['reconciliation','sources','imports','close','manual'].includes(state.view);
  $('#period-note').textContent=isFreight?'按费用所属期间统计，月汇总不分摊到每天':'业务日期按来源报表记录';
  const sharedOption=$('#shop option[value="shared"]');if(sharedOption)sharedOption.hidden=!isFreight;
@@ -100,7 +99,6 @@ async function render(){
  refreshPendingLink();void refreshPendingCount();
  $('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在读取本月数据…',logo:'./loading-logo.png'});
  try{
-  if(isTasks){resetWidgets();pddUI?.destroy();await taskCenter.render(()=>seq===loadId);return;}
   if(isFreight){resetWidgets();pddUI?.destroy();await freightUI.dashboard(()=>seq===loadId);return;}
   if(isDetail){resetWidgets();await pddUI.details();return;}
   if(isAccount){resetWidgets();await pddUI.summary();syncPeriodControls();return;}
@@ -192,7 +190,7 @@ try{
  if(requestedRole){await api('/api/personnel/session',{role:requestedRole});Object.assign(boot,await api('/api/bootstrap'));}
  if(initialURL.searchParams.has('identity')){initialURL.searchParams.delete('identity');history.replaceState(null,'',initialURL.pathname+initialURL.search+initialURL.hash);}
  state.period=boot.month;$('#shop').insertAdjacentHTML('beforeend',shopOptions()+'<option value="shared" hidden>多店共用</option>');readRoute();
- pddUI=createPddUI({$,esc,money,number,api,dialog,toast,boot,state,render,upload:pddUploadForm});createRoleInterfaces();
+ pddUI=createPddUI({$,esc,money,number,api,dialog,toast,boot,state,render,upload:pddUploadForm});
  freightUI=createFreightUI({$,esc,money,api,boot,state,dialog,closeDialog,toast,render,addChart:c=>charts.push(c),addTable:t=>tables.push(t)});
  applyPersonnelUI();$('#demo-banner').hidden=!boot.demo;await render();
 }catch(e){$('#content').textContent=e.message;}

@@ -24,7 +24,7 @@ async function fixture(t,{instant='2026-10-26T11:00:00.000Z',people=[person()],a
   const options={databasePath,now,getChannels:async()=>channels||{email:{ready:true},dingtalk:{ready:true},sms:{ready:false},phone:{ready:false}},senders:senders||Object.fromEntries(['email','dingtalk','sms','phone'].map(channel=>[channel,async payload=>{delivered.push({channel,payload});return {receiptId:'mock-'+delivered.length};}]))};
   service=createWarehouseDaily(options);
   t.after(()=>{service.close();database.close();fs.rmSync(root,{recursive:true,force:true});});
-  await service.configure(admin,{employees:people,autoRemind});
+  // Attendance configuration is intentionally no longer activated.
   return {get daily(){return service;},database,delivered,setTime:value=>{current=new Date(value);},restart:()=>{service.close();service=createWarehouseDaily(options);},
     async success({sourceDate=businessDate(now()),expectedSourceDate=businessDate(now()),deliveryStatus='accepted',rowCount=1,totalQuantity=12}={}){
       database.prepare('DELETE FROM inventory_snapshots').run();
@@ -59,34 +59,6 @@ test('same row count and stock total cannot hide changed snapshot contents',asyn
   assert.equal((await f.daily.status(worker)).sync.complete,false);
 });
 
-test('employees sign only themselves; day is unique and requires a known identity',async t=>{
-  const f=await fixture(t),worker=employee();
-  await assert.rejects(async()=>f.daily.action(employee('unknown@example.com'),{action:'check-in',confirmed:true}));
-  await assert.rejects(async()=>f.daily.action(worker,{action:'check-in',login:'other@example.com',confirmed:true}));
-  await assert.rejects(async()=>f.daily.action(admin,{action:'check-in',confirmed:true}));
-  await f.daily.action(worker,{action:'check-in',confirmed:true});
-  const first=(await f.daily.status(worker)).me;
-  assert.ok(checkedAt(first),'check-in records the trusted server timestamp');
-  f.setTime('2026-10-26T11:01:00.000Z');
-  await f.daily.action(worker,{action:'check-in',confirmed:true});
-  assert.equal(checkedAt((await f.daily.status(worker)).me),checkedAt(first),'repeat check-in cannot replace the original timestamp');
-  assert.equal(f.delivered.length,0);
-});
-
-test('completion requires today verified snapshot and group acceptance',async t=>{
-  const f=await fixture(t),worker=employee();
-  await f.daily.action(worker,{action:'check-in',confirmed:true});
-  await assert.rejects(async()=>f.daily.action(worker,{action:'complete',confirmed:true}));
-  const runId=await f.success();
-  const state=await f.daily.status(worker);
-  assert.equal(state.sync.complete,true);
-  assert.equal(state.sync.runId,runId);
-  await assert.rejects(async()=>f.daily.action(worker,{action:'complete',runId,confirmed:false}));
-  await f.daily.action(worker,{action:'complete',runId,confirmed:true});
-  assert.ok(completedAt((await f.daily.status(worker)).me));
-  assert.equal(f.delivered.length,0,'completion does not itself send reminders');
-});
-
 test('stale source date and inconsistent row evidence never satisfy daily closure',async t=>{
   const f=await fixture(t),worker=employee();
   const old=await f.success({sourceDate:'2026-10-25'});
@@ -113,92 +85,11 @@ test('group API acceptance is displayed without a claim of employee reading',asy
   assert.ok(!state.me?.completedAt,'a successful bot send cannot auto-complete employee work');
 });
 
-test('sign-in and verified closure survive restart but do not satisfy the next business day',async t=>{
-  const f=await fixture(t),worker=employee();const runId=await f.success();
-  await f.daily.action(worker,{action:'check-in',confirmed:true});
-  await f.daily.action(worker,{action:'complete',runId,confirmed:true});
-  f.restart();
-  let state=await f.daily.status(worker);
-  assert.equal(state.sync.complete,true);assert.ok(checkedAt(state.me));assert.ok(completedAt(state.me));
-  f.setTime('2026-10-26T16:01:00.000Z');
-  state=await f.daily.status(worker);
-  assert.equal(state.sync.complete,false);assert.ok(!checkedAt(state.me));assert.ok(!completedAt(state.me));
-});
 
-test('automatic reminders default to off; manual reminders are deduplicated across restart',async t=>{
-  const f=await fixture(t),worker=employee();
-  await f.daily.tick();assert.equal(f.delivered.length,0);
-  await assert.rejects(async()=>f.daily.remind(admin,{logins:[worker.login],channels:['email'],confirmed:false}));
-  await f.daily.remind(admin,{logins:[worker.login],channels:['email'],confirmed:true});
-  assert.equal(f.delivered.length,1);
-  f.restart();
-  await f.daily.remind(admin,{logins:[worker.login],channels:['email'],confirmed:true});
-  assert.equal(f.delivered.length,1,'ordinary retry cannot re-send an accepted reminder');
-});
-
-test('rest days and already completed employees are excluded from reminders',async t=>{
-  const f=await fixture(t,{people:[person('rest@example.com',{workdays:[7]}),person()],autoRemind:true});
-  const runId=await f.success();
-  await f.daily.action(employee(),{action:'check-in',confirmed:true});
-  await f.daily.action(employee(),{action:'complete',runId,confirmed:true});
-  await f.daily.tick();
-  assert.equal(f.delivered.length,0);
-});
-
-test('one failed channel does not block another and is not reported as successful',async t=>{
-  const delivered=[];
-  const f=await fixture(t,{people:[person(undefined,{channels:['email','dingtalk']})],senders:{email:async()=>{throw Object.assign(Error('mock SMTP failure'),{definiteFailure:true});},dingtalk:async payload=>{delivered.push(payload);return {receiptId:'mock-dd-1'};}}});
-  const result=await f.daily.remind(admin,{logins:[employee().login],channels:['email','dingtalk'],confirmed:true});
-  assert.equal(delivered.length,1);
-  const state=await f.daily.status(admin);
-  const receipts=JSON.stringify({result,reminders:state.reminders});
-  assert.match(receipts,/"status":"failed"/);
-  assert.match(receipts,/accepted|success|成功|mock-dd-1/);
-});
-
-test('an overdue employee without reminder channels cannot block another employee',async t=>{
-  const f=await fixture(t,{people:[person('no-channel@example.com',{channels:[]}),person()],autoRemind:true});
-  await f.daily.tick();
-  assert.equal(f.delivered.length,1);
-});
-
-test('a different validation record with matching totals cannot prove this run',async t=>{
-  const f=await fixture(t),worker=employee();const runId=await f.success();
-  f.daily.updateRun(runId,{validationId:999999});
-  assert.equal((await f.daily.status(worker)).sync.complete,false);
-});
-
-test('a failed later attempt preserves today successful closure and records the failure',async t=>{
-  const f=await fixture(t),worker=employee(),completed=await f.success();
-  const failed=f.daily.beginRun({});
-  f.daily.updateRun(failed,{collectionStatus:'failed',error:'mock download failure'});
-  const state=await f.daily.status(worker);
-  assert.equal(state.sync.complete,true);assert.equal(state.sync.runId,completed);
-  assert.equal(state.sync.lastAttempt.id,failed);
-  assert.equal(state.sync.lastAttempt.collectionStatus,'failed');
-});
-
-test('uncertain provider outcome is retained and never blindly retried',async t=>{
-  let attempts=0;
-  const f=await fixture(t,{senders:{email:async()=>{attempts++;throw Error('mock timeout after submission');}}});
-  await f.daily.remind(admin,{logins:[employee().login],channels:['email'],confirmed:true});
-  f.restart();
-  await f.daily.remind(admin,{logins:[employee().login],channels:['email'],confirmed:true});
-  assert.equal(attempts,1);
-  assert.ok((await f.daily.status(admin)).reminders.some(row=>row.status==='unknown'));
-});
-
-
-test('authenticated legacy viewer can manage team arrangements and reminders without granting identity',async t=>{
-  const f=await fixture(t),worker={...employee(),role:'viewer'},other=person('other@example.com');
-  await assert.rejects(async()=>f.daily.configure(null,{employees:[],autoRemind:false}));
-  f.daily.configure(worker,{employees:[person(),other],autoRemind:false});
-  const state=await f.daily.status(worker);
-  assert.equal(state.employees.length,2);assert.equal(state.config.autoRemind,false);
-  await f.daily.action(worker,{action:'check-in',confirmed:true});
-  assert.ok(checkedAt((await f.daily.status(worker)).me));
-  await assert.rejects(f.daily.remind(worker,{logins:[other.login],channels:['email']}),/确认提醒对象和渠道/);
-  const sent=await f.daily.remind(worker,{logins:[other.login],channels:['email'],confirmed:true});
-  assert.equal(sent.results[0].status,'accepted');assert.equal(f.delivered.length,1);
-  assert.equal((await f.daily.status(worker)).reminders[0].login,other.login);
+test('removed attendance cannot write or send, including legacy auto-remind configuration',async t=>{
+ const f=await fixture(t);f.database.prepare('UPDATE warehouse_daily_config SET payload=? WHERE id=1').run(JSON.stringify({employees:[person()],autoRemind:true}));
+ for(const action of ['action','configure','remind'])assert.throws(()=>f.daily[action](admin,{}),error=>error.status===410);
+ assert.deepEqual(await f.daily.tick(),{skipped:true,reason:'attendance-removed'});
+ assert.equal(f.delivered.length,0);assert.deepEqual((await f.daily.status(admin)).config,{employees:[],autoRemind:false});
+ const id=await f.success();f.restart();assert.equal((await f.daily.status(admin)).sync.runId,id);
 });

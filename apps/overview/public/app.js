@@ -87,7 +87,16 @@ document.addEventListener('submit',async e=>{const f=e.target;if(!(f instanceof 
 $('#settings-button').onclick=settings;$('#refresh').onclick=refresh;$('#month').onchange=()=>{if(!$('#month').value)return;localStorage.setItem('overview-month',$('#month').value);$('#year').value=$('#month').value.slice(0,4);localStorage.setItem('overview-year',$('#year').value);refresh();};$('#grain').onchange=()=>{localStorage.setItem('overview-grain',$('#grain').value);refresh();};let yearRefresh;$('#year').oninput=$('#year').onchange=()=>{clearTimeout(yearRefresh);if(business.surface.getDraftState().dirty){restoreRenderedControls();business.notify();return;}surfaceConfirmed=false;business.notify();if(!$('#year').checkValidity()||!/^20\d{2}$/.test($('#year').value))return;yearRefresh=setTimeout(()=>{localStorage.setItem('overview-year',$('#year').value);refresh();},250);};window.addEventListener('hashchange',refresh);
 try{boot=await api('/api/bootstrap');$('#month').value=localStorage.getItem('overview-month')||boot.month;$('#grain').value=localStorage.getItem('overview-grain')==='year'?'year':'month';$('#year').value=localStorage.getItem('overview-year')||$('#month').value.slice(0,4);await refresh();}catch(e){$('#content').innerHTML=`<div class="notice error">启动读取失败：${esc(e.message)}</div>`;}
 
-window.lingtuShell?.onSourceChanged(() => { if (!document.querySelector('dialog[open]')) void refresh(); });
+let sourceRefreshPending=false,sourceRefreshRunning=false;
+async function flushSourceRefresh(){
+ if(!sourceRefreshPending||sourceRefreshRunning||document.hidden||window.lingtuShell?.isVisible?.()===false||document.querySelector('dialog[open]')||business.surface.getDraftState().dirty)return;
+ sourceRefreshPending=false;sourceRefreshRunning=true;
+ try{await refresh();}finally{sourceRefreshRunning=false;if(sourceRefreshPending)queueMicrotask(()=>void flushSourceRefresh());}
+}
+window.lingtuShell?.onSourceChanged(()=>{sourceRefreshPending=true;void flushSourceRefresh();});
+window.lingtuShell?.onVisibilityChanged(()=>void flushSourceRefresh());
+document.addEventListener('visibilitychange',()=>void flushSourceRefresh());
+document.addEventListener('close',()=>void flushSourceRefresh(),true);
 
 document.addEventListener('click',event=>{
  const link=event.target.closest('a[data-view],#purchase-link,#sales-link,.brand');if(!link)return;event.preventDefault();

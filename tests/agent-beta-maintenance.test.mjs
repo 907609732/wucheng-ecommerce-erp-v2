@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {assertBetaDataNotInMaintenance,withBetaDataMaintenance,withBetaServiceStartFence} from '../desktop/agent-host/data-maintenance.mjs';
-import {agentBetaPaths,prepareAgentProfile,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
+import {assertBetaDataNotInMaintenance,withBetaDataMaintenance,withBetaServiceStartFence} from '../desktop/business-host/data-maintenance.mjs';
+import {agentBetaPaths,prepareAgentProfile,guardAgentServices} from '../desktop/business-host/isolation.mjs';
 
 test('service start and data maintenance share an exclusive fence',async t=>{
  const local=fs.mkdtempSync(path.join(os.tmpdir(),'agent-maintenance-')),old=process.env.LOCALAPPDATA,paths={root:path.join(local,'WuchengAgentBeta')};process.env.LOCALAPPDATA=local;

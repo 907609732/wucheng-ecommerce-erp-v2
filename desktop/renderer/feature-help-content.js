@@ -184,17 +184,5 @@ window.erpFeatureHelpContent = {
       "desktop/shared/changelog.mjs、build/electron-builder.config.cjs"
     ]
   },
-  "attendance": {
-    "title": "云仓同步 · 签到管理",
-    "summary": "按北京时间记录员工本人签到与每日任务完成，并由管理员催办未完成的工作。",
-    "manual": [
-      { "title": "员工每日操作", "ordered": true, "items": ["使用自己的 Tailscale 工作台账号登录，点击运行概览中的今日签到；管理员本机不能代替员工打卡。", "核对库存并处理预警。今日最新数据完成采集、校验入库和钉钉群发送后，点击确认今日任务完成，保留本人确认时间。", "签到和任务完成分别记录；工作日、每日截止时间及任务说明由管理员安排。"] },
-      { "title": "管理员设置与催办", "items": ["点击添加员工，填写与工作台成员一致的 Tailscale 登录账号、姓名、工作日和任务。此处添加员工不会授予工作台访问权限。", "配置员工的邮箱、钉钉用户 ID 或手机号，再启用相应渠道。邮件、短信和电话凭据只在主服务器本机保存。", "管理员逐人点击提醒，核对对象与渠道后确认。自动催办默认关闭，启用后仅对超过截止时间且未完成的员工执行。"] }
-    ],
-    "principle": [
-      { "title": "身份和完成凭据", "items": ["员工签到从网关核验的 Tailscale 身份取得人员标识，不能通过选择姓名替其他员工签到；只读成员不能提交签到。", "今日任务完成绑定持久化同步批次：来源日期、原始文件摘要、校验记录、已导入快照和群发送结果须匹配；旧库存补发不能作为今日完成。", "服务器按 Asia/Shanghai 判断日期和截止时间；每名员工每日保留一条签到记录，并分别记录签到与任务完成时间。"] },
-      { "title": "通知结果与运行边界", "warning": true, "items": ["每人每天每渠道最多发起一次提醒，包含失败或结果未知的记录；结果未知时先核对服务商记录，系统不会盲目重复短信或电话。", "服务商已受理表示已接受请求，不代表邮件已读、短信已到达、电话已接听或员工已完成工作。短信和电话可能产生服务费用。", "自动提醒需要主服务器持续在线。关机、休眠、软件退出或断网时无法保证按时催办。"] }
-    ],
-    "sources": ["core/erp/warehouse-daily.js、desktop/shared/warehouse-reminder-senders.mjs", "desktop/renderer/daily-work-ui.mjs、desktop/main.mjs", "desktop/modules/cloud-control.mjs、desktop/workbench/actor.mjs"]
-  }
+
 };

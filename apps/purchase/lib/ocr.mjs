@@ -7,7 +7,7 @@ import {createCanvas,DOMMatrix,ImageData,Path2D} from '@napi-rs/canvas';
 import {extractText} from './importer.mjs';
 
 const bundledModels=path.resolve(import.meta.dirname,'../resources/ocr');
-export const modelDir=fs.existsSync(path.join(bundledModels,'chi_sim.traineddata'))?bundledModels:path.join(process.env.LOCALAPPDATA||process.cwd(),'PurchaseDesk','ocr-models');
+export const modelDir=fs.existsSync(path.join(bundledModels,'chi_sim.traineddata'))?bundledModels:path.join(process.env.LOCALAPPDATA||process.env.LINGTU_MODULE_ROOT||path.resolve(import.meta.dirname,'..'),'PurchaseDesk','ocr-models');
 export async function recognize(buffer,filename,onProgress=()=>{}){
  return recognizeBatch([{buffer,filename}],onProgress);
 }

@@ -94,7 +94,8 @@ async function validateInputs({stage:stageInput,electronDist:electronInput,scanS
  const pkg=json(path.join(stage,'package.json')),launcher=json(path.join(stage,'desktop/launcher/package.json'));
  if(!/^\d+\.\d+\.\d+$/.test(pkg.version||'')||launcher.version!==pkg.version)throw Error('Preview must use the frozen stage version');
  if(manifest.format!=='agent-beta-resources/v2'||Object.keys(manifest.payloadHashes).some(rel=>rel.startsWith('workbench-gateway/')))throw Error('A single-runtime v2 stage is required');
- for(const rel of ['desktop/agent-runtime/mcp-entry.mjs','desktop/agent-runtime/hermes-bootstrap.py','apps/purchase/server.mjs','apps/sales/server.mjs','apps/overview/server.mjs','apps/purchase/public','apps/sales/public','apps/overview/public','apps/exporter/out/main/preview-ledger.js','apps/warehouse/runtime/resources/app.asar','apps/exporter/runtime/resources/app.asar'])if(!fs.existsSync(path.join(stage,rel)))throw Error('Complete preview resource missing: '+rel);
+ if(manifest.businessOnly!==true||Object.keys(manifest.engines||{}).length||Object.keys(manifest.payloadHashes).some(rel=>/^(?:desktop\/(?:agent-runtime|agent-host)\/|agent-engines\/|node_modules\/@agentclientprotocol\/)/.test(rel)))throw Error('Harness resources cannot enter the business preview');
+ for(const rel of ['desktop/business-interface/index.mjs','desktop/launcher/business-index.html','apps/purchase/server.mjs','apps/sales/server.mjs','apps/overview/server.mjs','apps/purchase/public','apps/sales/public','apps/overview/public','apps/exporter/out/main/preview-ledger.js','apps/warehouse/runtime/resources/app.asar','apps/exporter/runtime/resources/app.asar'])if(!fs.existsSync(path.join(stage,rel)))throw Error('Complete preview resource missing: '+rel);
  for(const id of ['purchase','sales','overview','exporter'])if(!fs.existsSync(path.join(stage,'apps',id,'node_modules')))throw Error('Frozen production dependencies missing: '+id);
  return {stage,electronDist,electronVersion:electronPackage.version,scanSummary,scanSummarySha256:digest(scanSummary),manifest,manifestSha256,sourceCommit,sourceDigests,version:pkg.version,audit};
 }
@@ -140,16 +141,17 @@ export function createPreviewLayout({stage,prepackaged,manifest,manifestSha256,s
  const resources=path.join(prepackaged,'resources'),appRoot=path.join(resources,'app'),runtimeRoot=path.join(resources,'agent-runtime');
  if(fs.existsSync(appRoot)||fs.existsSync(runtimeRoot))throw Error('Preview application/runtime directory already exists');
  if(manifest.format!=='agent-beta-resources/v2'||Object.keys(manifest.payloadHashes).some(rel=>rel.startsWith('workbench-gateway/')))throw Error('A single-runtime v2 stage is required');
+ if(manifest.businessOnly!==true||Object.keys(manifest.engines||{}).length||Object.keys(manifest.payloadHashes).some(rel=>/^(?:desktop\/(?:agent-runtime|agent-host)\/|agent-engines\/|node_modules\/@agentclientprotocol\/)/.test(rel)))throw Error('Harness resources cannot enter the business preview');
  copyTree(stage,runtimeRoot);
  for(const [rel,expected]of Object.entries(manifest.payloadHashes)){
   checkedPayloadRelative(rel);
   if(digest(path.join(runtimeRoot,...rel.split('/')))!==expected)throw Error('Frozen preview payload differs: '+rel);
  }
- if(digest(path.join(runtimeRoot,'agent-beta-resources.json'))!==manifestSha256||json(path.join(runtimeRoot,'desktop/agent-host/packaged-manifest.json')).sha256!==manifestSha256)throw Error('Copied preview manifest/pin mismatch');
+ if(digest(path.join(runtimeRoot,'agent-beta-resources.json'))!==manifestSha256||json(path.join(runtimeRoot,'desktop/business-host/packaged-manifest.json')).sha256!==manifestSha256)throw Error('Copied preview manifest/pin mismatch');
  const sourcePkgFile=path.join(stage,'package.json'),sourceLockFile=path.join(stage,'package-lock.json'),pkg=thinHostPackage(json(sourcePkgFile),{preview:true}),lock=thinHostLock(pkg);
  fs.mkdirSync(appRoot);const pkgFile=path.join(appRoot,'package.json'),lockFile=path.join(appRoot,'package-lock.json'),entryFile=path.join(appRoot,'preview-entry.mjs');
  fs.writeFileSync(pkgFile,JSON.stringify(pkg,null,2),{flag:'wx'});fs.writeFileSync(lockFile,JSON.stringify(lock,null,2),{flag:'wx'});fs.writeFileSync(entryFile,previewEntry,{flag:'wx'});
- const html=fs.readFileSync(path.join(runtimeRoot,'desktop/launcher/agent-index.html'),'utf8');
+ const html=fs.readFileSync(path.join(runtimeRoot,'desktop/launcher/business-index.html'),'utf8');
  if(!/class=["'][^"']*\bdevelopment-preview\b/.test(html))throw Error('Persistent development preview banner missing');
  const metadata={format:'agent-preview-package/v2',preview:true,verifiedFullBeta:false,version,sourceCommit,builderSourceSha256:digest(import.meta.filename),stageManifestSha256:manifestSha256,strictScanSummarySha256:scanSummarySha256,appId:'com.wucheng.ecommerce.erp.v2.agentpreview',profileRootName:'WuchengAgentBeta-preview',runtimeRootName:'agent-runtime',overlays:{package:{before:digest(sourcePkgFile),after:digest(pkgFile)},packageLock:{before:digest(sourceLockFile),after:digest(lockFile)},entry:{path:'preview-entry.mjs',sha256:digest(entryFile)}}};
  fs.writeFileSync(path.join(resources,'agent-preview-package.json'),JSON.stringify(metadata,null,2),{flag:'wx'});
@@ -167,6 +169,13 @@ export async function buildPreview(inputs){
  const {suiteSourceDigests,suiteSourceDigest}=await import('./suite-source-digests.mjs');const {globalSourceHash}=await import('./agent-beta-coverage.mjs');
  if(gitCommit()!==validated.sourceCommit||!same(validated.sourceDigests,{business:suiteSourceDigests(root),desktop:suiteSourceDigest(path.join(root,'desktop')),global:globalSourceHash()}))throw Error('Source changed during preview preparation');
  if(digest(validated.scanSummary)!==validated.scanSummarySha256)throw Error('Strict public scan evidence changed during preview preparation');
+ // Compaction happens before NSIS. This avoids building an unused full-size
+ // installer merely to obtain its prepackaged tree.
+ if(inputs.layoutOnly===true){
+  const inventory=[];function walk(dir,prefix=''){for(const item of fs.readdirSync(dir,{withFileTypes:true})){const rel=prefix+item.name,file=path.join(dir,item.name);if(item.isSymbolicLink())throw Error('Linked prepared snapshot');if(item.isDirectory())walk(file,rel+'/');else if(item.isFile())inventory.push({path:rel,bytes:fs.statSync(file).size,sha256:digest(file)});}}
+  walk(prepackaged);const receipt={prepackaged,stage:validated.stage,sourceCommit:validated.sourceCommit,stageManifestSha256:validated.manifestSha256,metadata,inventory,installerCreated:false};
+  const file=path.join(output,'snapshot-inputs.json');fs.writeFileSync(file,JSON.stringify(receipt,null,2),{flag:'wx'});return {file,...receipt,inventory:undefined};
+ }
  const configFile=path.join(output,'preview-builder.cjs'),artifactName=`WuchengAgentPreview-Setup-\${version}-preview-${validated.sourceCommit.slice(0,12)}-\${arch}.\${ext}`;
  const installerInclude=createPreviewInstallerInclude(output,prepackaged);
  const config={appId:metadata.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:validated.electronVersion,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions(installerInclude)};
@@ -185,6 +194,6 @@ export async function buildPreview(inputs){
  fs.writeFileSync(path.join(output,'preview-result.json'),JSON.stringify(summary,null,2),{flag:'wx'});return summary;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(import.meta.filename)){
- if(process.argv.length!==5)throw Error('Usage: node scripts/build-agent-preview.mjs <prepared-stage-absolute-path> <locked-electron-dist-absolute-path> <strict-scan-summary-absolute-path>');
- console.log(JSON.stringify(await buildPreview({stage:process.argv[2],electronDist:process.argv[3],scanSummary:process.argv[4]})));
+ if(![5,6].includes(process.argv.length)||process.argv.length===6&&process.argv[5]!=='--layout-only')throw Error('Usage: node scripts/build-agent-preview.mjs <prepared-stage-absolute-path> <locked-electron-dist-absolute-path> <strict-scan-summary-absolute-path> [--layout-only]');
+ console.log(JSON.stringify(await buildPreview({stage:process.argv[2],electronDist:process.argv[3],scanSummary:process.argv[4],layoutOnly:process.argv[5]==='--layout-only'})));
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {createHostIdentity} from '../desktop/agent-host/identity.mjs';
+import {createHostIdentity} from '../desktop/business-host/identity.mjs';
 import {createWorkbenchGateway} from '../desktop/workbench/gateway.mjs';
 import {WORKBENCH_MODULES} from '../desktop/workbench/actor.mjs';
 import {configureWorkbench} from '../desktop/workbench/server.mjs';

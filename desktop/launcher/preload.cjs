@@ -2,7 +2,8 @@ const {contextBridge, ipcRenderer} = require('electron');
 const invoke = name => (...args) => ipcRenderer.invoke(name, ...args);
 const on = name => callback => { const listener = (_event, value) => callback(value); ipcRenderer.on(name, listener); return () => ipcRenderer.removeListener(name, listener); };
 contextBridge.exposeInMainWorld('launcher', {
-  agentRequest: invoke('agent:request'),
+  businessStatus: invoke('business:status'),
+  businessReview: invoke('business:review'),
   openLink: invoke('links:open'),
   readLogs:invoke('diagnostics:read'),copyLogs:invoke('diagnostics:copy'),exportLogs:invoke('diagnostics:export'),openLogsFolder:invoke('diagnostics:open-folder'),reportDiagnostic:invoke('diagnostics:event'),
   ready:invoke('launcher:ready'),
@@ -20,6 +21,6 @@ contextBridge.exposeInMainWorld('launcher', {
   offlinePlan:invoke('modules:offline-plan'),
   offlineClose: invoke('modules:offline-close'), openData: invoke('modules:open-data'),
   hide: invoke('desks:hide'), bounds: invoke('desks:bounds'), businessSurface: invoke('desks:surface'), services: invoke('desks:status'), stop: invoke('desks:stop'),
-  onProgress: on('modules:progress'), onNavigate: on('desks:navigate'), onMessage: on('modules:message')
+  onDeskInvalidated: on('desks:invalidated'),onProgress: on('modules:progress'), onNavigate: on('desks:navigate'), onMessage: on('modules:message')
   ,checkUpdate:invoke('launcher:update-check'),installUpdate:invoke('launcher:update-install'),onUpdate:on('launcher:update')
 });

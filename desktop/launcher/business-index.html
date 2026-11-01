@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; frame-src blob:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>五成 ERP · 业务工作台</title>
+  <link rel="stylesheet" href="business-workspace.css">
+  <link rel="stylesheet" href="../shared/loading-screen.css">
+</head>
+<body class="business-mode">
+  <aside class="development-preview" role="note">开发预览 · 独立测试账本</aside>
+  <a class="skip-link" href="#main">跳到工作区</a>
+  <div class="app-shell">
+    <button id="toggle-sidebar" class="sidebar-toggle" type="button" aria-label="收起侧栏" aria-expanded="true" aria-controls="main-sidebar" title="收起侧栏">‹</button>
+    <nav id="main-sidebar" class="main-nav" aria-label="工作台导航">
+      <button type="button" data-view="business" aria-current="page"><span aria-hidden="true">▦</span> 业务工作台</button>
+      <button type="button" id="nav-warehouse"><span aria-hidden="true">▤</span> 云仓业务</button>
+      <button type="button" data-view="settings"><span aria-hidden="true">⚙</span> 设置</button>
+      <header class="app-header">
+        <a class="brand" href="#business" aria-label="五成 ERP 首页"><img src="../assets/lingtu-icon.png" alt=""><span><strong>五成 ERP</strong><small>采购、销售、经营，一起核对</small></span></a>
+        <div class="identity"><span id="environment" class="environment">正在确认账本</span><span id="actor">正在确认身份</span><span id="connection" class="connection" role="status">正在确认连接</span></div>
+      </header>
+      <p class="nav-note">原件与账目可追溯<br>正式变更由你复核</p>
+    </nav>
+    <main id="main" tabindex="-1">
+      <div id="error-banner" class="error-banner" role="alert" hidden><span id="error-message"></span><button id="dismiss-error" type="button" aria-label="关闭错误提示">×</button></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="view-business" class="view business-view" aria-label="业务工作台">
+        <div class="business-toolbar">
+          <div class="business-tabs" role="tablist" aria-label="业务工作台">
+            <button id="desk-tab-overview" type="button" role="tab" data-desk="overview" aria-selected="true" aria-controls="business-surface">经营</button>
+            <button id="desk-tab-purchase" type="button" role="tab" data-desk="purchase" aria-selected="false" aria-controls="business-surface" tabindex="-1">采购</button>
+            <button id="desk-tab-sales" type="button" role="tab" data-desk="sales" aria-selected="false" aria-controls="business-surface" tabindex="-1">销售</button>
+          </div>
+          <div class="business-toolbar-actions">
+            <details id="business-more" class="business-more"><summary>更多业务</summary><div><button type="button" data-desk="warehouse">云仓</button><button type="button" data-desk="exporter">订单导出</button></div></details>
+            <button id="business-review-open" type="button" aria-haspopup="dialog">待确认操作 <span id="business-review-count" class="count">—</span></button>
+          </div>
+        </div>
+        <div id="business-source-note" class="business-source-note" hidden><span id="business-source-label"></span><button id="business-source-back" type="button" class="text-button" hidden>返回原工作台</button><button id="business-source-retry" type="button" class="text-button" hidden>重新定位</button></div>
+        <div id="business-layout" class="business-layout"><div id="business-surface" class="business-surface" role="tabpanel" aria-labelledby="desk-tab-overview" tabindex="0"><div id="business-loading"></div><div id="business-failure" class="business-failure" hidden><h2>业务工作台暂未打开</h2><p id="business-failure-message"></p><button id="business-retry" type="button">重试</button></div></div></div>
+      </section>
+      <section id="view-settings" class="view settings-view" aria-labelledby="settings-title" hidden>
+        <div class="section-heading"><div><h1 id="settings-title">设置</h1><p>公司连接、外部 AI 接入和日志诊断。</p></div><button id="refresh-settings" type="button">刷新</button></div>
+        <section class="settings-card"><div class="section-heading"><h2>外部 AI 接入</h2><span id="workbench-version" class="fine-print"></span></div><p>将配置添加到你使用的 AI 工具，即可查询业务数据、准备导入和编辑预览。正式写入仍须在业务工作台复核。</p><div class="actions"><button id="copy-mcp" type="button">复制 MCP 配置</button><button id="copy-cli" type="button">复制 CLI 命令</button></div><pre id="integration-config" class="config-output" tabindex="0" aria-label="外部 AI 接入配置">正在读取配置…</pre></section>
+        <section class="settings-card"><h2>公司主机连接</h2><p id="connection-detail"></p><form id="connection-form"><div class="field-grid"><label>运行方式<select id="connection-mode"><option value="standalone">单机</option><option value="server">公司主机</option><option value="client">员工客户端</option></select></label><label id="connection-provider-label">私网连接<select id="connection-provider"><option value="embedded">内置私网连接</option><option value="system">现有 Tailscale 客户端</option></select></label><label id="connection-url-label" class="span-2">公司主机地址<input id="connection-url" type="url" autocomplete="off" placeholder="https://设备名.私网名.ts.net:9443"></label></div><div class="actions"><button id="check-connection" type="button">检查连接</button><button id="save-connection" type="submit" class="primary">保存连接</button></div><details id="private-network-tools" class="local-tools" hidden><summary>内置私网登录与连接</summary><p id="private-network-state" role="status"></p><div class="actions"><button id="network-login" type="button">保存并登录私网</button><button id="network-connect" type="button">登录后重新连接</button><button id="network-status" type="button">刷新状态</button><button id="network-logout" type="button">退出私网</button></div><p class="fine-print">登录会打开官方授权页面，请由你完成验证。</p></details><section id="connection-review" class="connection-review" aria-labelledby="connection-review-title" hidden><h3 id="connection-review-title" tabindex="-1">确认公司连接变更</h3><p id="connection-review-note"></p><pre id="connection-difference"></pre><div class="actions"><button id="confirm-connection" type="button" class="primary">确认启用公司主机</button><button id="cancel-connection" type="button">暂不变更</button></div></section></form></section>
+        <section class="settings-card"><h2>账本备份与记录</h2><p>进入对应业务的设置或“备份与记录”，创建包含原件和附件的备份。备份文件按各业务账本独立保存。</p><div class="actions"><button type="button" data-backup-desk="purchase">采购台备份入口</button><button type="button" data-backup-desk="sales">销售台备份入口</button><button type="button" data-backup-desk="overview">经营备份入口</button></div></section>
+        <details id="local-diagnostics" class="settings-card local-tools"><summary>日志与诊断</summary><p>查看最近主机日志，或导出诊断报告交给维护人员。</p><div class="actions"><button id="read-diagnostics" type="button">读取最近日志</button><button id="copy-diagnostics" type="button">复制最近日志</button><button id="export-diagnostics" type="button">导出诊断报告</button></div><pre id="diagnostic-output" tabindex="0" aria-label="最近主机日志"></pre></details>
+      </section>
+    </main>
+  </div>
+  <dialog id="business-review-dialog" class="review-dialog" aria-labelledby="business-review-title">
+    <div class="section-heading"><div><h2 id="business-review-title">待确认操作</h2><p>核对外部 AI 准备的业务变更，再决定是否提交。</p></div><button id="business-review-close" type="button" aria-label="关闭待确认操作">×</button></div>
+    <div id="business-review-loading"></div><p id="business-review-status" role="status"></p>
+    <div class="review-layout"><div><label>查看操作<select id="business-review-filter"><option value="pending">待确认</option><option value="all">全部操作记录</option></select></label><button id="business-review-refresh" type="button">刷新列表</button><div id="business-review-list" class="review-list" aria-label="业务操作列表"></div><button id="business-review-more" type="button" hidden>加载更多记录</button></div>
+      <section id="business-review-detail" aria-label="操作详情"><p class="empty">选择一项，查看变更内容。</p></section>
+    </div>
+  </dialog>
+  <script type="module" src="business-workspace.mjs"></script>
+</body>
+</html>

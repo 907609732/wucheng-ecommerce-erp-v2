@@ -2,9 +2,10 @@ const {contextBridge,ipcRenderer}=require('electron');
 const invoke=name=>(...args)=>ipcRenderer.invoke(name,...args);
 const on=name=>callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on(name,listener);return()=>ipcRenderer.removeListener(name,listener);};
 contextBridge.exposeInMainWorld('launcher',{
-  ready:invoke('launcher:ready'),agentRequest:invoke('agent:request'),
+  ready:invoke('launcher:ready'),businessStatus:invoke('business:status'),businessReview:invoke('business:review'),
+  connection:invoke('connection:get'),checkConnection:invoke('connection:check'),saveConnection:invoke('connection:save'),integrationConfig:invoke('launcher:integration-config'),copyIntegration:invoke('launcher:copy-integration'),readLogs:invoke('diagnostics:read'),
   open:invoke('modules:open'),hide:invoke('desks:hide'),bounds:invoke('desks:bounds'),businessSurface:invoke('desks:surface'),
-  services:invoke('desks:status'),onNavigate:on('desks:navigate'),onMessage:on('modules:message')
+  services:invoke('desks:status'),onDeskInvalidated:on('desks:invalidated'),onNavigate:on('desks:navigate'),onMessage:on('modules:message')
 });
 window.addEventListener('DOMContentLoaded',()=>{
   const banner=document.querySelector('.development-preview');

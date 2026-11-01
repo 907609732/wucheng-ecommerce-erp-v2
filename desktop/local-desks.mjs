@@ -3,23 +3,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ServiceManager} from './shared/service-manager.mjs';
-import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from './agent-host/business-surface.mjs';
+import {controlledBusinessLocator,businessSurfaceRequest,businessSurfaceScript,parseBusinessSurfaceResult} from './business-host/business-surface.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{},includeWarehouse=false,isRemote=()=>false,partitionFor=id=>'persist:lingtu-'+id,beforeOpen=async()=>{},prepareView=async()=>{},authorizeOperation=()=>{},decorateURL=(_id,url)=>url}={}){
-  const views=new Map(),viewLocations=new Map(),readyViews=new Set();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
+  const views=new Map(),viewLocations=new Map(),readyViews=new Set(),loadingViews=new Map(),visibleViews=new Map();let active='',generation=0,bounds={x:0,y:0,width:0,height:0};
   const rootSender=e=>e.sender===win.webContents&&e.senderFrame===win.webContents.mainFrame;
   const childSender=e=>[...views.values()].some(v=>e.sender===v.webContents&&e.senderFrame===v.webContents.mainFrame);
   const handlers=[];
   function handle(name,fn){ipcMain.handle(name,(event,...args)=>{authorizeOperation(name,args,event);return fn(event,...args);});handlers.push(name);}
+  function setViewVisible(view,show){
+    if(view.webContents.isDestroyed())return;
+    view.setVisible(show);
+    if(visibleViews.get(view)!==show){visibleViews.set(view,show);view.webContents.send('desks:visibility',{visible:show});}
+  }
   const layout=()=>{
     const size=win.getContentBounds(),zoom=win.webContents.getZoomFactor?.()||1;
     const x=Math.max(0,Math.min(size.width,Math.round(bounds.x*zoom))),y=Math.max(0,Math.min(size.height,Math.round(bounds.y*zoom)));
     const right=Math.max(0,Math.min(size.width,Math.round((bounds.x+bounds.width)*zoom))),bottom=Math.max(0,Math.min(size.height,Math.round((bounds.y+bounds.height)*zoom)));
-    const rect={x,y,width:right-x,height:bottom-y},visible=rect.width>0&&rect.height>0&&!win.isMinimized?.();
-    for(const [id,v]of views){const show=visible&&active===id;if(show)v.setBounds(rect);v.setVisible(show);}
+    const rect={x,y,width:right-x,height:bottom-y},visible=rect.width>0&&rect.height>0&&!win.isMinimized?.()&&win.isVisible?.()!==false;
+    for(const [id,v]of views){const show=visible&&active===id;if(show)v.setBounds(rect);setViewVisible(v,show);}
     return visible;
   };
-  const hide=(cancel=true)=>{if(cancel)generation++;active='';for(const v of views.values())v.setVisible(false);};
+  const hide=(cancel=true)=>{if(cancel)generation++;active='';for(const v of views.values())setViewVisible(v,false);};
   async function open(id,route){
     if(!['purchase','sales','overview',...(isRemote()?['warehouse','exporter']:[])].includes(id))throw Error('该扩展不支持内嵌打开');
     if(route!==undefined&&(typeof route!=='string'||route.length>2000||!/^\/(?:[a-zA-Z0-9/_-]+\.html)?(?:\?[a-zA-Z0-9%=&._-]+)?(?:#[a-zA-Z0-9/_-]+)?$/.test(route)||route.includes('..')))throw Error('扩展页面无效');
@@ -28,11 +33,13 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     const cap=await manager.ensure(id);
     if(mine!==generation)return {cancelled:true};
     const targetURL=decorateURL(id,cap.url+(route||'/'));
-    viewLocations.set(id,cap.url);
     let view=views.get(id);
+    if(view&&viewLocations.get(id)!==cap.url)throw Error('业务服务地址已变化，请保存当前内容后重新打开工作台');
+    viewLocations.set(id,cap.url);
     if(!view){
-      view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id)}});
-      views.set(id,view);win.contentView.addChildView(view);view.setVisible(false);
+      view=new WebContentsView({webPreferences:{preload:path.join(here,'extension-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,partition:partitionFor(id),backgroundThrottling:true}});
+      views.set(id,view);win.contentView.addChildView(view);setViewVisible(view,false);
+      view.webContents.on('did-finish-load',()=>{if(!view.webContents.isDestroyed())view.webContents.send('desks:visibility',{visible:visibleViews.get(view)===true});});
       const external=url=>{let target;try{target=new URL(url);}catch{return;}if(['127.0.0.1','localhost','[::1]'].includes(target.hostname)){notify('此本机链接不属于当前测试工作台，已阻止跳转');return;}if(/^https?:$/.test(target.protocol))void shell.openExternal(url).catch(e=>notify(e.message));};
       const crossModule=url=>{
         let target;try{target=new URL(url);}catch{return false;}const base=new URL(cap.url),pointer=target.pathname.match(/^\/apps\/(warehouse|purchase|sales|overview|exporter)(\/.*)?$/);let destination,route;
@@ -51,12 +58,20 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
       view.webContents.setWindowOpenHandler(({url})=>{if(crossModule(url))return {action:'deny'};if(url.startsWith(cap.url+'/'))void view.webContents.loadURL(url).catch(e=>notify(e.message));else external(url);return {action:'deny'};});
       const navigate=(event,url)=>{if(crossModule(url)){event.preventDefault();return;}if(!url.startsWith(cap.url+'/')){event.preventDefault();external(url);}};
       view.webContents.on('will-navigate',navigate);view.webContents.on('will-redirect',navigate);
-      view.webContents.on('render-process-gone',()=>notify(`${id} 页面意外退出，请重新打开`));
+      view.webContents.on('render-process-gone',()=>{readyViews.delete(view);loadingViews.delete(view);if(active===id)hide();win.webContents.send('desks:invalidated',{id,reason:'renderer-exited'});notify(`${id} 页面意外退出，请重新打开`);});
       view.webContents.session.on('will-download',(_e,item)=>{item.setSaveDialogOptions({title:'保存扩展导出文件'});});
     }
     await prepareView({id,view,cap});
     const currentURL=view.webContents.getURL?.();
-    if(!readyViews.has(view)||currentURL?.startsWith('chrome-error:')||route&&currentURL!==targetURL){readyViews.delete(view);await view.webContents.loadURL(targetURL);readyViews.add(view);}
+    if(!readyViews.has(view)||currentURL?.startsWith('chrome-error:')||route&&currentURL!==targetURL){
+      const pending=loadingViews.get(view);
+      if(pending)await pending.promise;
+      if(mine!==generation)return {cancelled:true};
+      if(!readyViews.has(view)||view.webContents.getURL()?.startsWith('chrome-error:')||route&&view.webContents.getURL()!==targetURL){
+        readyViews.delete(view);const promise=view.webContents.loadURL(targetURL);loadingViews.set(view,{promise,targetURL});
+        try{await promise;readyViews.add(view);}finally{if(loadingViews.get(view)?.promise===promise)loadingViews.delete(view);}
+      }
+    }
     if(mine!==generation)return {cancelled:true};
     hide(false);active=id;if(layout())view.webContents.focus();
     return {id,url:cap.url};
@@ -90,12 +105,12 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
     }finally{clearTimeout(timeout);}
   });
   handle('desks:bounds',(e,b)=>{if(!rootSender(e))throw Error('来源不符');if(!['x','y','width','height'].every(k=>Number.isFinite(b?.[k]))||b.width<0||b.height<0)throw Error('业务视图边界无效');bounds=Object.fromEntries(['x','y','width','height'].map(k=>[k,b[k]]));layout();});
-  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);viewLocations.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
+  handle('desks:stop',async(e,id)=>{if(!rootSender(e))throw Error('来源不符');const result=await manager.stop(id);const view=views.get(id);if(view){view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);loadingViews.delete(view);visibleViews.delete(view);views.delete(id);viewLocations.delete(id);}if(active===id)win.webContents.send('desks:navigate',{id:'home'});return result;});
   handle('desks:logs',async(e,id)=>{if(!rootSender(e)||isRemote()||!['purchase','sales','overview'].includes(id))throw Error('仅主机可查看服务日志');const file=path.join(manager.config(id).dataDir,'integration-service.log');if(fs.existsSync(file))await shell.openPath(file);});
   handle('desks:child-open',(e,id)=>{if(!childSender(e)||!['overview','exporter'].includes(id))throw Error('来源不符');win.webContents.send('desks:navigate',{id});return {requested:true};});
   handle('desks:child-home',e=>{if(!childSender(e))throw Error('来源不符');win.webContents.send('desks:navigate',{id:'home'});});
   handle('desks:data-changed',e=>{if(!childSender(e))throw Error('来源不符');views.get('overview')?.webContents.send('desks:source-changed');return {ok:true};});
-  win.on('resize',layout);win.on('restore',layout);win.on('minimize',layout);
+  win.on('resize',layout);win.on('restore',layout);win.on('minimize',layout);win.on('hide',layout);win.on('show',layout);
   const registryDir=path.dirname(manager.registryFile);fs.mkdirSync(registryDir,{recursive:true});
   const hostFile=path.join(registryDir,'host.json'),requestFile=path.join(registryDir,'open-request.json');let last='';
   let advertised=false;
@@ -106,6 +121,6 @@ export function installDeskViews(win,{manager=new ServiceManager(),notify=()=>{}
   };
   tick();const timer=setInterval(tick,5000);timer.unref();
   win.on('closed',()=>{clearInterval(timer);for(const name of handlers)ipcMain.removeHandler(name);for(const v of views.values())if(!v.webContents.isDestroyed())v.webContents.close();try{if(JSON.parse(fs.readFileSync(hostFile,'utf8')).pid===process.pid)fs.unlinkSync(hostFile);}catch{}});
-  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);views.delete(id);viewLocations.delete(id);};
+  const invalidate=id=>{const view=views.get(id);if(!view)return;if(active===id)hide();view.webContents.close();win.contentView.removeChildView(view);readyViews.delete(view);loadingViews.delete(view);visibleViews.delete(view);views.delete(id);viewLocations.delete(id);};
   return {open,hide,manager,invalidate,reset:()=>{hide();for(const id of [...views.keys()])invalidate(id);}};
 }

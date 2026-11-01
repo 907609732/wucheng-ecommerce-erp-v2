@@ -6,7 +6,7 @@ export function installBundledDesks({source,workspace,settingsPath}){
   for(const name of ['extension.json','extension.mjs','service-manager.mjs'])fs.copyFileSync(path.join(source,name),path.join(target,name));
   const shared=path.join(workspace,'shared');
   fs.mkdirSync(shared,{recursive:true});
-  for(const name of ['service-manager.mjs','workbench-location.mjs','user-data-path.mjs'])
+  for(const name of ['service-manager.mjs','business-service-client.mjs','business-service-host.mjs','business-service-worker.mjs','workbench-location.mjs','user-data-path.mjs'])
     fs.copyFileSync(path.resolve(source,'../../shared',name),path.join(shared,name));
   const settings=fs.existsSync(settingsPath)?JSON.parse(fs.readFileSync(settingsPath,'utf8')):{firstRunPending:true};
   if(!(settings.trustedExtensionIds||[]).includes('lingtu.desks')){

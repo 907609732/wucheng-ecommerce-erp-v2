@@ -7,10 +7,10 @@ import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {agentBetaPaths,assertPreviewPaths,assertPreviewLocalMode,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
-import {initializePreviewLedgers} from '../desktop/agent-host/preview-ledgers.mjs';
-import {verifyActivationResources} from '../desktop/agent-host/activation.mjs';
-import {AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2} from '../desktop/agent-host/resource-layout.mjs';
+import {agentBetaPaths,assertPreviewPaths,assertPreviewLocalMode,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/business-host/isolation.mjs';
+import {initializePreviewLedgers} from '../desktop/business-host/preview-ledgers.mjs';
+import {verifyActivationResources} from '../desktop/business-host/activation.mjs';
+import {AGENT_RESOURCE_FORMAT_V1,AGENT_RESOURCE_FORMAT_V2} from '../desktop/business-host/resource-layout.mjs';
 const repo=path.resolve(import.meta.dirname,'..'),require=createRequire(path.join(repo,'apps/exporter/package.json'));
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function fixture(t){const local=fs.mkdtempSync(path.join(os.tmpdir(),'erp-preview-init-')),previous=process.env.LOCALAPPDATA;process.env.LOCALAPPDATA=local;t.after(()=>{if(previous===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=previous;fs.rmSync(local,{recursive:true,force:true});});return {local,paths:agentBetaPaths({localAppData:local,preview:true,root:undefined})};}

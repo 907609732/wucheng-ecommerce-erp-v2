@@ -29,6 +29,11 @@ export async function openCainiao({month,api,post,esc,toast,modal}){
  $('#cn-start').onclick=action(async()=>{const j=await post('/api/cainiao/download-jobs',{from:$('#cn-from').value,to:$('#cn-range').checked?$('#cn-to').value:$('#cn-from').value,account:connection.account});focusId=j.id;});
  const click=e=>{const b=e.target.closest('[data-cn-action]');if(!b)return;action(async()=>{const j=jobs.find(j=>j.id===b.dataset.id);focusId=j.id;switch(b.dataset.cnAction){case 'resume':await post('/api/cainiao/download-jobs/'+j.id+'/resume',{});break;case 'cancel':await post('/api/cainiao/download-jobs/'+j.id+'/cancel',{});break;case 'folder':await post('/api/cainiao/download-jobs/'+j.id+'/open-folder',{});break;case 'again':{const next=await post('/api/cainiao/download-jobs',{from:j.months[0],to:j.months.at(-1),account:connection.account,force:true});focusId=next.id;break;}}})();};
  dialog.addEventListener('click',click);
- const cleanup=()=>{closed=true;clearTimeout(timer);$('#cn-auth-token').value='';dialog.removeEventListener('click',click);};dialog.addEventListener('close',cleanup,{once:true});
- async function poll(){try{await refresh();}catch(e){if(!closed)error(e);}finally{if(!closed)timer=setTimeout(poll,2500);}}await poll();
+ const visible=()=>!document.hidden&&window.lingtuShell?.isVisible?.()!==false;
+ let polling=false,unsubscribeVisibility;
+ const onVisibility=()=>{clearTimeout(timer);if(visible()&&!polling&&!closed)void poll();};
+ document.addEventListener('visibilitychange',onVisibility);
+ const cleanup=()=>{closed=true;clearTimeout(timer);document.removeEventListener('visibilitychange',onVisibility);unsubscribeVisibility?.();$('#cn-auth-token').value='';dialog.removeEventListener('click',click);};dialog.addEventListener('close',cleanup,{once:true});
+ async function poll(){if(closed||polling||!visible())return;polling=true;try{await refresh();}catch(e){if(!closed)error(e);}finally{polling=false;if(!closed&&visible())timer=setTimeout(poll,2500);}}
+ unsubscribeVisibility=window.lingtuShell?.onVisibilityChanged(onVisibility);await poll();
 }

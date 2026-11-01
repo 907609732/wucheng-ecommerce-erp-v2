@@ -116,21 +116,16 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
           if(route==='/state')return send(200,{version,busy:isBusy(),maintenance:maintenance(),executionLocation:'server',permissions:{read:true,runTasks:true},...(business.getState?sanitize(await business.getState(actor)): {}),...getDataSetIdentity()});
           if(route==='/inventory')return send(200,sanitize(await business.getInventory(actor)));
           if(route==='/daily')return send(410,{error:'云仓签到功能已移除'});
-          if(false){
-            if(!business.getDailyStatus)return send(503,{error:'签到服务尚未就绪'});
-            return send(200,sanitize(await business.getDailyStatus(actor)));
-          }
+
           if(route==='/monthly-sales')return send(200,sanitize(await business.getMonthlySales(Object.fromEntries(['year','selectedMonth','scope','seriesMode','sku'].map(key=>[key,String(url.searchParams.get(key)||'')])),actor)));
           if(route==='/task')return send(200,sanitize(await business.getTaskState(actor)));
           if(route==='/logs'){const state=sanitize(await business.getTaskState(actor)),limit=Math.max(1,Math.min(100,Number(url.searchParams.get('limit'))||30));return send(200,{logs:(Array.isArray(state.logs)?state.logs:[]).slice(-limit)});}
           return send(404,{error:'未知云仓业务接口'});
         }
         if(route==='/daily'||route.startsWith('/daily/'))return send(410,{error:'云仓签到功能已移除'});
-        const dailyRoute=['/daily/action','/daily/config','/daily/remind'].includes(route);
-        if(req.method!=='POST'||!['/jobs','/jobs/stop','/host-action','/send-latest-valid','/daily/action','/daily/config','/daily/remind'].includes(route))return send(404,{error:'未知云仓业务接口'});
+        if(req.method!=='POST'||!['/jobs','/jobs/stop','/host-action','/send-latest-valid'].includes(route))return send(404,{error:'未知云仓业务接口'});
         if(maintenance())return send(409,{error:'模块正在安装或迁移检查',code:'MODULE_MAINTENANCE'});
-        if(dailyRoute&&actor.channel!=='ui')return send(403,{error:'签到及催办必须在工作台界面操作'});
-        let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>(dailyRoute?524288:65536))return send(413,{error:'请求过大'});}
+        let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>65536)return send(413,{error:'请求过大'});}
         const body=JSON.parse(raw||'{}'),hash=createHash('sha256').update(JSON.stringify(body)).digest('hex');
         const old=workbenchDb.prepare('SELECT * FROM requests WHERE actor_id=? AND request_id=?').get(actor.id,actor.requestId);
         if(old){if(old.route!==req.url||old.payload_hash!==hash)return send(409,{error:'重复请求内容发生变化',code:'IDEMPOTENCY_CONFLICT'});const result=JSON.parse(old.result);return send(result.error?result.status||400:200,result);}
@@ -140,11 +135,7 @@ export async function startCloudControl({root, dataDir, version, busy, activate,
           const task=route==='/jobs'?taskPayload(body):null;
           const owner={...actor,requestedBy:actor.login,executionLocation:'server'};
           let value;
-          if(dailyRoute){
-            const handler=route==='/daily/action'?business.dailyAction:route==='/daily/config'?business.saveDailyConfig:business.remindDaily;
-            if(typeof handler!=='function')throw Object.assign(Error('签到服务尚未配置'),{status:503});
-            value=await handler(owner,body);
-          }else if(route==='/host-action'){
+          if(route==='/host-action'){
             if(typeof business.requestLogin!=='function')throw Object.assign(Error('主机登录接口尚未配置'),{status:503});
             value={state:'waiting-host-action',message:'已请求主服务器打开菜鸟登录页，请由主机操作人完成登录、扫码或验证码。',task:await business.requestLogin(owner)};
           }else if(route==='/send-latest-valid'){

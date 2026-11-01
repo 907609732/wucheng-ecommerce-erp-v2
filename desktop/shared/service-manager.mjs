@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {spawn} from 'node:child_process';
+import {spawnBusinessService} from './business-service-client.mjs';
 import net from 'node:net';
 import {createHash,randomUUID} from 'node:crypto';
 import {getWorkbenchLocation} from './workbench-location.mjs';
@@ -174,7 +175,10 @@ export class ServiceManager{
         writeStartLock(lock,record);
         try{
           if(this.agentManaged){env.LINGTU_AGENT_MANAGED='1';delete env.LINGTU_WORKBENCH_POLICY_FILE;}
-          const child=spawn(executable,args,{...(!native?{cwd:c.root}:{}),detached:true,windowsHide:true,shell:false,stdio:native?'ignore':['ignore',log,log],env});
+          if(this.businessOnly)env.LINGTU_BUSINESS_ONLY='1';
+          if(this.testLedger)env.LINGTU_TEST_LEDGER='1';
+          if(!native)env.LINGTU_MODULE_ROOT=c.root;
+          const child=!native&&c.managed&&c.sharedServiceHost===true?spawnBusinessService({registryFile:this.registryFile,executable,entry:args[0],env,log,id,lockFile:lock,lockToken:record.token}):spawn(executable,args,{...(!native?{cwd:c.root}:{}),detached:true,windowsHide:true,shell:false,stdio:native?'ignore':['ignore',log,log],env});
           const spawned=new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});spawned.catch(()=>{});
           childExited=new Promise(resolve=>child.once('exit',(code,signal)=>{exitInfo={code,signal};resolve();}));
           if(child.pid){record.childPid=child.pid;writeStartLock(lock,record);}

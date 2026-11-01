@@ -6,7 +6,8 @@ import {spawn,execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {ServiceManager} from '../desktop/shared/service-manager.mjs';
-import {privateProfileEnvironment} from '../desktop/agent-runtime/engine-common.mjs';
+// Fixture-owned profiles are separate from all installed application profiles.
+function privateProfileEnvironment(home){return {HOME:home,USERPROFILE:home,APPDATA:path.join(home,'roaming'),LOCALAPPDATA:path.join(home,'local'),XDG_CONFIG_HOME:path.join(home,'config'),XDG_DATA_HOME:path.join(home,'data'),GH_CONFIG_DIR:path.join(home,'gh')};}
 
 // This manual QA launcher is deliberately separate from the production/Beta
 // launcher. It never creates a packaging proof or changes a user's registry.
@@ -27,7 +28,8 @@ if(!process.argv.includes('--launch')){
     }
     throw Error('Could not allocate an independent fixture port');
   };
-  const manifest={schemaVersion:1,purpose:'hybrid-source-manual-acceptance',nonce,root,fixtureRoot,registryFile,output,scope:'Real source Electron and three HTTP services, synthetic temporary books, no company model credentials; not a packaged Beta'};
+  const debugPort=process.argv.includes('--debug')?await freePort():null;
+  const manifest={debugPort,schemaVersion:1,purpose:'hybrid-source-manual-acceptance',nonce,root,fixtureRoot,registryFile,output,scope:'Real source Electron and three HTTP services, synthetic temporary books, no company model credentials; not a packaged Beta'};
   let manager,child,exitCode=1;
   try{
     for(const name of Object.keys(process.env))if(/(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET)|^(?:CODEX_HOME|HERMES_HOME|LINGTU_REGISTRY_PATH|LINGTU_WORKBENCH_POLICY_FILE)$/i.test(name))delete process.env[name];
@@ -56,7 +58,7 @@ if(!process.argv.includes('--launch')){
     env.HYBRID_SOURCE_FIXTURE_ROOT=fixtureRoot;
     const log=fs.openSync(path.join(output,'electron.log'),'a');
     // This child is the interactive acceptance window, not a background helper.
-    try{child=spawn(electron,[path.join(root,'tests','fixtures','hybrid-source-electron')],{cwd:root,env,windowsHide:false,stdio:['ignore',log,log],shell:false});}finally{fs.closeSync(log);}
+    try{child=spawn(electron,[...(debugPort?['--remote-debugging-address=127.0.0.1','--remote-debugging-port='+debugPort]:[]),path.join(root,'tests','fixtures','hybrid-source-electron')],{cwd:root,env,windowsHide:false,stdio:['ignore',log,log],shell:false});}finally{fs.closeSync(log);}
     const stop=()=>{if(child?.exitCode===null)child.kill();};process.once('SIGINT',stop);process.once('SIGTERM',stop);
     console.log(JSON.stringify({scope:manifest.scope,fixtureRoot,output,windowTitle:'五成 ERP · 三合一隔离验收',pid:child.pid,acceptancePassed:false}));
     exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {agentBetaPaths,assertAgentRegistry} from '../agent-host/isolation.mjs';
+import {agentBetaPaths,assertAgentRegistry} from '../business-host/isolation.mjs';
 
 const nativeComponents={warehouse:{name:'wucheng-agent-beta-warehouse',main:'desktop/main.mjs'},exporter:{name:'lingtu-order-export',main:'out/main/index.js'}};
 const physicalFs=process.versions.electron?process.getBuiltinModule('original-fs'):fs;

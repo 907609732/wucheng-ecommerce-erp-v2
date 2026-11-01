@@ -152,40 +152,6 @@
       "semantic": "The finding is a FourKeyMap class export assignment in minified terminal UI code, not a credential value."
     },
     {
-      "owner": "first-party",
-      "pkgName": "wucheng-agent-beta",
-      "version": "0.11.6",
-      "relativeFile": "desktop/agent-runtime/hermes-compatibility.json",
-      "fileSha256": "e3998857465b2277caf86779c0893a6684d1d04174bf8159453c2192122ebe8e",
-      "rule": "generic-api-key",
-      "spans": [
-        {
-          "startLine": 11,
-          "endLine": 11,
-          "startColumn": 13,
-          "endColumn": 101
-        }
-      ],
-      "semantic": "The finding is a 64-hex SHA256 of a public compatibility source file. All seven compatibility-file values in this JSON are SHA256 digests."
-    },
-    {
-      "owner": "first-party",
-      "pkgName": "wucheng-agent-beta",
-      "version": "0.11.6",
-      "relativeFile": "desktop/agent-runtime/settings.mjs",
-      "fileSha256": "3aa2e739dc365403e730616313b8dfe6c6dafb858e451f71c365641b8482e527",
-      "rule": "generic-api-key",
-      "spans": [
-        {
-          "startLine": 23,
-          "endLine": 23,
-          "startColumn": 28,
-          "endColumn": 72
-        }
-      ],
-      "semantic": "The finding is the incoming.apiKey / clearApiKey boolean-expression code used to decide whether an existing secret must be read, not a hardcoded secret value."
-    },
-    {
       "owner": "dependency",
       "pkgName": "node-forge",
       "version": "1.4.0",

@@ -54,21 +54,9 @@ export function createWarehouseDaily({databasePath, now=()=>new Date(), senders=
     const successful=rows.find(r=>verified(r)&&r.snapshotHash&&r.snapshotHash===inventorySnapshotFingerprint(inventory)),latest=rows[0];
     return {...(successful||latest||{collectionStatus:'pending',validationStatus:'pending',deliveryStatus:'pending'}),complete:Boolean(successful),runId:(successful||latest)?.id||'',expectedSourceDate:expected,lastAttempt:latest||null};
   }
-  function employeesFor(actor) {
-    const day=businessDate(now()),c=config();
-    const rows=c.employees.map(e=>{
-      const record=db.prepare('SELECT * FROM warehouse_attendance WHERE login=? AND business_date=?').get(e.login,day);
-      const due=e.enabled&&e.workdays.includes(weekday(day));
-      const deadlineAt=`${day}T${e.deadline}:00+08:00`,overdue=now().getTime()>new Date(deadlineAt).getTime();
-      return {...e,checkInAt:record?.check_in_at||'',completedAt:record?.completed_at||'',completedRunId:record?.run_id||'',status:!due?'off':record?.completed_at?'completed':overdue?'overdue':'pending',late:Boolean(record?.completed_at&&new Date(record.completed_at)>new Date(deadlineAt))};
-    });
-    return rows;
-  }
   async function status(actor) {
     if(!actor?.id)throw problem('缺少已验证的工作台身份',401);
-    const employees=employeesFor(actor),all=true,due=employees.filter(e=>e.status!=='off');
-    const reminders=db.prepare('SELECT * FROM warehouse_reminders WHERE business_date=? ORDER BY created_at DESC').all(businessDate(now())).filter(r=>all||r.login===normalizeLogin(actor.login)).map(r=>({...JSON.parse(r.payload),login:r.login,channel:r.channel,status:r.status,createdAt:r.created_at}));
-    return {businessDate:businessDate(now()),timeZone:'Asia/Shanghai',expectedSourceDate:expectedInventoryDate(now()),sync:syncStatus(),actor:{id:actor.id,login:actor.login,role:actor.role,local:Boolean(actor.local)},me:actor.local?null:employees.find(e=>e.login===normalizeLogin(actor.login))||null,employees,team:{expected:due.length,checkedIn:due.filter(e=>e.checkInAt).length,completed:due.filter(e=>e.completedAt).length,pending:due.filter(e=>!e.completedAt).length},config:all?config():{employees:[],autoRemind:false},channels:await getChannels(),reminders};
+    return {businessDate:businessDate(now()),timeZone:'Asia/Shanghai',expectedSourceDate:expectedInventoryDate(now()),sync:syncStatus(),actor:{id:actor.id,login:actor.login,role:actor.role,local:Boolean(actor.local)},me:null,employees:[],team:{expected:0,checkedIn:0,completed:0,pending:0},config:{employees:[],autoRemind:false},channels:{},reminders:[]};
   }
   function removed(){throw problem('云仓签到功能已移除',410);}
   async function tick(){return {skipped:true,reason:'attendance-removed'};}

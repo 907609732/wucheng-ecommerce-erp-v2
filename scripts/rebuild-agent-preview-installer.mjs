@@ -19,9 +19,9 @@ export function rebuildInstaller(frozen){
  const resources=path.join(frozen,'resources'),meta=read(path.join(resources,'agent-preview-package.json')),app=read(path.join(resources,'app/package.json'));
  if(meta.preview!==true||meta.verifiedFullBeta!==false||meta.appId!=='com.wucheng.ecommerce.erp.v2.agentpreview'||meta.profileRootName!=='WuchengAgentBeta-preview'||meta.runtimeRootName!=='agent-runtime'||app.name!=='wucheng-agent-preview'||app.version!==meta.version||app.main!=='preview-entry.mjs')throw Error('Frozen preview identity is invalid');
  const runtime=path.join(resources,'agent-runtime'),manifestFile=path.join(runtime,'agent-beta-resources.json'),manifest=read(manifestFile);
- if(sha(manifestFile)!==meta.stageManifestSha256||read(path.join(runtime,'desktop/agent-host/packaged-manifest.json')).sha256!==meta.stageManifestSha256)throw Error('Frozen resource pin differs');
+ if(sha(manifestFile)!==meta.stageManifestSha256||read(path.join(runtime,'desktop/business-host/packaged-manifest.json')).sha256!==meta.stageManifestSha256)throw Error('Frozen resource pin differs');
  const dist=path.join(root,'apps/exporter/node_modules/electron/dist'),version=fs.readFileSync(path.join(dist,'version'),'utf8').trim();
- if(version!=='44.7.0'||manifest.sharedElectron.version!==version||sha(path.join(frozen,'WuchengAgentPreview.exe'))!==sha(path.join(dist,'electron.exe')))throw Error('Electron distribution/version differs');
+ if(manifest.businessOnly!==true||Object.keys(manifest.engines||{}).length||manifest.sharedElectron.version!==version||sha(path.join(frozen,'WuchengAgentPreview.exe'))!==sha(path.join(dist,'electron.exe')))throw Error('Electron distribution/version differs');
  const output=fs.mkdtempSync(path.join(base,'installer-repair-')),stagingBase=path.join(os.homedir(),'.codex/installer-staging');
  fs.mkdirSync(stagingBase,{recursive:true});physical(stagingBase);
  // makensis 3.0.4.1 still opens File /r inputs through MAX_PATH-limited APIs.
@@ -33,14 +33,12 @@ export function rebuildInstaller(frozen){
  const measured=new Map(inventory.map(item=>[item.path,item.sha256]));
  for(const [relative,digest] of Object.entries(manifest.payloadHashes)){if(relative.includes('\\')||relative.includes(':')||relative.split('/').some(p=>!p||p==='.'||p==='..')||measured.get('resources/agent-runtime/'+relative)!==digest)throw Error('Frozen business payload no longer matches its manifest: '+relative);}
  for(const [relative,digest] of [['resources/app/package.json',meta.overlays.package.after],['resources/app/package-lock.json',meta.overlays.packageLock.after],['resources/app/preview-entry.mjs',meta.overlays.entry.sha256]])if(measured.get(relative)!==digest)throw Error('Frozen shell overlay differs');
- // Keep the canonical engine entry intact; expose the documented packaging path.
- const harnessSource=path.join(prepackaged,'resources/agent-runtime/desktop/agent-runtime/hermes-bootstrap.py'),harness=path.join(prepackaged,'resources/agent-engines/hermes-bootstrap.py');
- fs.mkdirSync(path.dirname(harness),{recursive:true});fs.copyFileSync(harnessSource,harness,fs.constants.COPYFILE_EXCL);
+ for(const entry of ['resources/agent-engines','resources/agent-runtime/desktop/agent-runtime','resources/agent-runtime/desktop/agent-host'])if(fs.existsSync(path.join(prepackaged,entry)))throw Error('Harness must not be included in business preview: '+entry);
  if(inventory.some(item=>path.join(prepackaged,...item.path.split('/')).length>=260))throw Error('NSIS source path exceeds MAX_PATH; choose a shorter staging root');
  const include=createPreviewInstallerInclude(output,prepackaged),artifactName='WuchengAgentPreview-Setup-'+meta.version+'-installer-repair-x64.exe';
  const config={appId:meta.appId,productName:'五成工作台 开发预览',executableName:'WuchengAgentPreview',artifactName,electronVersion:version,directories:{output:path.join(output,'output')},publish:null,npmRebuild:false,win:{target:[{target:'nsis',arch:['x64']}]},nsis:previewInstallerOptions(include)};
  const configFile=path.join(output,'preview-builder.cjs');fs.writeFileSync(configFile,'module.exports='+JSON.stringify(config),{flag:'wx'});
- const inputs={source:frozen,prepackaged,applicationSourceCommit:meta.sourceCommit,stageManifestSha256:meta.stageManifestSha256,electronVersion:version,electronSha256:sha(path.join(frozen,'WuchengAgentPreview.exe')),inventory,compatibilityOverlay:{path:'resources/agent-engines/hermes-bootstrap.py',sha256:sha(harness)},installerConfigSha256:sha(configFile),businessCodeChanged:false};
+ const inputs={source:frozen,prepackaged,applicationSourceCommit:meta.sourceCommit,stageManifestSha256:meta.stageManifestSha256,electronVersion:version,electronSha256:sha(path.join(frozen,'WuchengAgentPreview.exe')),inventory,installerConfigSha256:sha(configFile),businessCodeChanged:false};
  fs.writeFileSync(path.join(output,'verified-frozen-inputs.json'),JSON.stringify(inputs,null,2),{flag:'wx'});
  console.log(JSON.stringify({phase:'building',output,files:inventory.length,bytes:inventory.reduce((n,f)=>n+f.bytes,0)}));
  const log=fs.openSync(path.join(output,'builder.log'),'wx'),started=Date.now();let result;

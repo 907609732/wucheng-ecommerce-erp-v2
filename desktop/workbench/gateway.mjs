@@ -185,7 +185,7 @@ export async function createWorkbenchGateway(options={}) {
   app.route({method:methods,url:'/apps/:id/',handler:(req,reply)=>proxy(req,reply,true)});
   app.route({method:methods,url:'/apps/:id/*',handler:(req,reply)=>proxy(req,reply,true)});
   const context={requireSession,requireAdmin,resolveActor,writeAudit,operationStore:store,storeDir,serverId:store.serverId,dataSetId:store.dataSetId,publicOrigin};
-  if(options.agentRuntime){const {registerAgentRoutes}=await import('../agent-host/routes.mjs');await registerAgentRoutes(app,context,options.agentRuntime);}
+  if(options.businessRuntime){const {registerBusinessRoutes}=await import('../business-host/routes.mjs');await registerBusinessRoutes(app,context,options.businessRuntime);}
   if(registerRoutes)await registerRoutes(app,context);
   app.addHook('onClose',async()=>store.close());
   return {app,...context,async start(){try{return await app.listen({host,port});}catch(error){await app.close();throw error;}},async stop(){await app.close();}};

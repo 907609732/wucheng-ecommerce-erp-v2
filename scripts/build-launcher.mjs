@@ -4,7 +4,9 @@ import {spawnSync} from 'node:child_process';
 import tailnetResource from '../build/tailnet-resource.cjs';
 import {digest,verifyCatalog} from '../desktop/modules/package-format.mjs';
 import {suiteSourceDigests} from './suite-source-digests.mjs';
-const root=process.cwd();fs.mkdirSync('dist',{recursive:true});
+const root=process.cwd();
+if(fs.existsSync(path.join(root,'desktop/launcher/business-index.html')))throw Error('纯业务重构尚未授权切换正式安装身份。请使用 scripts/agent-beta-stage.mjs --prepare、scripts/build-agent-preview.mjs --layout-only 与 scripts/package-compact-agent-preview.mjs 构建独立预览安装包；旧正式发布管线已停用。');
+fs.mkdirSync('dist',{recursive:true});
 const hostVersion=JSON.parse(fs.readFileSync('desktop/launcher/package.json','utf8')).version;
 // A deliverable always contains the complete product. --shell-only is restricted
 // to isolated developer directory/prepare checks, never an installer release.
@@ -62,7 +64,7 @@ if(install.status!==0)throw Error('Launcher dependency installation failed');
 // The detached gateway uses the shared Node runtime and ordinary files, so a host
 // upgrade cannot terminate it or point Node at an Electron ASAR archive.
 const gateway=fs.mkdtempSync(path.resolve('dist/workbench-gateway-'));
-for(const relative of [...['actor','descriptors','gateway','manifest','policy','server','store'].map(name=>'desktop/workbench/'+name+'.mjs'),'desktop/workbench-migration','desktop/shared/service-manager.mjs','desktop/shared/user-data-path.mjs','desktop/shared/workbench-location.mjs'])fs.cpSync(path.join(root,relative),path.join(gateway,relative),{recursive:true});
+for(const relative of [...['actor','descriptors','gateway','manifest','policy','server','store'].map(name=>'desktop/workbench/'+name+'.mjs'),'desktop/workbench-migration','desktop/shared/service-manager.mjs','desktop/shared/business-service-client.mjs','desktop/shared/business-service-host.mjs','desktop/shared/business-service-worker.mjs','desktop/shared/user-data-path.mjs','desktop/shared/workbench-location.mjs',...['isolation','common','bridge','routes','trust'].map(name=>'desktop/business-host/'+name+'.mjs')])fs.cpSync(path.join(root,relative),path.join(gateway,relative),{recursive:true});
 const gatewayDependencies=Object.fromEntries(['fastify','@fastify/reply-from','@fastify/cookie'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(root,'node_modules',name,'package.json'),'utf8')).version]));
 fs.writeFileSync(path.join(gateway,'package.json'),JSON.stringify({name:'lingtu-workbench-gateway',version:pkg.version,private:true,type:'module',dependencies:gatewayDependencies},null,2));
 const gatewayLock=JSON.parse(fs.readFileSync(path.join(root,'package-lock.json'),'utf8'));gatewayLock.name='lingtu-workbench-gateway';gatewayLock.version=pkg.version;gatewayLock.packages['']={name:gatewayLock.name,version:pkg.version,dependencies:gatewayDependencies};

@@ -1,9 +1,6 @@
 {
   "format": "agent-beta-stage-plan/v1",
-  "engines": {
-    "codex": "desktop/agent-runtime/codex-engine.mjs",
-    "hermes": "desktop/agent-runtime/hermes-engine.mjs"
-  },
+  "engines": {},
   "warehouseEntries": [
     "desktop/workbench/warehouse-agent.mjs",
     "desktop/workbench/warehouse-agent-api.mjs"
@@ -22,6 +19,7 @@
       "src/main/agent-adapter.mjs"
     ]
   },
-  "betaVersion": "0.11.7",
-  "purchaseMobilePort": 27380
+  "betaVersion": "0.11.8",
+  "purchaseMobilePort": 27380,
+  "businessOnly": true
 }

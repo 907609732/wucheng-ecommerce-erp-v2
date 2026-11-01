@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, safeStorage, shell, dialog } from "electro
 import {readComponentContext} from "./shared/component-context.mjs";
 import {installBundledDesks} from './shared/install-desks.mjs';
 import {ServiceManager} from './shared/service-manager.mjs';
-import {agentBetaPaths,guardAgentServices} from './agent-host/isolation.mjs';
+import {agentBetaPaths,guardAgentServices} from './business-host/isolation.mjs';
 import {startCloudControl} from './modules/cloud-control.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -31,7 +31,7 @@ import { requestedUserDataPath } from "./shared/user-data-path.mjs";
 import { getWorkbenchLocation } from "./shared/workbench-location.mjs";
 import { readCainiaoInventory } from "./shared/inventory-store.mjs";
 import {createWarehouseDaily,expectedInventoryDate} from '../core/erp/warehouse-daily.js';
-import {normalizeReminderSettings,reminderChannelStates,createWarehouseReminderSenders} from './shared/warehouse-reminder-senders.mjs';
+
 import { readMonthlySalesDashboard } from "./shared/monthly-sales-store.mjs";
 import { createUpdater } from "./updater.mjs";
 import { terminateProcessTree } from "./shared/task-process.mjs";
@@ -51,6 +51,8 @@ const componentLaunchArgs = componentContext?.launchArgs || [];
 // Explicit opt-in from the isolated Agent host. Existing production scheduling
 // remains unchanged until a separately approved migration switches ownership.
 const agentManaged=process.env.LINGTU_AGENT_MANAGED==='1';
+const businessOnly=process.env.LINGTU_BUSINESS_ONLY==='1';
+const testLedger=process.env.LINGTU_TEST_LEDGER==='1';
 let warehouseAgent;
 
 let startupLocation;
@@ -113,13 +115,12 @@ let reminderTimer = null;
 let reminderWork = 0;
 const localDailyActor={id:'local-admin',login:'local-admin',name:'本机管理员',role:'admin',local:true,channel:'ui'};
 function dailyService() {
-  if(!warehouseDaily)warehouseDaily=createWarehouseDaily({databasePath:inventoryDatabasePath(),senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});
+  if(!warehouseDaily)warehouseDaily=createWarehouseDaily({databasePath:inventoryDatabasePath()});
   return warehouseDaily;
 }
 async function dailyStatus(actor=localDailyActor) {
   assertDailyAvailable();
   const value=await dailyService().status(actor);
-  if(actor.local)value.reminderSettings={...normalizeReminderSettings(readSettings().warehouseReminders),secretFlags:Object.fromEntries(['smtpPassword','aliyunAccessKeyId','aliyunAccessKeySecret'].map(key=>[key,Boolean(cachedSecrets?.[key])]))};
   return value;
 }
 async function dailyRemind(actor,payload) {
@@ -356,8 +357,8 @@ function emitState(extra = {}) {
     monthlySalesDueMonth = latestCompleteMonth();
   }
   const payload = {
-    schedulingOwner:agentManaged?'agent':'legacy',
-    legacyAutomaticRemindersEnabled:!agentManaged,
+    schedulingOwner:testLedger?'test-disabled':businessOnly?'business':'legacy',
+    legacyAutomaticRemindersEnabled:false,
     running: Boolean(runningChild),
     runningKind,
     stopRequested: stopRequestedPid !== null,
@@ -453,7 +454,7 @@ function currentBranding() {
 }
 
 async function startProcess(kind, trigger = "manual", options = {}, context = {}) {
-  if(agentManaged)throw Object.assign(Error('Agent管理模式须从中央任务结果页复核后执行'),{code:'AGENT_REVIEW_REQUIRED'});
+  if(agentManaged&&!(businessOnly&&!testLedger&&trigger==='schedule'))throw Object.assign(Error('请从业务复核页确认后执行'),{code:'AGENT_REVIEW_REQUIRED'});
   if(fs.existsSync(path.join(app.getPath('userData'),'.workbench-maintenance.json')))throw Object.assign(Error('账本正在迁移维护，恢复并核对完成前不能执行任务'),{code:'MODULE_MAINTENANCE'});
   if (runningChild || runningTaskPromise) throw new Error("已有任务正在运行，请等待完成");
   const definition = taskDefinition(kind, options);
@@ -875,7 +876,7 @@ function configureSchedule() {
   scheduleTimer = null;
   nextScheduledRun = null;
   nextMonthlyScheduledRun = null;
-  if(agentManaged){emitState();return;}
+  if(testLedger||(agentManaged&&!businessOnly)){emitState();return;}
   const settings = readSettings();
   configureLoginItem(settings);
   if (settings.runtimeMode === "client") {
@@ -1301,7 +1302,7 @@ app.whenReady().then(async () => {
       business: {
         agentManaged,
         getAgentAdapter: agentManaged?async key=>{
-          if(!warehouseAgent){const {verifyAgentApproval}=await import('./agent-runtime/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),collectDiagnostics,searchDebugLogs,exportDebugBundle,getConfiguration:publicSettings,senders:createWarehouseReminderSenders({readSettings,readSecrets}),getChannels:async()=>reminderChannelStates(readSettings().warehouseReminders,await readSecrets(),readSettings())});}
+          if(!warehouseAgent){const {verifyAgentApproval}=await import('./business-interface/approval.mjs');warehouseAgent=createWarehouseAgentAdapter({databasePath:inventoryDatabasePath(),workspace:appDataDir(),settingsPath:settingsPath(),secretsPath:secretsPath(),workbenchKey:key,verifyApproval:verifyAgentApproval,getEnvironment:async()=>buildEnvironment(readSettings(),await readSecrets(),'sync'),collectDiagnostics,searchDebugLogs,exportDebugBundle,getConfiguration:publicSettings});}
           return warehouseAgent;
         }:undefined,
         getDailyStatus: actor => dailyStatus(actor),

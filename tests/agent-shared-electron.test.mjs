@@ -7,8 +7,8 @@ import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {pipeline} from 'node:stream/promises';
 import yazl from 'yazl';
-import {agentBetaPaths,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/agent-host/isolation.mjs';
-import {createAgentActivation} from '../desktop/agent-host/activation.mjs';
+import {agentBetaPaths,prepareAgentProfile,assertAgentRegistry,guardAgentServices} from '../desktop/business-host/isolation.mjs';
+import {createAgentActivation} from '../desktop/business-host/activation.mjs';
 import {ServiceManager} from '../desktop/shared/service-manager.mjs';
 import {withElectronLifecycle} from '../desktop/modules/electron-lifecycle.mjs';
 

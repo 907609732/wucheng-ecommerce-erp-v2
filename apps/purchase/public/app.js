@@ -1,5 +1,4 @@
 import {loadingMarkup} from './loading-screen.mjs';
-import {createTaskCards as createTaskCenter} from './task-cards.js';
 import {newOrderNumber} from './order-number.mjs';
 import {validateUploadLimits} from './upload-limits.mjs';
 import {wireOrderFormView} from './order-form-view.js';
@@ -37,7 +36,6 @@ const platforms=Object.keys(importRules);const statuses=orderStatuses;
 const colors=['#168374','#eca65c','#d4aa38','#d98190','#25a565','#8fac9e','#bdc7b6'];
 const state={page:'dashboard',dashboardMonth:'',year:today().slice(0,4),basis:'paid',platform:'全部',category:'',orders:[],imports:[],token:'',chart:null,donut:null,filter:emptyOrderFilter(),pageNo:1};
 const monthUI=createMonthUI({state,api,esc,money,modal,closeModal,toast,refresh,render,emptyOrderFilter,setKind:kind=>{modalKind=kind;}});
-const taskCenter=createTaskCenter({state,api,esc,money,toast,modal,closeModal,refresh,render,today,historyHtml:importHistoryHtml,openImport:importModal,openOcr:ocrModal,openConfirmation:(month,platform)=>monthUI.open(month,platform),setKind:kind=>{modalKind=kind;},openOrders:async(month,platform)=>{state.basis='paid';state.filter={...emptyOrderFilter(),month,platform:platform||''};state.pageNo=1;state.page='orders';await render();}});
 const classificationActions=createClassificationActions({modal,closeModal,api,esc,money,state,toast,refreshRows:async()=>{if(state.page==='orders')await refreshOrderRows();else await render();},setKind:kind=>{modalKind=kind;}});
 const auditUI=createAuditUI({state,api,esc,modal,closeModal,toast,refresh,render,setKind:kind=>{modalKind=kind;},getKind:()=>modalKind});
 const attributeActions=createAttributeActions({modal,closeModal,api,esc,money,state,toast,refreshRows:async()=>{if(state.page==='orders')await refreshOrderRows();else await render();},setKind:kind=>{modalKind=kind;}});
@@ -121,7 +119,7 @@ async function aboutPage(){
   <details class="panel settings-disclosure" style="grid-column:1/-1"><summary>各平台订单导入教程</summary><div class="panel-body">${Object.keys(importGuides).map(importGuide).join('')}</div></details><section class="panel"><div class="panel-head"><h2>关于</h2>${icon('bag')}</div><div class="panel-body"><p><strong>灵兔采购台</strong> · 把每一笔采购看清楚</p><div class="checklist"><span>${icon('check')} 署名：<strong>${esc(info.brand)}</strong></span><span>${icon('check')} 当前版本 <strong>v${esc(info.version)}</strong></span><span>${icon('check')} 官网：${website}</span></div></div></section>
  </div>`;
  wireAppearance();
- if(state.agentManaged){for(const action of ['backup','check-update']){const button=document.querySelector(`[data-action="${action}"]`);if(button){button.hidden=true;const panel=button.closest('section'),notes=panel?.querySelectorAll('.privacy-note');if(notes?.length)notes[notes.length-1].textContent=action==='backup'?'备份与恢复由工作台设置统一处理，此处不覆盖测试账本。':'组件更新由工作台统一处理，不从采购页替换程序。';}}}
+ if(state.agentManaged){for(const action of ['check-update']){const button=document.querySelector(`[data-action="${action}"]`);if(button){button.hidden=true;const panel=button.closest('section'),notes=panel?.querySelectorAll('.privacy-note');if(notes?.length)notes[notes.length-1].textContent=action==='backup'?'备份与恢复由工作台设置统一处理，此处不覆盖测试账本。':'组件更新由工作台统一处理，不从采购页替换程序。';}}}
  monthUI.wirePassword();
 }
 function modal(title,subtitle,body,foot,narrow=false){if(!document.querySelector('#overlay .modal'))modalReturnFocus=document.activeElement;attachmentEpoch++;attachmentBusy=false;saveBusy=false;orderImageUI.dispose();$('#overlay').innerHTML=`<div class="modal-backdrop ${modalKind==='ocr'?'ocr-backdrop':''}"><section class="modal ${narrow?'narrow':''}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><h2 id="modal-title">${title}</h2><p>${subtitle}</p></div><button class="close" data-action="close" aria-label="关闭">${icon('close')}</button></header><div class="modal-body">${body}</div><footer class="modal-foot">${foot}</footer></section></div>`;document.body.style.overflow='hidden';if(formOrder)wireClassification(formOrder);setTimeout(()=>$('.modal input:not([type=file]),.modal button')?.focus(),30);}
@@ -271,6 +269,8 @@ async function startOcr(){
 }
 async function pollOcr(id,revision){
  if(modalKind!=='ocr'||revision!==ocrRevision)return;
+ // The OCR job continues on the server; hidden desks do not poll or rebuild the form.
+ if(document.hidden||window.lingtuShell?.isVisible?.()===false){ocrPoll=setTimeout(()=>pollOcr(id,revision),2000);return;}
  try{
   const job=await api('/api/ocr/'+id);if(modalKind!=='ocr'||revision!==ocrRevision)return;
   if(job.status==='failed')throw Object.assign(Error(job.error),{code:job.code});

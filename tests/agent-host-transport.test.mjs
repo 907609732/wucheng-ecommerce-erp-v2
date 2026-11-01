@@ -7,12 +7,11 @@ import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {randomBytes,createHash} from 'node:crypto';
 import {once} from 'node:events';
-import {createAgentModuleTransport,moduleTimeoutBudget} from '../desktop/agent-host/module-transport.mjs';
+import {createBusinessModuleTransport as createAgentModuleTransport,moduleTimeoutBudget} from '../desktop/business-interface/module-transport.mjs';
 import {provisionWorkbenchKey,verifyWorkbenchActor} from '../desktop/workbench/actor.mjs';
-import {selectCompatibleCodex} from '../desktop/agent-host/composition.mjs';
 import {ServiceManager} from '../desktop/shared/service-manager.mjs';
 
-const approvalUrl=process.env.AGENT_RUNTIME_TEST_ENTRY?pathToFileURL(path.join(path.dirname(process.env.AGENT_RUNTIME_TEST_ENTRY),'approval.mjs')):new URL('../desktop/agent-runtime/approval.mjs',import.meta.url);
+const approvalUrl=process.env.AGENT_RUNTIME_TEST_ENTRY?pathToFileURL(path.join(path.dirname(process.env.AGENT_RUNTIME_TEST_ENTRY),'approval.mjs')):new URL('../desktop/business-interface/approval.mjs',import.meta.url);
 const {signAgentApproval,verifyAgentApproval}=await import(approvalUrl);
 const temp=t=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-host-transport-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:8,retryDelay:80}));return root;};
 async function fixture(t,{role='editor',canRunTasks=false,respond}={}){
@@ -58,12 +57,7 @@ test('downloads reject arbitrary routes, outside paths, oversize and mismatched 
   fs.rmSync(f.artifactRoot,{recursive:true});const outside=path.join(f.root,'outside');fs.mkdirSync(outside);fs.symlinkSync(outside,f.artifactRoot,'junction');await assert.rejects(()=>f.transport.download('warehouse','/api/files/id',{ctx}),{code:'ARTIFACT_PATH_DENIED'});fs.unlinkSync(f.artifactRoot);
   f.setActor(null);await assert.rejects(()=>f.transport.download('warehouse','/api/files/id',{ctx}),{code:'MODULE_DENIED'});
 });
-test('Codex discovery validates npm before PATH candidates and refuses incompatible versions',async t=>{
-  const root=temp(t),script=path.join(root,'npm','node_modules','@openai','codex','bin','codex.js');fs.mkdirSync(path.dirname(script),{recursive:true});fs.writeFileSync(script,'// fixture');const checks=[];
-  const createEngine=options=>({options,check:async()=>{checks.push(options);return {available:options.argsPrefix?.[0]===script,version:options.argsPrefix?.[0]===script?'0.150.1':'0.165.0-alpha.1.2'};}});
-  const engine=await selectCompatibleCodex({createEngine,nodeExecutable:process.execPath,appData:root,locate:()=>['C:/incompatible/codex.exe']});assert.equal(engine.options.argsPrefix[0],script);assert.equal(checks.length,1);
-  const unavailable=await selectCompatibleCodex({createEngine,nodeExecutable:process.execPath,appData:path.join(root,'absent'),locate:()=>['C:/incompatible/codex.exe']});assert.equal((await unavailable.check()).available,false);
-});
+
 test('real managed child receives AGENT_MANAGED and leaves the isolated existing ledger intact',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'agent-host-child-')),dataDir=path.join(root,'data');fs.mkdirSync(dataDir);fs.mkdirSync(path.join(root,'node_modules','express'),{recursive:true});fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({name:'wucheng-sales-desk',type:'module',version:'0.0.1'}));fs.writeFileSync(path.join(dataDir,'sales.sqlite'),'isolated-ledger-sentinel');
   const probe=http.createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');const port=probe.address().port;await new Promise(resolve=>probe.close(resolve));const registryFile=path.join(root,'registry.json');fs.writeFileSync(registryFile,JSON.stringify({sales:{root,dataDir,port,managed:true,version:'0.0.1',nodePath:process.execPath,allowInitialize:false}}));

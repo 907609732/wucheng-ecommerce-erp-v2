@@ -12,10 +12,10 @@ function content(file){const stat=fs.statSync(file),old=cache.get(file);if(old&&
 function packageFile(file){const value=file.replaceAll('\\','/'),at=value.lastIndexOf('/node_modules/');if(at<0)return null;const rest=value.slice(at+14),parts=rest.split('/'),name=parts[0].startsWith('@')?parts.slice(0,2).join('/'):parts[0],directory=value.slice(0,at+14)+name;try{const pkg=JSON.parse(fs.readFileSync(path.join(directory,'package.json'),'utf8'));return {directory,pkgName:pkg.name,version:pkg.version,relativeFile:rest.slice(name.length+1)};}catch{return null;}}
 const keys=(value,expected)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...expected].sort().join('|');
 function resourceManifest(value){
- const v2=value?.format==='agent-beta-resources/v2',fields=['format','engines','modules','vendor','purchaseMobilePort','warehouseEntries','sourceDigests','approvalSha256','payloadHashes',...(v2?['sharedElectron']:[])];
+ const v2=value?.format==='agent-beta-resources/v2',fields=['format','engines','modules','vendor','purchaseMobilePort','warehouseEntries','sourceDigests','approvalSha256','payloadHashes',...(v2?['sharedElectron']:[]),...(value?.businessOnly===true?['businessOnly']:[])];
  if(!keys(value,fields)||!['agent-beta-resources/v1','agent-beta-resources/v2'].includes(value.format)||value.purchaseMobilePort!==27380||!hex(value.approvalSha256))return false;
  if(v2&&(!keys(value.sharedElectron,['version','components'])||value.sharedElectron.version!=='44.7.0'||JSON.stringify(value.sharedElectron.components)!==JSON.stringify(['warehouse','exporter'])))return false;
- if(!keys(value.engines,['codex','hermes'])||Object.values(value.engines).some(e=>!keys(e,['entry','sha256'])||!hex(e.sha256)||typeof e.entry!=='string'))return false;
+ if(value.businessOnly===true){if(!v2||!keys(value.engines,[]))return false;}else if(!keys(value.engines,['codex','hermes'])||Object.values(value.engines).some(e=>!keys(e,['entry','sha256'])||!hex(e.sha256)||typeof e.entry!=='string'))return false;
  if(!keys(value.modules,['warehouse','purchase','sales','overview','exporter']))return false;
  for(const [id,m]of Object.entries(value.modules)){
   const native=id==='warehouse'||id==='exporter',expected=['root','version',...(id!=='warehouse'?['entries']:[]),...(id==='exporter'||v2&&native?['runtime']:[])];
