@@ -16,7 +16,7 @@ export async function compactPreview({source,destination,inventory,tracedFiles,w
  // Retain every package involved in an unresolved/optional dependency warning.
  for(const w of warnings){const s=typeof w==='string'?w:JSON.stringify(w);for(const m of s.replaceAll('\\\\','/').replaceAll('\\','/').matchAll(/\/node_modules\/((?:@[^/\s]+\/)?[^/\s:'"]+)/g))used.add(m[1]);}
  // Dynamic host assets are served directly rather than imported by Node.
- for(const name of ['echarts','tabulator-tables','yauzl','yazl','playwright','playwright-core'])used.add(name);
+ for(const name of ['@modelcontextprotocol/server','echarts','tabulator-tables','yauzl','yazl','playwright','playwright-core'])used.add(name);
  let removedExporter=0,removedRoot=0,removedDev=0,rawApp=0;
  for(const item of inventory){
   const rel=item.path,src=path.join(source,...rel.split('/')),runtime=rel.startsWith(prefix)?rel.slice(prefix.length):'';

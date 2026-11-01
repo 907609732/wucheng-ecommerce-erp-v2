@@ -1,3 +1,6 @@
+export const BUSINESS_ACTIONS=Object.freeze(['capabilities','query','prepare','receipt','requests.create','attachments.upload','reviews.list','reviews.get']);
+export const BUSINESS_TOOLS=Object.freeze(BUSINESS_ACTIONS.map(action=>'business_'+action.replaceAll('.','_')));
+
 export const AI_TOOLS = Object.freeze([
   "inventory_status",
   "inventory_recent_logs",
@@ -24,7 +27,7 @@ function cliObject(values) {
   if(encoded!==undefined&&plain!==undefined)throw Error('请只使用一种 JSON 参数格式');
   const text=encoded!==undefined?Buffer.from(encoded,'base64url').toString('utf8'):plain;
   if(text===undefined)return {};
-  if(Buffer.byteLength(text,'utf8')>65536)throw Error('工作台参数过大');
+  if(Buffer.byteLength(text,'utf8')>65536)throw Error('CLI JSON 参数超过 64 KiB；附件请使用 MCP business_attachments_upload，并遵守系统命令行长度限制');
   let object;try{object=JSON.parse(text);}catch{throw Error('工作台参数不是有效的 JSON');}
   if(!object||typeof object!=='object'||Array.isArray(object))throw Error('工作台参数必须是 JSON 对象');
   return object;
@@ -34,6 +37,13 @@ export function parseCliRequest(args = []) {
   const values = args.map((value) => String(value));
   const command = String(values[0] || "help").toLowerCase();
   if (["help", "--help", "-h"].includes(command)) return { command: "help" };
+  if(command==='business'){
+    const action=String(values[1]||'capabilities').toLowerCase();
+    if(!BUSINESS_ACTIONS.includes(action))throw Error('业务命令不允许审批或直接提交；请在工作台复核结果');
+    const module=values.find(value=>value.startsWith('--module='))?.slice(9);
+    if(module!==undefined&&!moduleIds.has(module))throw Error('未知工作台模块');
+    return {command,action,...(module?{module}:{}),params:cliObject(values)};
+  }
   if(command==='workbench'){
     const action=String(values[1]||'help').toLowerCase();
     if(!workbenchActions.has(action))throw Error('工作台命令支持 status、capabilities、modules、query、tasks、prepare');

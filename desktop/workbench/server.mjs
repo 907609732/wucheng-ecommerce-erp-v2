@@ -7,14 +7,14 @@ import {agentBetaPaths,assertAgentRegistry,guardAgentServices} from '../business
 import {createBusinessBridgeClient} from '../business-host/bridge.mjs';
 
 export const defaultWorkbenchStore=()=>path.join(agentBetaPaths().profile,'workbench-server');
-export async function runWorkbenchServer({storeDir=defaultWorkbenchStore(),publicOrigin,registryFile,port,registerRoutes,agentRuntime,agentPaths=agentBetaPaths(),...options}={}){
+export async function runWorkbenchServer({storeDir=defaultWorkbenchStore(),publicOrigin,registryFile,port,registerRoutes,businessInterface,workbenchPaths,agentRuntime,agentPaths=workbenchPaths||agentBetaPaths(),...options}={}){
   if(path.resolve(storeDir)!==path.join(agentPaths.profile,'workbench-server')||registryFile&&path.resolve(registryFile)!==path.resolve(agentPaths.registryFile))throw Error('测试版网关必须使用独立配置与账本注册表');
   assertAgentRegistry(agentPaths);
   const configFile=path.join(storeDir,'server-config.json');
   let config={};if(fs.existsSync(configFile))config=JSON.parse(fs.readFileSync(configFile,'utf8'));
   const selectedPort=port??config.port??agentPaths.gatewayPort;if(selectedPort!==agentPaths.gatewayPort)throw Error('测试版网关端口必须为 '+agentPaths.gatewayPort);
   const services=guardAgentServices(new ServiceManager({registryFile:agentPaths.registryFile}),agentPaths);
-  const gateway=await createWorkbenchGateway({services,storeDir,publicOrigin:publicOrigin||config.publicOrigin,port:selectedPort,registerRoutes,businessRuntime:agentRuntime||createBusinessBridgeClient({storeDir:path.join(agentPaths.profile,'business-interface')}),...options});
+  const gateway=await createWorkbenchGateway({services,storeDir,publicOrigin:publicOrigin||config.publicOrigin,port:selectedPort,registerRoutes,businessRuntime:businessInterface||agentRuntime||createBusinessBridgeClient({storeDir:path.join(agentPaths.profile,'business-interface')}),...options});
   await gateway.start();return gateway;
 }
 function argumentsOf(argv){const result={};for(let i=0;i<argv.length;i++){const key=argv[i];if(!key.startsWith('--')||!argv[i+1]||argv[i+1].startsWith('--'))throw Error('参数必须使用 --名称 值');result[key.slice(2)]=argv[++i];}return result;}

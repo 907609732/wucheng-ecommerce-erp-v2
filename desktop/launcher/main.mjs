@@ -35,7 +35,7 @@ import {assertLauncherOperationAllowed} from '../business-host/launcher-policy.m
 import {createDesktopUiSessions} from '../business-host/desktop-ui-sessions.mjs';
 import {betaProcessesRunning} from '../business-host/startup.mjs';
 import {createPreparationWindow,createPreparationShutdown,formatPreparationProgress} from './preparation-window.mjs';
-import {packagedAgentResources} from '../business-host/resource-layout.mjs';
+import {packagedAgentResources,AGENT_RESOURCE_FORMAT_V2} from '../business-host/resource-layout.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const hostVersion=JSON.parse(fs.readFileSync(path.join(here,'package.json'),'utf8')).version;
@@ -43,7 +43,7 @@ let location,workbenchPaths,businessInterface,businessGateway,hostIdentity,busin
 try{
   packagedResources=app.isPackaged?packagedAgentResources({resourcesPath:process.resourcesPath,launcherDirectory:here}):null;
   workbenchPaths=agentBetaPaths();
-  if(packagedResources?.layout==='business-resources/v1')Object.assign(workbenchPaths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
+  if(packagedResources?.layout===AGENT_RESOURCE_FORMAT_V2)Object.assign(workbenchPaths,{sharedElectronExecutable:process.execPath,sharedElectronVersion:process.versions.electron});
   const registryArgument=process.argv.find(value=>value.startsWith('--registry-file='))?.slice('--registry-file='.length);
   if(registryArgument&&!path.isAbsolute(registryArgument))throw Error('注册表必须使用完整路径');
   if(registryArgument&&path.resolve(registryArgument)!==workbenchPaths.registryFile)throw Error('测试版不能使用正式账本注册表');
@@ -238,7 +238,7 @@ async function ensureGateway(){
 }
 async function getBusinessInterface(){
   if(businessInterface)return businessInterface;
-  if(!businessInterfaceStarting)businessInterfaceStarting=Promise.resolve(createBusinessInterface({paths:workbenchPaths,services,identity:hostIdentity})).then(value=>businessInterface=value).finally(()=>{businessInterfaceStarting=null;});
+  if(!businessInterfaceStarting)businessInterfaceStarting=Promise.resolve(createBusinessInterface({paths:workbenchPaths,services,identity:hostIdentity,startBridge:!headless})).then(value=>businessInterface=value).finally(()=>{businessInterfaceStarting=null;});
   return businessInterfaceStarting;
 }
 const names = {warehouse: '云仓同步', purchase: '采购台', sales: '销售台', overview: '经营收支总览', exporter: '历史订单导出台', 'node-runtime': '共享运行环境', 'browser-runtime': '浏览器组件'};

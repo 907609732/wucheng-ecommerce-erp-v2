@@ -1,4 +1,4 @@
-import {WORKBENCH_TOOLS} from './ai-interface.mjs';
+import {WORKBENCH_TOOLS,BUSINESS_ACTIONS,BUSINESS_TOOLS} from './ai-interface.mjs';
 
 const MODULES=['warehouse','purchase','sales','overview','exporter'];
 const fail=(message,code='INVALID_WORKBENCH_REQUEST')=>Object.assign(Error(message),{code});
@@ -14,17 +14,29 @@ function moduleId(value){if(!MODULES.includes(value))throw fail('未知工作台
 // One dispatcher is retained for the whole stdio session. It delegates to the
 // launcher's existing local/remote adapter, so identities, audit, locks and UI
 // confirmation fences are identical to normal business requests.
-export function createWorkbenchDispatcher({executeLegacy,version='0.0.0'}){
+export function createWorkbenchDispatcher({executeLegacy,executeBusiness,version='0.0.0'}){
   if(typeof executeLegacy!=='function')throw TypeError('executeLegacy is required');
   return async function dispatch(request){
     if(!object(request)||typeof request.command!=='string')throw fail('缺少有效工作台命令');
+    if(request.command==='business'){
+      if(typeof executeBusiness!=='function')throw fail('业务接口尚未就绪','BUSINESS_INTERFACE_UNAVAILABLE');
+      if(!BUSINESS_ACTIONS.includes(request.action))throw fail('正式提交必须在工作台业务复核界面确认','HUMAN_REVIEW_REQUIRED');
+      if(request.module!==undefined)moduleId(request.module);
+      const limit=request.action==='attachments.upload'?70*1024*1024:65536;
+      if(request.params!==undefined&&(!object(request.params)||Buffer.byteLength(JSON.stringify(request.params),'utf8')>limit))throw fail('业务参数格式或大小无效');
+      return executeBusiness({...request,params:request.params||{}});
+    }
+    if(request.command==='help'&&executeBusiness){
+      const result=await executeLegacy(request);
+      return {...result,business:{usage:'business <action> [--module=<module>] [--params-json=<JSON> | --params-base64=<base64url>]',actions:[...BUSINESS_ACTIONS],cliJsonLimitBytes:65536,attachments:'大附件使用 MCP business_attachments_upload；CLI 同时受系统命令行长度限制',confirmation:'正式提交仅在工作台结果页人工复核'}};
+    }
     if(request.command!=='workbench')return executeLegacy(request);
     const value=params(request.params);
     if(request.action==='status')return executeLegacy({command:'status'});
     if(request.action==='capabilities'){
       const response=await executeLegacy({command:'capabilities'});
       if(response?.ok===false)return response;
-      return {...response,ok:true,capabilities:{...response?.capabilities,workbench:{apiVersion:1,version,commands:['status','capabilities','modules','query','tasks','prepare'],mcpTools:[...WORKBENCH_TOOLS],persistentDispatcher:true,formalWrites:'two-ui-confirmations-required',arbitraryFileRead:false,arbitraryCommandExecution:false}}};
+      return {...response,ok:true,capabilities:{...response?.capabilities,workbench:{apiVersion:1,version,commands:['status','capabilities','modules','query','tasks','prepare'],mcpTools:[...WORKBENCH_TOOLS,...(executeBusiness?BUSINESS_TOOLS:[])],businessCommands:executeBusiness?[...BUSINESS_ACTIONS]:[],persistentDispatcher:true,formalWrites:'two-ui-confirmations-required',arbitraryFileRead:false,arbitraryCommandExecution:false}}};
     }
     if(request.action==='modules'){
       const response=await executeLegacy(extension('status'));

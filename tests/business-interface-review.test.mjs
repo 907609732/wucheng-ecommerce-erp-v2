@@ -25,3 +25,13 @@ test('unknown commit is never replayed and completes only after receipt readback
  const f=await fixture(t),{review}=await f.prepare(),out=await f.approve(review);assert.equal(out.review.state,'unknown');assert.equal(f.commits(),1);
  await assert.rejects(()=>f.approve(out.review),{code:'REVIEW_STATE_INVALID'});f.known();const result=await f.api.request('receipt',{id:review.id},{actor:a});assert.equal(result.review.state,'completed');assert.equal(f.commits(),1);
 });
+
+test('headless business client preserves a live UI bridge descriptor',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'business-bridge-coexist-'));
+ const options={paths:{profile:root},services:{},identity:{resolveActor:id=>[a,b].find(x=>x.id===id)},adapters:[],transport:{}};
+ const ui=await createBusinessInterface(options),file=path.join(root,'business-interface','bridge.json'),before=fs.readFileSync(file);
+ const cli=await createBusinessInterface({...options,startBridge:false});
+ try{assert.deepEqual(fs.readFileSync(file),before);await cli.request('requests.create',{}, {actor:a});await cli.close();assert.deepEqual(fs.readFileSync(file),before);
+  const {createBusinessBridgeClient}=await import('../desktop/business-host/bridge.mjs');const bridge=createBusinessBridgeClient({storeDir:path.join(root,'business-interface')});const response=await bridge.request('capabilities',{}, {actor:b});assert.equal(response.total,0);
+ }finally{await ui.close();fs.rmSync(root,{recursive:true,force:true});}
+});

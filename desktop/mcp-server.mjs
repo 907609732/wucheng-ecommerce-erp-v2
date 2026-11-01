@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import {sanitizeDiagnosticText} from './shared/diagnostics.mjs';
+import {BUSINESS_ACTIONS} from './shared/ai-interface.mjs';
 
 function result(value, isError = false) {
   return {
@@ -170,6 +171,13 @@ export function createWorkbenchMcpServer({version,dispatch,onClose}){
   server.registerTool('workbench_query',{description:'通过所属模块受控接口只读查询；支持 kind、id、query 或已登记 API path，不允许任意文件、SQL 或命令。',inputSchema:z.object({module,params:object}),annotations:read},invoke('query'));
   server.registerTool('workbench_tasks',{description:'只读查询云仓当前采集任务或历史订单采集任务；不会启动采集。params.id 可指定导出台任务。',inputSchema:z.object({module:z.enum(['warehouse','exporter']),params:object}),annotations:read},invoke('tasks'));
   server.registerTool('workbench_prepare',{description:'按用户本次确认整理采购导入或业务编辑草稿，不正式写账；不能替代两次界面确认。',inputSchema:z.object({module:z.enum(['purchase','sales','overview']),params:object,confirmSideEffect:z.boolean().default(false)}),annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false}},invoke('prepare'));
+  for(const action of BUSINESS_ACTIONS){
+    server.registerTool('business_'+action.replaceAll('.','_'),{
+      description:({capabilities:'发现业务能力、输入格式与复核要求。优先调用；支持module、cursor、limit。',query:'调用已登记的业务查询能力，不支持任意SQL或文件路径。',prepare:'准备导入或业务变更，返回差异和待复核结果；不会替用户确认正式提交。',receipt:'回查提交回执；未知结果不得重复提交。','requests.create':'创建当前人员的业务请求，供后续附件与操作关联。','attachments.upload':'把附件字节保存到当前请求的隔离目录，传name、dataBase64和可选sha256。','reviews.list':'分页查询业务操作记录及待复核数量。','reviews.get':'查看指定业务复核的范围、差异、来源和异常。'})[action],
+      inputSchema:z.object({module:module.optional(),params:object}),
+      annotations:{readOnlyHint:['capabilities','query','reviews.list','reviews.get'].includes(action),destructiveHint:false,openWorldHint:false}
+    },async args=>{try{return result(await dispatch({command:'business',action,...args}));}catch(error){return result({ok:false,code:error.code||'BUSINESS_REQUEST_FAILED',error:safeError(error)},true);}});
+  }
   return server;
 }
 

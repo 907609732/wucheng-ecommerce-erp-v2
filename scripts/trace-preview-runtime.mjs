@@ -10,6 +10,9 @@ for(const item of inputs.inventory){if(!item.path.startsWith(prefix))continue;co
  if(rel.startsWith('desktop/launcher/')&&!['desktop/launcher/main.mjs','desktop/launcher/diagnostics.mjs','desktop/launcher/component-dispatch.mjs','desktop/launcher/packaged-entry.mjs'].includes(rel))continue;
  entries.push(path.join(base,rel));
 }
+// Explicit roots cover code invoked through IPC/CLI and worker file URLs rather
+// than an ordinary import from the visible window. Missing roots fail closed.
+for(const rel of ['desktop/business-interface/index.mjs','desktop/shared/workbench-mcp-runtime.mjs','desktop/shared/business-service-client.mjs','desktop/shared/business-service-host.mjs','desktop/shared/business-service-worker.mjs','apps/purchase/lib/agent-adapter.mjs','apps/sales/lib/agent-adapter.mjs','apps/overview/lib/agent-adapter.mjs','apps/exporter/src/main/agent-adapter.mjs']){const file=path.join(base,rel);if(!fs.existsSync(file))throw Error('Required business trace root missing: '+rel);if(!entries.includes(file))entries.push(file);}
 const started=Date.now();console.log(JSON.stringify({tool:'@vercel/nft',version:'1.11.0',entries:entries.length}));
 const trace=await nft.nodeFileTrace(entries,{base,processCwd:base,mixedModules:true,moduleSyncCatchall:true,fileIOConcurrency:128,resolve:(id,parent,job,cjs)=>id==='electron'?'node:electron':nft.resolve(id,parent,job,cjs)});
 const files=new Set([...trace.fileList].map(file=>file.replaceAll('\\','/'))),kept=[],removed=[],groups={};
