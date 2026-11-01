@@ -1,7 +1,7 @@
 import {pathToFileURL} from 'node:url';
 
 export function formatPreparationProgress(value={},names={}){
- const labels={verify:'正在校验程序文件',copy:'正在准备业务程序',runtime:'正在准备运行环境',initialize:'正在初始化预览账本',ready:'准备完成'};
+ const labels={verify:'正在校验程序文件',copy:'正在准备业务程序',dependencies:'正在展开共享业务依赖',runtime:'正在准备运行环境',initialize:'正在初始化预览账本',ready:'准备完成'};
  const phase=Object.hasOwn(labels,value.phase)?value.phase:'preparing',label=labels[phase]||'正在准备工作台';
  const component=names[value.component],version=typeof value.version==='string'&&/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(value.version)?value.version:null;
  const measured=Number.isSafeInteger(value.processed)&&Number.isSafeInteger(value.total)&&value.processed>=0&&value.total>0&&value.processed<=value.total;
