@@ -9,7 +9,7 @@ import {createWorkbenchGateway} from '../desktop/workbench/gateway.mjs';
 import {provisionWorkbenchKey,verifyWorkbenchActor} from '../desktop/workbench/actor.mjs';
 
 const origin='https://erp.test-tail.ts.net:8443',login='owner@example.test';
-async function fixture(t,{role='editor',channel='ui',canRunTasks=true,maxUploadBytes}={}){
+async function fixture(t,{role='editor',channel='ui',canRunTasks=true,maxUploadBytes,cacheStaticAssets=false}={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'workbench-gateway-test-')),dataDir=path.join(dir,'module');fs.mkdirSync(dataDir);
   const key=provisionWorkbenchKey(dataDir),integrationKey='a'.repeat(64);fs.writeFileSync(path.join(dataDir,'.integration-key'),integrationKey);
   let writes=0,lastActor=null,lastHeaders=null;
@@ -30,7 +30,7 @@ async function fixture(t,{role='editor',channel='ui',canRunTasks=true,maxUploadB
   const url='http://127.0.0.1:'+backend.server.address().port;
   const cap={url,version:'1.0.0',workbench:{...manifest,dataSetId:'a0000000-0000-4000-8000-000000000001',revision:'revision-1'}};const services={config:id=>({root:dir,dataDir,version:'1.0.0'}),capabilities:async()=>cap,ensure:async()=>cap};
   const accessPolicy={schemaVersion:1,users:{[login]:{role,modules:['purchase'],canRunTasks,enabled:true}}};
-  const gateway=await createWorkbenchGateway({services,storeDir:path.join(dir,'gateway'),publicOrigin:origin,accessPolicy,port:0,...(maxUploadBytes?{maxUploadBytes}:{})});
+  const gateway=await createWorkbenchGateway({services,storeDir:path.join(dir,'gateway'),publicOrigin:origin,accessPolicy,cacheStaticAssets,port:0,...(maxUploadBytes?{maxUploadBytes}:{})});
   t.after(async()=>{await gateway.stop();await backend.close();fs.rmSync(dir,{recursive:true,force:true});});
   const initial={'host':new URL(origin).host,'tailscale-user-login':login,'x-workbench-channel':channel};
   const session=await gateway.app.inject({url:'/api/workbench/v1/session',headers:initial});assert.equal(session.statusCode,200,session.body);
@@ -108,3 +108,5 @@ test('chunked upload limit returns a clear 413 without destroying the response c
   assert.equal(response.status,413,response.body);assert.equal(fs.readdirSync(path.join(f.dir,'gateway','requests')).length,0);
 });
 
+
+test('production web static assets may revalidate privately while business JSON stays uncached',async t=>{const f=await fixture(t,{cacheStaticAssets:true});const asset=await f.inject('/apps/purchase/app.js');assert.equal(asset.headers['cache-control'],'private, no-cache');const api=await f.inject('/apps/purchase/api/orders');assert.equal(api.headers['cache-control'],'no-store');});

@@ -51,7 +51,13 @@ async function boundedResponse(response,limit){let size=0;const chunks=[];for aw
 export async function createWorkbenchGateway(options={}) {
   const {services,storeDir,getManifest,registerRoutes,logger=false,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
   if(!services||!storeDir)throw Error('缺少工作台服务注册表或存储目录');
-  const publicOrigin=validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
+  const localDevelopment=options.localDevelopment===true;
+  if(localDevelopment&&!/^http:\/\/127\.0\.0\.1:\d+$/.test(options.publicOrigin||''))throw Error('开发入口必须是本机 HTTP 地址');
+  const publicOrigin=localDevelopment?new URL(options.publicOrigin).origin:validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
+  const sessionCookie=localDevelopment?'workbench-dev-session':COOKIE;
+  const moduleIds=options.moduleIds||WORKBENCH_MODULES;
+  if(!Array.isArray(moduleIds)||!moduleIds.length||new Set(moduleIds).size!==moduleIds.length||moduleIds.some(id=>!WORKBENCH_MODULES.includes(id)))throw Error('工作台模块清单无效');
+  const companyActor=identity=>({...withCompanyAccess(identity),modules:[...moduleIds]});
   const host=options.host||'127.0.0.1',port=options.port??17330;
   if(host!=='127.0.0.1')throw Error('工作台只能绑定 127.0.0.1，由 Tailscale Serve 提供 HTTPS');
   const store=createGatewayStore(storeDir);
@@ -67,20 +73,22 @@ export async function createWorkbenchGateway(options={}) {
   function loginOf(request){
     if(!loopback(request.ip))throw fail(403,'LOOPBACK_REQUIRED','只能由本机 Tailscale Serve 转发');
     if(request.headers.host!==publicHost)throw fail(421,'INVALID_HOST','入口地址与本机配置不一致');
-    const raw=request.raw.rawHeaders||[];if(raw.filter((v,i)=>i%2===0&&v.toLowerCase()==='tailscale-user-login').length!==1)throw fail(401,'IDENTITY_REQUIRED','缺少唯一的 Tailscale 用户身份');
-    const login=cleanLogin(request.headers['tailscale-user-login']);if(!login||login.length>254||/[\s,\r\n]/.test(login))throw fail(401,'IDENTITY_REQUIRED','缺少 Tailscale 用户身份');
+    const raw=request.raw.rawHeaders||[];
+    if(localDevelopment&&request.headers['tailscale-user-login'])throw fail(400,'DEV_IDENTITY_DENIED','开发入口不能接受远程身份');
+    if(!localDevelopment&&raw.filter((v,i)=>i%2===0&&v.toLowerCase()==='tailscale-user-login').length!==1)throw fail(401,'IDENTITY_REQUIRED','缺少唯一的 Tailscale 用户身份');
+    const login=localDevelopment?'local-development':cleanLogin(request.headers['tailscale-user-login']);if(!login||login.length>254||/[\s,\r\n]/.test(login))throw fail(401,'IDENTITY_REQUIRED','缺少 Tailscale 用户身份');
     if(Object.keys(request.headers).some(k=>k==='x-workbench-actor'||k==='x-workbench-actor-signature'||k==='x-workbench-prefix'||k==='x-workbench-api-base'))throw fail(400,'SPOOFED_ACTOR','客户端不得提供模块代理身份');
     if(request.headers.origin&&request.headers.origin!==publicOrigin)throw fail(403,'ORIGIN_DENIED','请求来源不受信任');
     if(['cross-site','same-site'].includes(request.headers['sec-fetch-site']))throw fail(403,'ORIGIN_DENIED','请求来源不受信任');
     return login;
   }
   function resolveActor(request,{csrf=!readonly(request.method)}={}){
-    const login=loginOf(request),session=store.session(request.cookies[COOKIE]);
+    const login=loginOf(request),session=store.session(request.cookies[sessionCookie]);
     if(!session||session.login!==login)throw fail(401,'SESSION_REQUIRED','请先连接工作台以建立会话');
     const channel=request.headers['x-workbench-channel'];if(channel&&channel!==session.channel)throw fail(403,'CHANNEL_DENIED','本次会话不能切换调用通道');
     if(csrf&&(!equal(request.headers['x-workbench-csrf'],session.csrf)||request.headers.origin!==publicOrigin))throw fail(403,'CSRF_DENIED','本次修改缺少有效的界面确认来源');
     store.observeMember(login);
-    return withCompanyAccess({v:1,id:'tailscale:'+login,login,label:login,sessionId:session.session_id,channel:session.channel});
+    return companyActor({v:1,id:'tailscale:'+login,login,label:login,sessionId:session.session_id,channel:session.channel});
   }
   const requireSession=async(request,reply)=>{try{request.workbenchActor=resolveActor(request);}catch(e){reply.code(e.statusCode||500).send({ok:false,code:e.code,error:e.message});}};
   const requireAdmin=requireSession; // Legacy route name; all authenticated company members have equal access.
@@ -88,7 +96,7 @@ export async function createWorkbenchGateway(options={}) {
   const bindModule=(actor,id,cap)=>store.bindModule(actor.sessionId,id,cap?.dataSetId||cap?.workbench?.dataSetId||cap?.state?.workbench?.dataSetId||cap?.capabilities?.workbench?.dataSetId);
   async function metadata(actor){return Promise.all(actor.modules.map(async id=>{try{const cap=await services.capabilities(id),c=services.config(id),workbench=cap?.workbench||cap?.state?.workbench||cap?.capabilities?.workbench;return {id,version:cap?.version||c.version||null,status:cap?.url?(workbench?.protocolVersion===1?'running':'incompatible'):cap?.installed===false?'missing':'stopped',dataSetId:cap?.dataSetId||workbench?.dataSetId||null,revision:cap?.revision??workbench?.revision??null};}catch{return {id,status:'unavailable',version:null,dataSetId:null,revision:null};}}));}
   async function backend(id,{start=true}={}){
-    if(!WORKBENCH_MODULES.includes(id))throw fail(404,'MODULE_UNKNOWN','未登记的模块');
+    if(!moduleIds.includes(id))throw fail(404,'MODULE_UNKNOWN','未登记的模块');
     const config=services.config(id);let cap;
     if(start&&config.maintenance)throw fail(503,'MODULE_MAINTENANCE','模块处于维护或恢复窗口，请稍后重试');
     try{cap=start?await services.ensure(id):await services.capabilities(id);}
@@ -104,10 +112,10 @@ export async function createWorkbenchGateway(options={}) {
     const manifest=await loadOperationManifest(id,{config,capabilities:cap,getManifest,integrationKey});
     return {config,cap,url,integrationKey,actorKey,manifest};
   }
-  function responseHeaders(headers,id,upstream,ui){
+  function responseHeaders(headers,id,upstream,ui,target=''){
     const result=redactedHeaders(headers);const cookies=rewriteCookies(headers,id);if(cookies?.length)result['set-cookie']=cookies;
     if(headers.location){const location=new URL(headers.location,upstream.url);if(location.origin!==upstream.url)throw fail(502,'MODULE_REDIRECT_DENIED','模块返回了外部重定向');result.location='/apps/'+id+location.pathname+location.search;}
-    result['cache-control']='no-store';result['x-content-type-options']='nosniff';result['referrer-policy']='same-origin';
+    result['cache-control']=options.cacheStaticAssets===true&&ui&&!target.startsWith('/api/')&&/\.(?:js|mjs|css|png|jpg|jpeg|svg|woff2?|ico)$/.test(target.split('?')[0])?'private, no-cache':'no-store';result['x-content-type-options']='nosniff';result['referrer-policy']='same-origin';
     if(ui)result['content-security-policy']=headers['content-security-policy']||"frame-ancestors 'self'; object-src 'none'; base-uri 'self'";
     return result;
   }
@@ -131,7 +139,7 @@ export async function createWorkbenchGateway(options={}) {
     if(!ui&&operation.kind==='ui')throw fail(404,'OPERATION_UNLISTED','请通过模块页面入口打开');
     if((operation.uiOnly||operation.kind==='confirmation')&&actor.channel!=='ui')throw fail(403,'UI_CONFIRMATION_REQUIRED','此操作必须在界面完成两次确认');
     const requestId=randomUUID();
-    if(readonly(request.method))return reply.from(upstream.url+target,{rewriteRequestHeaders:()=>outboundHeaders(request,id,upstream,actor,target,requestId),rewriteHeaders:h=>responseHeaders(h,id,upstream,ui),retriesCount:0,timeout:60000});
+    if(readonly(request.method))return reply.from(upstream.url+target,{rewriteRequestHeaders:()=>outboundHeaders(request,id,upstream,actor,target,requestId),rewriteHeaders:h=>responseHeaders(h,id,upstream,ui,target),retriesCount:0,timeout:60000});
     const key=request.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9._:-]{8,160}$/.test(key))throw fail(400,'IDEMPOTENCY_KEY_REQUIRED','修改请求必须带有唯一操作标识');
     const body=await spoolBody(request,spoolDir,maxUploadBytes);
     try{
@@ -146,7 +154,7 @@ export async function createWorkbenchGateway(options={}) {
         const headers=outboundHeaders(request,id,upstream,currentActor,target,requestId);
         const response=await fetch(upstream.url+target,{method:request.method,headers,...(body.bytes?{body:fs.createReadStream(body.file),duplex:'half'}:{}),redirect:'manual',signal:AbortSignal.timeout(120000)});
         const result=await boundedResponse(response,maxResponseBytes),rawHeaders=Object.fromEntries(response.headers);if(response.headers.getSetCookie)rawHeaders['set-cookie']=response.headers.getSetCookie();
-        const safeHeaders=responseHeaders(rawHeaders,id,upstream,ui);
+        const safeHeaders=responseHeaders(rawHeaders,id,upstream,ui,target);
         store.finish(operationKey,{status:response.status,headers:safeHeaders,body:result});writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:response.ok?'completed':'rejected',details:{status:response.status}});
         reply.code(response.status);for(const [k,v] of Object.entries(safeHeaders))reply.header(k,v);return reply.send(result);
       }catch(error){store.finish(operationKey,{state:'unknown',status:502});writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:'unknown',details:{code:error.code||'UPSTREAM_UNCERTAIN'}});throw fail(502,'OPERATION_OUTCOME_UNKNOWN','连接中断，操作可能已完成；请查询结果后再处理，系统已阻止重复写入');}
@@ -155,11 +163,11 @@ export async function createWorkbenchGateway(options={}) {
   app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId}));
   app.get(API+'/session',async(request,reply)=>{
     const login=loginOf(request),channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
-    let session=store.session(request.cookies[COOKIE]),token=request.cookies[COOKIE];
+    let session=store.session(request.cookies[sessionCookie]),token=request.cookies[sessionCookie];
     if(!session||session.login!==login||session.channel!==channel){token=randomBytes(32).toString('base64url');const s={sessionId:randomUUID(),login,channel,csrfToken:randomBytes(32).toString('base64url'),expiresAt:Date.now()+sessionTtlMs};store.saveSession(token,s);session=store.session(token);}
-    reply.setCookie(COOKIE,token,{secure:true,httpOnly:true,sameSite:'strict',path:'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
+    reply.setCookie(sessionCookie,token,{secure:!localDevelopment,httpOnly:true,sameSite:'strict',path:'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
     store.observeMember(login);
-    const actor=withCompanyAccess({id:'tailscale:'+login,login,label:login,channel});
+    const actor=companyActor({id:'tailscale:'+login,login,label:login,channel});
     return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor)};
   });
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));

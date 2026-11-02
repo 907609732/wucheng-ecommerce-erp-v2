@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>五成 ERP</title>
+    <link rel="stylesheet" href="/web/shell.css" />
+    <script defer src="/web/shell.js"></script>
+  </head>
+  <body>
+    <header>
+      <strong>五成 ERP</strong>
+      <nav aria-label="业务台">
+        <a href="#purchase">采购</a><a href="#sales">销售</a
+        ><a href="#overview">经营总览</a>
+      </nav>
+      <span id="status" role="status">正在连接…</span
+      ><button id="retry" hidden>重新连接</button>
+    </header>
+    <main>
+      <p id="message">正在验证连接，请稍候。</p>
+      <iframe id="workspace" title="业务工作区" hidden></iframe>
+    </main>
+  </body>
+</html>

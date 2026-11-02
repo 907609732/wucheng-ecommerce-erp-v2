@@ -1,5 +1,9 @@
 # 运行与数据维护
 
+浏览器服务使用 `server/` 的显式配置和独立版本目录，开发默认 `.codex-artifacts/web-dev`，正式模式拒绝缺失账本。更新、备份恢复、Tailscale 和 WinSW 操作见 [浏览器运维说明](browser-service.md)。源码版本管理与业务备份分别维护；浏览器运行路径不下载安装模块。
+
+## 保留的桌面预览路径
+
 当前程序继续使用 `com.wucheng.ecommerce.erp.v2.agentpreview` 和 `%LOCALAPPDATA%/WuchengAgentBeta-preview`，仅开放隔离预览账本。保留外部 MCP/CLI 与人工复核，不提供内置模型执行器。预览模式不能连接正式公司服务。
 
 首次打开模块时下载冻结版本组件；失败时检查网络并重试。取消保留已接收的分片；重试仍验证完整摘要与签名。缺少程序或账本不等于零业务数据，不能显示为可用。日常不使用清空数据来修复程序。

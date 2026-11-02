@@ -11,7 +11,7 @@ const require=createRequire(import.meta.url);
 export {browserOperation} from './agent-cainiao-page.mjs';
 
 export class CainiaoBrowser{
- constructor(dir){this.dir=path.join(dir,'.cainiao-staging');fs.mkdirSync(this.dir,{recursive:true});this.authorization=new CainiaoAuthorization(dir);this.state={status:'disconnected',account:'',message:'连接已登录菜鸟的 Chrome'};this.client=null;this.connecting=null;this.generation=0;}
+ constructor(dir){if(process.env.LINGTU_WEB_COLLECTOR==='1'){const {CollectorBrowser}=require(path.resolve(import.meta.dirname,'../../../server/collector-client.mjs'));return new CollectorBrowser(dir);}this.dir=path.join(dir,'.cainiao-staging');fs.mkdirSync(this.dir,{recursive:true});this.authorization=new CainiaoAuthorization(dir);this.state={status:'disconnected',account:'',message:'连接已登录菜鸟的 Chrome'};this.client=null;this.connecting=null;this.generation=0;}
  status(){return {...this.state,authorizationSaved:this.authorization.has()};}
  async connect(){
   if(this.connecting)return this.connecting;const oldClient=this.client;this.client=null;const generation=++this.generation;this.state={status:'connecting',account:'',message:this.authorization.has()?'正在使用已保存的授权连接 Chrome':'请在 Chrome 的 Playwright 扩展页面确认连接，选择菜鸟金掌柜标签页'};

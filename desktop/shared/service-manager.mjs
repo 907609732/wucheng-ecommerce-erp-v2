@@ -64,11 +64,11 @@ const defaults=()=>{
   };
 };
 export class ServiceManager{
-  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false,sharedElectronExecutable,sharedElectronVersion}={}){
+  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false,sharedElectronExecutable,sharedElectronVersion,environment={}}={}){
     if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<50||startupTimeoutMs>300000||!Number.isInteger(startupPollMs)||startupPollMs<10||startupPollMs>1000)throw Error('扩展启动等待配置无效');
     this.startupTimeoutMs=startupTimeoutMs;this.startupPollMs=startupPollMs;this.agentManaged=agentManaged===true;
     this.sharedElectronExecutable=sharedElectronExecutable;
-    this.sharedElectronVersion=sharedElectronVersion;
+    this.sharedElectronVersion=sharedElectronVersion;this.environment=environment;
     const explicitRegistry=registryFile||process.env.LINGTU_REGISTRY_PATH,location=explicitRegistry?null:getWorkbenchLocation();
     this.registryFile=explicitRegistry||location.registryFile;this.pending=new Map();this.errors=new Map();
     this.policyFile=policyFile||(!explicitRegistry?path.join(location.profile,'workbench-server','access-policy.json'):undefined);
@@ -79,7 +79,7 @@ export class ServiceManager{
     const c={...base[id],...custom[id]};
     if(c.sharedElectron!==undefined&&typeof c.sharedElectron!=='boolean')throw startError('共享 Electron 标记无效','SHARED_ELECTRON_NOT_BOUND');
     sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion);
-    if(id==='sales'){try{const p=Number(fs.readFileSync(path.join(c.dataDir,'server.port'),'utf8'));if(p>=17869&&p<=17889)c.port=p;}catch{}}
+    if(id==='sales'&&!c.managed){try{const p=Number(fs.readFileSync(path.join(c.dataDir,'server.port'),'utf8'));if(p>=17869&&p<=17889)c.port=p;}catch{}}
     if(!Number.isInteger(c.port)&&!['exporter','warehouse'].includes(id))throw Error('扩展端口配置无效');return c;
   }
   componentArgs(id){const c=this.config(id);return sharedNative(id,c,this.sharedElectronExecutable,this.sharedElectronVersion)?['--agent-component='+id]:[];}
@@ -162,7 +162,7 @@ export class ServiceManager{
         if(id==='purchase'&&await portOpen(mobilePort))throw Error(`采购手机入口端口 ${mobilePort} 已被其他程序占用，已停止启动`);
         if(!native){
           log=fs.openSync(path.join(c.dataDir,'integration-service.log'),'a');
-          env={...process.env,[c.env]:String(c.port),PURCHASE_DATA_DIR:id==='purchase'?c.dataDir:process.env.PURCHASE_DATA_DIR||'',SALES_DATA_DIR:id==='sales'?c.dataDir:process.env.SALES_DATA_DIR||'',OVERVIEW_DATA_DIR:id==='overview'?c.dataDir:process.env.OVERVIEW_DATA_DIR||'',LINGTU_REGISTRY_PATH:this.registryFile,...(this.policyFile?{LINGTU_WORKBENCH_POLICY_FILE:this.policyFile}:{})};
+          env={...process.env,...this.environment,[c.env]:String(c.port),PURCHASE_DATA_DIR:id==='purchase'?c.dataDir:process.env.PURCHASE_DATA_DIR||'',SALES_DATA_DIR:id==='sales'?c.dataDir:process.env.SALES_DATA_DIR||'',OVERVIEW_DATA_DIR:id==='overview'?c.dataDir:process.env.OVERVIEW_DATA_DIR||'',LINGTU_REGISTRY_PATH:this.registryFile,...(this.policyFile?{LINGTU_WORKBENCH_POLICY_FILE:this.policyFile}:{})};
           env.LINGTU_MAINTENANCE=c.maintenance?'1':'0';
           if(id==='purchase')env.PURCHASE_MOBILE_PORT=String(mobilePort);
           delete env.ELECTRON_RUN_AS_NODE;

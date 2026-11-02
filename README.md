@@ -1,3 +1,12 @@
+# 浏览器工作台（日常入口）
+
+采购、销售、经营总览已支持系统 Node.js 24 直接运行。`npm.cmd run dev` 启动浏览器开发入口 http://127.0.0.1:28430，使用隔离数据；其他电脑通过正式 Tailscale HTTPS 入口访问。
+
+- 修改前端后刷新，修改模块后端后自动重启对应服务。
+- `npm.cmd run web:check` 检查环境与入口；`npm.cmd run web:status` 检查服务。
+- 正式运行、备份、免安装包更新与 WinSW 配置见 [浏览器运维说明](docs/browser-service.md)。
+- 原 Electron 源码开发入口保留为 `npm.cmd run desktop:dev`。
+
 # 五成电子商务 ERP 工作台
 
 当前唯一维护主线：五模块轻量业务工作台。保留云仓同步、采购、销售、经营收支总览、历史订单导出及外部 MCP/CLI；继续使用独立预览身份，不迁移正式账本。本轮源码改造与交付验收状态分开记录。
