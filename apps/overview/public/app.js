@@ -54,7 +54,7 @@ function chooseMonth(period){return periodPicker.set({grain:'month',period},{sou
 async function refresh(){
  if(business.surface.getDraftState().dirty){if(data)periodPicker.set(renderedPeriod(),{silent:true});history.replaceState(null,'','#'+view);business.notify();toast('未保存表单已保留；已恢复当前数据期间，保存或明确放弃后再刷新');return {status:'blocked',reason:'unsaved-draft'};}surfaceConfirmed=false;sourceLocator=null;business.notify();
  const focusPicker=document.activeElement?.closest('[data-period-picker]')?.dataset.picker,seq=++sequence;view=location.hash.slice(1)||'overview';if(!viewTitles[view])view='overview';if(view!=='overview'&&periodPicker.get().grain==='year')periodPicker.set({grain:'month',period:currentMonth},{silent:true});
- const periodRoot=periodPicker.element;periodRoot.hidden=view==='freight';periodRoot.querySelector('.lt-period__grain').hidden=view!=='overview';
+ const periodRoot=periodPicker.element;periodRoot.hidden=view==='freight';periodPicker.setGrains(view==='overview'?['month','year']:['month'],{reason:view==='overview'?'本页仅支持月、年统计':'本页按月度账期处理'});
  $('#page-title').textContent=viewTitles[view];document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
  $('#content').setAttribute('aria-busy','true');$('#refresh').disabled=true;document.querySelector('#overview-loading')?.remove();$('#content').insertAdjacentHTML('afterbegin',loadingMarkup({variant:'inline',id:'overview-loading',status:'正在读取最新账本…',logo:'./loading-logo.png'}));
  try{const url=view==='overview'?'/api/dashboard?'+new URLSearchParams(dashboardQuery()):'/api/overview?month='+periodPicker.get().period;
