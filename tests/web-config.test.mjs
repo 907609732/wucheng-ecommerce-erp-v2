@@ -8,7 +8,7 @@ import {
   loadConfig,
   validateConfig,
 } from "../server/config.mjs";
-import { ServiceManager } from "../desktop/shared/service-manager.mjs";
+import { ServiceManager } from "../server/service-manager.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 test("development uses an explicit isolated directory and only three source modules", () => {
   const c = developmentConfig({
@@ -53,7 +53,7 @@ test("an explicit managed sales port is not replaced by copied legacy server.por
     const registryFile = path.join(dir, "registry.json");
     fs.writeFileSync(
       registryFile,
-      JSON.stringify({ sales: { managed: true, dataDir: dir, port: 41062 } }),
+      JSON.stringify({ sales: { managed: true, root: dir, dataDir: dir, port: 41062 } }),
     );
     assert.equal(
       new ServiceManager({ registryFile }).config("sales").port,

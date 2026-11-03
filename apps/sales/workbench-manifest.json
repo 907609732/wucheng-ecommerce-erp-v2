@@ -345,15 +345,6 @@
     },
     {
       "module": "sales",
-      "method": "POST",
-      "path": "/api/integration/v1/overview/open",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "sales:POST:/api/integration/v1/overview/open"
-    },
-    {
-      "module": "sales",
       "method": "GET",
       "path": "/api/integration/v1/report",
       "kind": "read",

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { getWorkbenchLocation } from "../desktop/shared/workbench-location.mjs";
+import { getWorkbenchLocation } from "./legacy/workbench-location.mjs";
 import { moduleIds, databases } from "./config.mjs";
 function size(dir) {
   let bytes = 0,

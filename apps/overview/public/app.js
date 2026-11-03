@@ -89,13 +89,11 @@ try{boot=await api('/api/bootstrap');$('#month').value=localStorage.getItem('ove
 
 let sourceRefreshPending=false,sourceRefreshRunning=false;
 async function flushSourceRefresh(){
- if(!sourceRefreshPending||sourceRefreshRunning||document.hidden||window.lingtuShell?.isVisible?.()===false||document.querySelector('dialog[open]')||business.surface.getDraftState().dirty)return;
+ if(!sourceRefreshPending||sourceRefreshRunning||document.hidden||document.querySelector('dialog[open]')||business.surface.getDraftState().dirty)return;
  sourceRefreshPending=false;sourceRefreshRunning=true;
  try{await refresh();}finally{sourceRefreshRunning=false;if(sourceRefreshPending)queueMicrotask(()=>void flushSourceRefresh());}
 }
-window.lingtuShell?.onSourceChanged(()=>{sourceRefreshPending=true;void flushSourceRefresh();});
-window.lingtuShell?.onVisibilityChanged(()=>void flushSourceRefresh());
-document.addEventListener('visibilitychange',()=>void flushSourceRefresh());
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)sourceRefreshPending=true;void flushSourceRefresh();});
 document.addEventListener('close',()=>void flushSourceRefresh(),true);
 
 document.addEventListener('click',event=>{

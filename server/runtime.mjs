@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createWorkbenchGateway } from "../desktop/workbench/gateway.mjs";
+import { createWorkbenchGateway } from "./gateway/gateway.mjs";
 import { validateConfig, moduleIds } from "./config.mjs";
 import { createSourceServices } from "./services.mjs";
 import { controlEndpoint } from "./control.mjs";

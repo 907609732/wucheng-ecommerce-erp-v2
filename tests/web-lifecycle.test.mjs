@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ServiceManager } from "../desktop/shared/service-manager.mjs";
+import { ServiceManager } from "../server/service-manager.mjs";
 import { createSourceServices } from "../server/services.mjs";
 import { developmentConfig } from "../server/config.mjs";
 test("drain waits for an in-flight first start and leaves no child running", async () => {

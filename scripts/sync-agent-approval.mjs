@@ -9,11 +9,10 @@ export const approvalCopies = [
   'apps/purchase/lib/agent-approval.mjs',
   'apps/sales/lib/agent-approval.mjs',
   'apps/overview/lib/agent-approval.mjs',
-  'apps/exporter/src/main/agent-approval.mjs',
 ];
 
 export function synchronizeApproval(root, {write = false} = {}) {
-  const sourcePath = path.join(root, 'desktop/business-interface/approval.mjs');
+  const sourcePath = path.join(root, 'shared/protocol/approval.mjs');
   const normalize = value => value.replace(/\r\n/g, '\n');
   const source = normalize(fs.readFileSync(sourcePath, 'utf8'));
   const sha256 = createHash('sha256').update(source).digest('hex');
@@ -27,7 +26,7 @@ export function synchronizeApproval(root, {write = false} = {}) {
     } else mismatches.push(relative);
   }
   if (mismatches.length) throw new Error('Approval implementation is missing or stale: ' + mismatches.join(', '));
-  return {ok: true, source: 'desktop/business-interface/approval.mjs', normalizedSha256: sha256, copies: approvalCopies, written: write};
+  return {ok: true, source: 'shared/protocol/approval.mjs', normalizedSha256: sha256, copies: approvalCopies, written: write};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

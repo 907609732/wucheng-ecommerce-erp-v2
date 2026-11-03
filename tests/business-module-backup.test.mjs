@@ -1,8 +1,0 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {backupBusinessModule} from '../desktop/business-host/module-backup.mjs';
-const fixture=()=>{const calls=[];return {calls,id:'purchase',prepare:async id=>calls.push('prepare:'+id),services:{capabilities:async()=>({running:true}),ensure:async id=>calls.push('restart:'+id)},lifecycle:{checkIdle:async()=>calls.push('idle'),backup:async()=>{calls.push('backup');return {hadData:true,directory:'isolated-fixture/backup'};}}};};
-test('shared backup prepares, checks idle, reuses validated lifecycle and restores running service',async()=>{const f=fixture();assert.equal((await backupBusinessModule(f)).directory,'isolated-fixture/backup');assert.deepEqual(f.calls,['prepare:purchase','idle','backup','restart:purchase']);});
-test('shared backup refuses busy services before stopping or copying',async()=>{const f=fixture();f.services.capabilities=async()=>({busy:true,running:true});await assert.rejects(backupBusinessModule(f),{code:'SERVICE_BUSY'});assert.deepEqual(f.calls,['prepare:purchase']);});
-test('shared backup does not report missing data as success and restarts after failure',async()=>{const f=fixture();f.lifecycle.backup=async()=>({hadData:false});await assert.rejects(backupBusinessModule(f),/没有可备份/);assert.equal(f.calls.at(-1),'restart:purchase');f.lifecycle.backup=async()=>{throw Error('disk full')};await assert.rejects(backupBusinessModule(f),/disk full/);assert.equal(f.calls.at(-1),'restart:purchase');});
-test('unsupported backup cannot trigger preparation or access another module',async()=>{const f=fixture();f.id='../formal';await assert.rejects(backupBusinessModule(f),/不支持/);assert.deepEqual(f.calls,[]);});

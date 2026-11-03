@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ServiceManager } from "../desktop/shared/service-manager.mjs";
+import { ServiceManager } from "./service-manager.mjs";
 import { moduleIds, databases } from "./config.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid) => {

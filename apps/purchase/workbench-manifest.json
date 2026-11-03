@@ -328,15 +328,6 @@
     {
       "module": "purchase",
       "method": "POST",
-      "path": "/api/integration/v1/exporter/open",
-      "kind": "write",
-      "remote": true,
-      "uiOnly": true,
-      "operationId": "purchase:POST:/api/integration/v1/exporter/open"
-    },
-    {
-      "module": "purchase",
-      "method": "POST",
       "path": "/api/integration/v1/maintenance/activate",
       "kind": "write",
       "remote": false,

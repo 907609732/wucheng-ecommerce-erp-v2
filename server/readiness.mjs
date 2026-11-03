@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { signWorkbenchActor } from "../desktop/workbench/actor.mjs";
+import { signWorkbenchActor } from "./gateway/actor.mjs";
 import { moduleIds } from "./config.mjs";
 export async function verifyServices(services) {
   const caps = await Promise.all(moduleIds.map((id) => services.ensure(id))),

@@ -45,12 +45,12 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  if(agentManaged)app.use((req,res,next)=>{
   // Header presence is only an early requirement. installWorkbenchModule below
   // verifies the HMAC before any of these business handlers can execute.
-  if(/^\/api\/integration\/v1\/(?:agent\/|orders$|transfers(?:\/|$)|edits(?:\/|$)|review-session$|exporter\/open$)/.test(req.path)&&!req.headers['x-workbench-actor']&&!req.headers['x-workbench-actor-signature'])return res.status(401).json({error:'业务操作需要真实工作台签名身份',code:'WORKBENCH_LOGIN_REQUIRED'});
+  if(/^\/api\/integration\/v1\/(?:agent\/|orders$|transfers(?:\/|$)|edits(?:\/|$)|review-session$)/.test(req.path)&&!req.headers['x-workbench-actor']&&!req.headers['x-workbench-actor-signature'])return res.status(401).json({error:'业务操作需要真实工作台签名身份',code:'WORKBENCH_LOGIN_REQUIRED'});
   next();
  });
  const taskCenter=openTaskCenter(store),personnel=openPurchasePersonnel(store),taskBoard=openTaskAssignment(store,taskCenter,personnel);
  const transfers=openOrderTransfers(store);
- const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','exporter.open','edits.prepare','edits.review-ui']});
+ const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','edits.prepare','edits.review-ui']});
  const edits=installPurchaseEdits(integration,store);
  registerTransferRoutes(integration,transfers,store);installWorkbenchMigration(integration,store,createWorkbenchMigration);installWorkbenchAudit(integration,store);integration.finish();
  const orderImages=openOrderImages(store,{downloader:imageDownloader});

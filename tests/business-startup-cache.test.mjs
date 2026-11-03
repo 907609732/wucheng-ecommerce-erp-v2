@@ -1,6 +1,0 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createActivationResourceOperation} from '../desktop/business-host/activation-resources.mjs';
-test('dependency cache reuses unchanged files but rehashes replacement and application entry',t=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'business-integrity-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const deps=path.join(root,'node_modules');fs.mkdirSync(deps);const file=path.join(deps,'index.js'),entry=path.join(root,'main.mjs');fs.writeFileSync(file,'one');fs.writeFileSync(entry,'entry');const cache={},a=createActivationResourceOperation(root,{verifiedCache:cache});const digest=a.hashResource(file);a.hashResource(entry);
- const b=createActivationResourceOperation(root,{verifiedCache:cache});assert.equal(b.hashResource(file),digest);assert.equal(b.metrics.cachedHashes,1);b.hashResource(entry);assert.equal(b.metrics.hashes,1);
- const replacement=path.join(deps,'replacement.js');fs.writeFileSync(replacement,'two');fs.renameSync(replacement,file);assert.notEqual(b.hashResource(file),digest);assert.equal(b.metrics.hashes,2);
-});

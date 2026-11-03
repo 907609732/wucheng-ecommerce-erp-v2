@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createWorkbenchGateway } from "../desktop/workbench/gateway.mjs";
+import { createWorkbenchGateway } from "../server/gateway/gateway.mjs";
 const ids = ["purchase", "sales", "overview"];
 test("explicit development mode has local sessions, CSRF, and only three modules", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "web-gateway-"));

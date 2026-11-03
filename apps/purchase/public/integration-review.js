@@ -1,10 +1,6 @@
 import {classificationForm,classificationDraft} from './classification-ui.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function openExporter(){
- if(window.workbenchTransport){location.assign('/apps/exporter/');return;}
- if(window.lingtuShell){const result=await window.lingtuShell.open('exporter');if(result?.requested||result?.opened)return;throw Error('工作台尚未确认打开订单导出，请在更多业务中重试');}
- const result=await api('/exporter/open','POST',{});if(result?.route)throw Error('请从工作台的更多业务打开订单导出；本页没有启动其他程序');
-}
+
 const yuan=n=>n==null?'未知':'¥'+(n/100).toFixed(2);
 const labels={date:'下单日期',paidAt:'付款日期',supplier:'供应商',status:'状态',amountCents:'整单实付',refundCents:'退款金额',shippingCents:'运费（已含在实付）',recipient:'收货人',phone:'电话',address:'地址',logisticsCompany:'物流公司',trackingNo:'运单号',note:'备注',items:'商品明细',classification:'采购分类'};
 let nonce='',current=null,step=1,busy=false;
@@ -68,11 +64,10 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   action(async()=>{
     if(b.dataset.batch)return load(b.dataset.batch);
-    if(b.id==='launch'){await openExporter();$('#message').textContent='订单导出台已打开；采集完成后点击其中的“导入采购台”。';return;}
     if(b.id==='save')return save();
     if(b.id==='first-confirm'){await save();if(!current.canConfirm)throw Error('请先处理全部待核对项目');current=await api(`/transfers/${current.id}/review`,'POST',{revision:current.revision});step=2;render();}
     if(b.id==='back'){step=1;render();}
-    if(b.id==='commit'){if(!$('#final-check').checked)throw Error('请勾选确认本批数量、金额和变更内容');const {receipt}=await api(`/transfers/${current.id}/confirm`,'POST',{revision:current.revision});await api(`/transfers/${current.id}/commit`,'POST',{receipt});await window.lingtuShell?.dataChanged();await load(current.id);}
+    if(b.id==='commit'){if(!$('#final-check').checked)throw Error('请勾选确认本批数量、金额和变更内容');const {receipt}=await api(`/transfers/${current.id}/confirm`,'POST',{revision:current.revision});await api(`/transfers/${current.id}/commit`,'POST',{receipt});await load(current.id);}
     if(b.id==='verify'){const v=await api(`/transfers/${current.id}/verification`);$('#verification').innerHTML=v.differences.length?`<p class="error">${v.differences.map(x=>esc(x.orderNo+'：'+x.reason)).join('<br>')}</p>`:'<p class="success">本批订单当前数据与确认结果一致。</p>';}
     if(b.id==='rollback'){const reason=prompt('撤销只影响本批新增与更新。请填写撤销原因：');if(!reason)return;await api(`/transfers/${current.id}/rollback`,'POST',{reason});await load(current.id);}
   });
