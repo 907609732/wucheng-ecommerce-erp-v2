@@ -1,0 +1,85 @@
+/* 灵兔 ERP 设计令牌 · 单一源。改这里，全局生效；不要在各界面再定义同义变量。 */
+:root{
+  /* ── 颜色：品牌与文本 ───────────────────────────── */
+  --lt-brand:#117b6e;            --lt-brand-strong:#07594f;   --lt-brand-soft:#e8f3ee;
+  --lt-brand-ring:#81cbb6;
+  --lt-ink:#182e2d;              --lt-ink-2:#4b665d;          --lt-muted:#758582;
+  --lt-quiet:#8b9b91;            --lt-placeholder:#a2aca6;
+  --lt-nav-idle:#6d7d78;         --lt-nav-caption:#9aa8a2;
+
+  /* ── 颜色：表面与描边 ───────────────────────────── */
+  --lt-surface:#fff;             --lt-surface-page:#f6f8f6;   --lt-surface-soft:#fbfcfa;
+  --lt-surface-table-head:#fafcf9; --lt-surface-row-hover:#f9fcf8;
+  --lt-surface-topbar:#ffffffb0;  --lt-surface-track:#edf1ec; --lt-surface-subtle:#f4f7f2;
+  --lt-line:#e6ece8;             --lt-line-control:#dfe6df;   --lt-line-row:#f0f3ed;
+
+  /* ── 颜色：状态 ─────────────────────────────────── */
+  --lt-success:#39a884; --lt-success-bg:#eaf5ed; --lt-success-text:#32876b;
+  --lt-warning:#ef984e; --lt-warning-bg:#fff6e6; --lt-warning-line:#f0e4ca; --lt-warning-text:#9f804b;
+  --lt-danger:#b95b58;  --lt-danger-bg:#fdf0ef;  --lt-danger-line:#edd0cc;  --lt-danger-text:#b46157;
+  --lt-required:#c9825a;
+
+  /* ── 颜色：平台与图表 ───────────────────────────── */
+  --lt-platform-1688:#db8838; --lt-platform-1688-bg:#fff0e3;
+  --lt-platform-taobao:#e37a44; --lt-platform-taobao-bg:#fff0e8;
+  --lt-platform-pdd:#cf6973; --lt-platform-pdd-bg:#fcebee;
+  --lt-chart-1:#168374; --lt-chart-2:#eca65c; --lt-chart-3:#d4aa38; --lt-chart-4:#d98190;
+  --lt-chart-5:#25a565; --lt-chart-6:#8fac9e; --lt-chart-7:#bdc7b6;
+  --lt-chart-axis:#91a097; --lt-chart-tooltip:#183e33; --lt-chart-bar-muted:#a9cec0; --lt-chart-empty:#eef2eb;
+
+  /* ── 字体 ────────────────────────────────────────── */
+  --lt-font:"Segoe UI","Microsoft YaHei",sans-serif;
+  --lt-font-mono:Consolas,monospace;
+  --lt-weight-regular:400; --lt-weight-medium:500; --lt-weight-strong:600; --lt-weight-heading:650;
+  --lt-tracking-body:.1px; --lt-tracking-h1:-.7px; --lt-tracking-caption:1.6px;
+  --lt-text-h1:calc(28px * var(--font-scale,1));
+  --lt-text-h1-sm:calc(24px * var(--font-scale,1));
+  --lt-text-modal-title:calc(19px * var(--font-scale,1));
+  --lt-text-h2:calc(17px * var(--font-scale,1));
+  --lt-text-h3:calc(15px * var(--font-scale,1));
+  --lt-text-body:calc(14px * var(--font-scale,1));
+  --lt-text-body-sm:calc(13px * var(--font-scale,1));
+  --lt-text-label:calc(12px * var(--font-scale,1));
+  --lt-text-caption:calc(12px * var(--font-scale,1));
+  --lt-text-micro:calc(10px * var(--font-scale,1));
+  --lt-leading-body:1.6; --lt-leading-note:1.8;
+
+  /* ── 间距与尺寸 ──────────────────────────────────── */
+  --lt-space-1:4px;  --lt-space-2:8px;  --lt-space-3:12px; --lt-space-4:16px;
+  --lt-space-5:20px; --lt-space-6:24px; --lt-space-7:32px; --lt-space-8:40px;
+  --lt-sidebar-w:222px; --lt-topbar-h:74px;
+  --lt-content-pad:32px 40px 40px; --lt-content-max:1700px;
+  --lt-control-h:38px; --lt-btn-h:38px; --lt-control-h-sm:32px; --lt-control-h-touch:44px;
+  --lt-tag-h:22px; --lt-row-pad:16px 16px; --lt-table-head-pad:12px 16px;
+
+  /* ── 圆角 / 描边 / 阴影 / 动效 / 层级 ─────────────── */
+  --lt-radius-control:7px; --lt-radius-panel:12px; --lt-radius-modal:14px;
+  --lt-radius-tag:6px; --lt-radius-pill:999px;
+  --lt-border:1px solid var(--lt-line);
+  --lt-border-control:1px solid var(--lt-line-control);
+  --lt-shadow-brand:0 5px 12px #0f766e20;
+  --lt-shadow-btn:0 3px 6px #147e7010;
+  --lt-shadow-toast:0 6px 28px #17372e30;
+  --lt-shadow-modal:0 20px 80px #102b2730;
+  --lt-focus-ring:3px solid var(--lt-brand-ring);
+  --lt-focus-offset:3px;
+  --lt-motion-fast:120ms; --lt-motion-base:160ms;
+  --lt-z-sidebar:10; --lt-z-topbar:20; --lt-z-dropdown:40; --lt-z-modal:50; --lt-z-toast:60;
+}
+
+/* 密度 */
+[data-lt-density="compact"]{
+  --lt-control-h:32px; --lt-btn-h:32px; --lt-row-pad:8px 12px;
+  --lt-text-body:calc(13px * var(--font-scale,1));
+  --lt-text-caption:calc(12px * var(--font-scale,1));
+}
+[data-lt-density="touch"]{
+  --lt-control-h:44px; --lt-btn-h:44px; --lt-row-pad:16px 12px;
+  --lt-text-body:calc(16px * var(--font-scale,1));
+}
+
+/* 断点 */
+@media (max-width:1120px){ :root{ --lt-sidebar-w:180px; --lt-content-pad:24px 24px; } }
+@media (max-width:860px){ :root{ --lt-sidebar-w:74px; --lt-topbar-h:60px; --lt-content-pad:20px 16px; } }
+
+/* 字号缩放下的栅格折叠由 base.css 的 [data-large-type="true"] 规则承担 */

@@ -1,8 +1,8 @@
 /* Shared loading surface. No external resources; all selectors remain scoped. */
 .lt-loading {
-  --lt-loading-blue: #2f6eea;
-  --lt-loading-text: #587395;
-  --lt-loading-muted: #617b9a;
+  --lt-loading-blue: var(--lt-brand,#117b6e);
+  --lt-loading-text: var(--lt-ink-2,#4b665d);
+  --lt-loading-muted: var(--lt-muted,#758582);
   box-sizing: border-box;
   isolation: isolate;
   position: relative;

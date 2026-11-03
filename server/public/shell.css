@@ -1,7 +1,7 @@
 :root {
-  font-family: "Microsoft YaHei", system-ui, sans-serif;
-  color: #1e293b;
-  background: #f6f8fb;
+  font-family: var(--lt-font);
+  color: var(--lt-ink);
+  background: var(--lt-surface-page);
 }
 * {
   box-sizing: border-box;
@@ -15,8 +15,8 @@ header {
   align-items: center;
   gap: 24px;
   padding: 0 24px;
-  background: white;
-  border-bottom: 1px solid #dce3ec;
+  background: var(--lt-surface);
+  border-bottom: 1px solid var(--lt-line);
 }
 nav {
   display: flex;
@@ -26,17 +26,17 @@ a,
 button {
   font: inherit;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--lt-radius-control);
   padding: 8px 16px;
   text-decoration: none;
-  color: #334155;
+  color: var(--lt-ink-2);
   background: transparent;
   cursor: pointer;
 }
 a[aria-current="page"],
 button {
-  background: #e9f0ff;
-  color: #235bd5;
+  background: var(--lt-brand-soft);
+  color: var(--lt-brand);
 }
 #status {
   margin-left: auto;

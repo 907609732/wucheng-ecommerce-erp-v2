@@ -1,4 +1,6 @@
+import {applyChartDefaults,themeColor,chartPalette} from './ui/chart-theme.mjs';
 import {loadingMarkup} from './loading-screen.mjs';
+import {mountPeriodPickers,disposePeriodPickers} from './ui/period-picker.mjs';
 import {createFreightUI} from './freight-ui.js';
 import {renderFundsOverview} from './funds-overview.js';
 import {createPddUI} from './pdd-ui.js';
@@ -10,7 +12,7 @@ const labels={freight:'运费',operations:'运营总览',reconciliation:'资金�
 const settingsItems=[['manual','线下与代发'],['sources','店铺与数据'],['imports','账单导入'],['close','月报确认']];
 const settingsViews=new Set(settingsItems.map(([view])=>view));
 $('#settings-nav').innerHTML=settingsItems.map(([view,label])=>`<a href="${view==='settings'?'#settings':'#settings?section='+view}" data-settings-view="${view}">${label}</a>`).join('');
-let boot,state={view:'operations',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI;
+let boot,state={view:'operations',grain:'month',period:'',shop:'all'},charts=[],tables=[],loadId=0,lastLedger=[],closeInfo,pddUI,freightUI,periodPicker;
 let personnelRefresh,choosingPersonnel=false;
 const isBoss=()=>['member','boss'].includes(selectedSalesRole(boot?.personnel));
 const shopName=id=>boot.shops.find(s=>s.id===id)?.name||id;
@@ -32,12 +34,8 @@ const mcol=(title,field)=>({title,field,hozAlign:'right',formatter:c=>money(c.ge
 function resetWidgets(){for(const c of charts)c.destroy();charts=[];for(const t of tables)t.destroy();tables=[];}
 function query(){return new URLSearchParams({period:state.period,grain:state.grain,shop:state.shop});}
 function metric(label,value,detail,currency=false){return `<div class="metric"><div class="label">${label}</div><span class="corner">↗</span><div class="value">${currency&&value!=='—'?'<small>¥</small>':''}${value}</div><div class="detail">${detail}</div></div>`;}
-function syncPeriodControls(){
- $('#period').type=state.grain==='month'?'month':state.grain==='day'?'date':'number';$('#period').value=state.period;
- document.querySelectorAll('[data-grain]').forEach(b=>b.classList.toggle('selected',b.dataset.grain===state.grain));
- $('#shop').value=state.shop;
-}
-function syncShopOptions(){if(!boot.shops.some(shop=>shop.id===state.shop)&&state.shop!=='shared')state.shop='all';$('#shop').innerHTML='<option value="all">全部店铺与渠道</option>'+shopOptions()+'<option value="shared" hidden>多店共用</option>';syncPeriodControls();}
+function syncPeriodUI(){periodPicker?.set({grain:state.grain,period:state.period},{silent:true});$('#shop').value=state.shop;}
+function syncShopOptions(){if(!boot.shops.some(shop=>shop.id===state.shop)&&state.shop!=='shared')state.shop='all';$('#shop').innerHTML='<option value="all">全部店铺与渠道</option>'+shopOptions()+'<option value="shared" hidden>多店共用</option>';syncPeriodUI();}
 function readRoute(){
  const [route,search]=location.hash.slice(1).split('?'),q=new URLSearchParams(search||'');
  state.view=route==='settings'&&settingsViews.has(q.get('section'))?q.get('section'):route==='settings'?'sources':labels[route]?route:'operations';
@@ -49,14 +47,14 @@ function readRoute(){
  if(['tasks','reconciliation','sources','imports','close','manual'].includes(state.view)&&state.grain!=='month'){state.period=month();state.grain='month';}
  state.accountSettlements=state.view==='reconciliation'&&q.get('mode')==='settlements';
   if(selectedSalesRole(boot.personnel)&&!canOpenSalesView(boot.personnel,state.view)){state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));toast('资金核对和月报确认由老板处理，已返回我的任务。');}
- syncPeriodControls();return q;
+ syncPeriodUI();return q;
 }
 function contextRoute(view,extra={}){return '#'+view+'?'+new URLSearchParams({month:month(),shop_id:state.shop,...extra});}
 function refreshPendingLink(){
  const count=isBoss()?Number(boot.pendingEdits)||0:0;$('#pending-edits-link').hidden=count===0;$('#pending-edits-count').textContent=String(count);
 }
 async function refreshPendingCount(){if(!isBoss())return;try{const current=await api('/api/bootstrap');boot.pendingEdits=current.pendingEdits;refreshPendingLink();}catch{/* Keep the last confirmed count when offline. */}}
-function clearPersonnelContent(){++loadId;resetWidgets();pddUI?.destroy();lastLedger=[];closeInfo=null;if($('#dialog').open)$('#dialog').close();$('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在确认工作身份…',logo:'./loading-logo.png'});}
+function clearPersonnelContent(){disposePeriodPickers($('#content'));++loadId;resetWidgets();pddUI?.destroy();lastLedger=[];closeInfo=null;if($('#dialog').open)$('#dialog').close();$('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在确认工作身份…',logo:'./loading-logo.png'});}
 async function refreshPersonnelSession(force=false){
  if(!boot||choosingPersonnel&&!force)return;if(personnelRefresh)return personnelRefresh;
  if(force)clearPersonnelContent();
@@ -75,12 +73,14 @@ function applyPersonnelUI(){
  refreshPendingLink();
 }
 function showPersonnelPicker(){
+ disposePeriodPickers($('#content'));
  choosingPersonnel=true;++loadId;resetWidgets();pddUI?.destroy();applyPersonnelUI();$('#page-title').textContent='选择工作身份';$('#content').innerHTML=personnelChoiceMarkup();
 }
 async function selectPersonnel(role){
  await api('/api/personnel/session',{role});Object.assign(boot,await api('/api/bootstrap'));choosingPersonnel=false;syncShopOptions();state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));applyPersonnelUI();await render();
 }
 async function render(){
+ const periodFocus=document.activeElement?.closest('[data-period-picker]')?.dataset.picker;
  if(!selectedSalesRole(boot.personnel)){showPersonnelPicker();return;}
  if(!canOpenSalesView(boot.personnel,state.view)){state.view='operations';state.accountSettlements=false;history.replaceState(null,'',contextRoute('operations'));toast('该项由老板处理，已返回我的任务。');}
  applyPersonnelUI();
@@ -97,11 +97,12 @@ async function render(){
  $('#page-title').textContent=labels[state.view];
  document.querySelectorAll('[data-nav]').forEach(b=>{const active=b.dataset.nav===(inSettings?'settings':isDetail?'reconciliation':state.view);b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
  refreshPendingLink();void refreshPendingCount();
+ disposePeriodPickers($('#content'));
  $('#content').innerHTML=loadingMarkup({brand:'五成电子商务工作台',subtitle:'销售台',status:'正在读取本月数据…',logo:'./loading-logo.png'});
  try{
   if(isFreight){resetWidgets();pddUI?.destroy();await freightUI.dashboard(()=>seq===loadId);return;}
   if(isDetail){resetWidgets();await pddUI.details();return;}
-  if(isAccount){resetWidgets();await pddUI.summary();syncPeriodControls();return;}
+  if(isAccount){resetWidgets();await pddUI.summary();syncPeriodUI();mountPeriodPickers($('#content'));if(periodFocus==='sales-reconcile')$('#content [data-picker="sales-reconcile"] .lt-period__value')?.focus();return;}
    resetWidgets();pddUI?.destroy();
    if(state.view==='operations'||state.view==='reconciliation'){const r=await api('/api/report?'+query()+(state.view==='operations'?'&empty_trend=skip':''));if(seq!==loadId)return;if(state.view==='operations'){if(r.totals.sales==null)await renderFundsOverview({$,api,boot,state,money,number,esc,charts,valid:()=>seq===loadId});else renderOperations(r);}else await renderReconciliation(r);}
    else if(state.view==='manual')await renderManual();else if(state.view==='sources')await renderSources();else if(state.view==='imports'){await renderImports();if(seq===loadId)$('#content').insertAdjacentHTML('afterbegin','<div class="notice"><span>按店铺导入官方账单，检查预览后提交。</span><div class="actions"><button class="button small" data-action="taobao-import">导入淘宝货款 CSV</button><button class="button primary small" data-action="pdd-import">导入拼多多 ZIP</button></div></div>');}else if(state.view==='close')await renderClose();else await renderSources();
@@ -109,11 +110,11 @@ async function render(){
 }
 function renderOperations(r){const known=r.operations.filter(o=>o.rmb.sales!=null).sort((a,b)=>b.rmb.sales-a.rmb.sales),none=r.totals.sales==null;
   $('#content').innerHTML=`<div class="notice ${r.totals.complete?'':'warning'}"><span>${r.totals.complete?'所选期间已完成数据覆盖核对。':none?'尚未取得真实经营数据。先导入并核对一个完整月份，趋势和对比会随数据生成。':'当前显示已取得的数据，部分店铺、日期或汇率尚未完整核对。'} ${r.locked?'本月结果已锁定。':''}</span><a href="#sources">查看数据覆盖 →</a></div><div class="metrics">${metric('已取得支付金额 · 人民币参考',money(r.totals.sales),`环比 ${pct(r.comparison.mom)}　同比 ${pct(r.comparison.yoy)}`,true)}${metric('支付订单数',number(r.totals.orders),'按支付订单统计，不按发货件数')}${metric('退款金额 · 人民币参考',money(r.totals.refunds),'按退款发生日期统计',true)}${metric('广告消耗 · 人民币参考',money(r.totals.ad_spend),'仅广告消耗，不含账户充值',true)}</div><div class="grid-two"><section class="card"><div class="card-head"><div><h2>销售趋势</h2><p class="subtext">${state.grain==='day'?'所选月份每天':'最近 12 个月'} · 金额折算仅供经营参考</p></div><span class="legend">支付金额</span></div>${r.trend.some(t=>t.sales!=null)?'<div class="chart-area"><canvas id="trend" aria-label="销售趋势折线图" role="img"></canvas></div>':'<div class="empty-chart"><strong>等待第一份月度报表</strong><small>缺失月份保留为空<br>不会用零填充或生成示例销售额</small></div>'}</section><section class="card"><div class="card-head"><div><h2>店铺销售排名</h2><p class="subtext">按已取得人民币参考金额排序</p></div><span class="pill muted">${known.length} / ${boot.shops.length} 渠道</span></div>${known.length?known.slice(0,7).map((o,i)=>`<div class="ranking-row"><span class="rank">${String(i+1).padStart(2,'0')}</span><span class="rank-name">${esc(o.shop)}</span><div class="rank-bar"><span style="width:${Math.max(0,known[0].rmb.sales>0?o.rmb.sales/known[0].rmb.sales*100:0)}%"></span></div><span class="rank-value">${money(o.rmb.sales)}</span></div>`).join(''):boot.shops.slice(0,6).map((s,i)=>`<div class="ranking-row"><span class="rank">·</span><span class="rank-name">${esc(s.name)}</span><div class="rank-bar"></div><span class="rank-value muted">未取得</span></div>`).join('')}</section></div><section class="card"><div class="card-head"><div><h2>各店经营明细</h2><p class="subtext">原币展示；客单价 = 支付金额 ÷ 支付订单数。访客仅使用相同期间的去重值。</p></div></div><div id="operations-table"></div></section><div class="grid-two"><section class="card"><div class="card-head"><h2>平台占比</h2><span class="subtext">仅包含已取得金额</span></div>${known.some(o=>o.rmb.sales>0)?'<div class="chart-area"><canvas id="share" aria-label="平台销售占比" role="img"></canvas></div>':'<div class="empty">待取得各平台销售额后显示</div>'}</section><section class="card"><h2>指标口径</h2><p class="section-note">${esc(r.definitions)}</p><p class="section-note">跨日、跨月和跨店访客不能直接相加。投产比仅在广告归因口径一致且已确认时计算；缺少对应数据时显示“—”。</p><p class="section-note">Ozon 原币单独保留。经营折算采用相应日期参考汇率；最终人民币收款以 PingPong 实际记录为准。</p></section></div>`;
-  if($('#trend'))charts.push(new Chart($('#trend'),{
-    type:'line',data:{labels:r.trend.map(t=>t.label),datasets:[{data:r.trend.map(t=>t.sales==null?null:t.sales/100),borderColor:'#287b68',backgroundColor:'#287b6812',pointRadius:3,fill:true,tension:.25,spanGaps:false}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'¥ '+c.parsed.y.toLocaleString()}}},scales:{x:{grid:{display:false},ticks:{color:'#8b9a8f',font:{size:10},maxTicksLimit:8}},y:{beginAtZero:true,border:{display:false},grid:{color:'#eef2eb'},ticks:{color:'#8b9a8f',font:{size:10}}}}}
+  if($('#trend'))charts.push(createThemedChart($('#trend'),{
+    type:'line',data:{labels:r.trend.map(t=>t.label),datasets:[{data:r.trend.map(t=>t.sales==null?null:t.sales/100),borderColor:themeColor('--lt-ink-2'),backgroundColor:'#287b6812',pointRadius:3,fill:true,tension:.25,spanGaps:false}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'¥ '+c.parsed.y.toLocaleString()}}},scales:{x:{grid:{display:false},ticks:{color:themeColor('--lt-muted'),font:{size:10},maxTicksLimit:8}},y:{beginAtZero:true,border:{display:false},grid:{color:themeColor('--lt-chart-empty')},ticks:{color:themeColor('--lt-muted'),font:{size:10}}}}}
   }));
-  if($('#share')){const grouped={};for(const o of known)grouped[o.platform]=(grouped[o.platform]||0)+o.rmb.sales;charts.push(new Chart($('#share'),{type:'doughnut',data:{labels:Object.keys(grouped),datasets:[{data:Object.values(grouped).map(x=>x/100),backgroundColor:['#287b68','#a9c588','#d7b66e','#6c9aab','#c6978c','#adc1b6','#748275','#c6ceaa'],borderWidth:3,borderColor:'#fff'}]},options:{maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:12}}}}}}));}
+  if($('#share')){const grouped={};for(const o of known)grouped[o.platform]=(grouped[o.platform]||0)+o.rmb.sales;charts.push(createThemedChart($('#share'),{type:'doughnut',data:{labels:Object.keys(grouped),datasets:[{data:Object.values(grouped).map(x=>x/100),backgroundColor:chartPalette(),borderWidth:3,borderColor:themeColor('--lt-surface')}]},options:{maintainAspectRatio:false,cutout:'70%',plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:12}}}}}}));}
   table('#operations-table',r.operations,[{title:'平台',field:'platform',width:85},{title:'店铺',field:'shop',width:185}, {title:'币种',field:'currency',width:75},mcol('支付金额','sales'),{title:'订单数',field:'orders',hozAlign:'right',formatter:c=>number(c.getValue())},mcol('退款金额','refunds'),mcol('广告消耗','ad_spend'),mcol('客单价','aov'),{title:'期间访客',field:'visitors',formatter:c=>number(c.getValue())},{title:'转化率',field:'conversion',formatter:c=>pct(c.getValue())},{title:'投产比',field:'roas',formatter:c=>c.getValue()==null?'—':c.getValue().toFixed(2)},{title:'核对',field:'coverage',formatter:c=>pill(c.getValue())},{title:'来源口径',field:'definition',width:350}]);
 }
 async function renderReconciliation(r){if(!state.accountSettlements&&(state.shop==='all'||boot.shops.some(x=>x.id===state.shop&&['淘宝','拼多多'].includes(x.platform)))){await pddUI.summary();return;}const d=await api('/api/reconciliation?'+new URLSearchParams({month:month(),shop:state.shop}));if(state.view!=='reconciliation')return;
@@ -149,13 +150,12 @@ function monthConfirm(unlock){const action=unlock?'解锁':'锁定',m=month();di
 function taobaoUploadForm(){dialog('导入淘宝交易货款账单',`<form id="taobao-upload"><p class="section-note">按官方账期导入货款与退款，不作为支付销售额。请保留官方文件名，先预览后提交。</p><label class="field">淘宝店铺<select name="shop_id">${options(boot.shops.filter(s=>s.platform==='淘宝').map(s=>[s.id,s.name]),state.shop)}</select></label><label class="field">官方 CSV<input type="file" name="file" accept=".csv" required></label>${actionFooter('读取并预览')}</form>`);$('#taobao-upload').onsubmit=e=>{e.preventDefault();submitForm(e.target,async()=>{const p=await api('/api/taobao/import',new FormData(e.target));if(p.status==='committed'){toast('该原件已导入，不会重复入账');closeDialog();return;}dialog('淘宝货款导入预览',`<p class="section-note">月份 ${esc(p.month)} · 货款收入 ${money(p.source_summary.income)} · 退款 ${money(-p.source_summary.expense)}。按账期归属，未核对平台月汇总。</p><p>新增 ${p.summary.valid} 笔 · 重复 ${p.summary.duplicates} 笔 · 冲突 ${p.summary.conflicts} 笔</p>${p.conflicts.length||p.locked?'<p class="error">存在冲突或锁定月份，不能提交。</p>':'<button id="taobao-commit" class="button primary">确认导入货款账单</button>'}`);if($('#taobao-commit'))$('#taobao-commit').onclick=async()=>{await api('/api/taobao/import/'+p.id+'/commit',{revision:p.revision});closeDialog();toast('淘宝交易货款已导入');const next=contextRoute('operations');if(location.hash===next)render();else location.hash=next;};});};}
 function importForm(){dialog('导入官方报表',`<form id="import-form"><p class="section-note">原件只保存在本机。首次导入需预览列映射和金额后提交。</p><div class="form-grid"><label class="field">店铺<select name="shop_id">${shopOptions(false,state.shop==='all'?(boot.shops[0]?.id||''):state.shop)}</select></label>${field('归属月份','month',month(),'month','required')}<label class="field">文件类型<select name="dataset"><option value="operations">运营报表</option><option value="ledger">结算 / 收款 / 单店费用流水</option></select></label><label class="field">官方 CSV、TSV 或 XLSX<input type="file" name="file" accept=".csv,.tsv,.xlsx" required></label>${field('工作表名称（不填选第一张）','sheet')}${field('表头所在行','header_row','1','number','min="1" max="100" required')}</div>${actionFooter('读取文件并映射列')}</form>`);$('#import-form').onsubmit=e=>{e.preventDefault();submitForm(e.target,async()=>{const form=new FormData(e.target),dataset=form.get('dataset'),b=await api('/api/imports',form);mappingForm(b,dataset);});};}
 function mappingForm(batch,dataset){const fields=boot.fields[dataset==='operations'?'operations':'ledger'];dialog('映射字段并检查预览',`<form id="mapping-form"><p class="section-note">文件共 ${batch.total} 行。选择原表对应列；不提供的指标保留为空。运营退款须使用退款发生日期口径。</p><div class="mapping-grid">${Object.entries(fields).map(([k,label])=>`<div class="mapping-row"><label for="map-${k}">${esc(label)}</label><select id="map-${k}" name="map_${k}">${options([['','未提供 / 使用默认'],...batch.headers.map((h,i)=>[String(i),h])],batch.mapping[k])}</select></div>`).join('')}</div><div class="form-grid"><label class="field full">来源名称<input name="source" placeholder="如拼多多官方运营报表、支付宝资金账单" required></label><label class="field">默认币种<select name="default_currency">${options(boot.currencies.map(c=>[c,c]),'CNY')}</select></label>${dataset==='ledger'?`<label class="field">未映射类型列时使用<select name="default_kind">${options(Object.entries(boot.kinds).filter(([k])=>!['sale','refund'].includes(k)))}</select></label>`:''}${dataset==='operations'?'<label class="field full">来源指标定义与广告归因窗口<textarea name="definition" rows="2" required placeholder="如：支付日期，含买家运费；退款按退款发生日；访客按当前报表期间去重；广告归因窗口"></textarea></label><label class="checkline field full"><input type="checkbox" name="compatible" value="1">已核实：买家与访客统计范围一致，广告归因成交额与消耗窗口可比（未核实则不计算转化率、投产比）</label>':''}</div>${actionFooter('生成导入预览')}</form><div id="preview-result"></div>`);$('#mapping-form').onsubmit=e=>{e.preventDefault();submitForm(e.target,async d=>{const mapping=Object.fromEntries(Object.entries(d).filter(([k])=>k.startsWith('map_')).map(([k,v])=>[k.slice(4),v]));const p=await api(`/api/imports/${batch.id}/preview`,{...d,mapping});$('#preview-result').innerHTML=`<div class="notice ${p.errors.length||p.conflicts.length||p.locked?'warning':''}">新增 ${p.summary.valid} 行 · 重复跳过 ${p.summary.duplicates} 行 · 冲突 ${p.summary.conflicts} 行 · 错误 ${p.summary.errors} 行 ${p.locked?' · 月份已锁定，原件保留待处理':''}</div>${p.errors.concat(p.conflicts).slice(0,20).map(x=>`<p class="error">第 ${x.row} 行：${esc(x.message)}</p>`).join('')}${htmlTable(['日期','类型 / 区间','原币','金额 / 支付金额'],p.records.slice(0,10).map(x=>[esc(x.date||x.start),esc(x.kind?boot.kinds[x.kind]:x.end),x.currency,money(x.amount??x.sales)]))}<div class="form-actions"><button class="button primary" id="commit-import" ${p.errors.length||p.conflicts.length||p.locked||p.attribution==='unassigned'?'disabled':''}>确认导入 ${p.summary.valid} 行</button></div>`;$('#commit-import').onclick=async e=>{e.target.disabled=true;try{const result=await api(`/api/imports/${batch.id}/commit`,{revision:p.revision});closeDialog();toast(`新增 ${result.added} 行，跳过 ${result.skipped} 行重复记录`);render();}catch(err){toast(err.message);e.target.disabled=false;}};});};}
-document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||b.closest('[data-freight-ui]'))return;try{
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||b.closest('[data-freight-ui]')||e.composedPath().some(node=>node.matches?.('[data-period-picker]')))return;try{
   if(b.dataset.personnelRole){b.disabled=true;await selectPersonnel(b.dataset.personnelRole);return;}
   if(!selectedSalesRole(boot?.personnel))return;
   if(b.dataset.shopDelete){shopDeleteForm(b.dataset.shopDelete);return;}
 
   if(b.dataset.nav){const view=b.dataset.nav,next=contextRoute(view,view==='reconciliation'?{shop_id:'all'}:{});if(location.hash===next){readRoute();render();}else location.hash=next;return;}
-  if(b.dataset.grain){const old=month();state.grain=b.dataset.grain;state.period=state.grain==='year'?old.slice(0,4):state.grain==='day'?old+'-01':old;$('#period').type=state.grain==='month'?'month':state.grain==='day'?'date':'number';$('#period').value=state.period;document.querySelectorAll('[data-grain]').forEach(x=>x.classList.toggle('selected',x.dataset.grain===state.grain));render();return;}
   if(b.dataset.edit){const r=lastLedger.find(l=>l.id===b.dataset.edit);ledgerForm(r.kind,true,r);return;}
   if(b.dataset.delete){reasonDialog('删除手工记录','说明（操作保留在审计历史）',async reason=>api('/api/ledger/'+b.dataset.delete,{reason},'DELETE'));return;}
   if(b.dataset.coverage){coverageForm(b.dataset.coverage);return;}
@@ -166,7 +166,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
 
 
   if(b.dataset.taskImport){
-   const shop=boot.shops.find(s=>s.id===b.dataset.taskImport);if(!shop)throw Error('请先选择店铺');state.shop=shop.id;syncPeriodControls();
+   const shop=boot.shops.find(s=>s.id===b.dataset.taskImport);if(!shop)throw Error('请先选择店铺');state.shop=shop.id;syncPeriodUI();
    if(shop.manual){location.hash=contextRoute('manual');return;}
    history.replaceState(null,'',contextRoute('operations'));$('#task-return').href=contextRoute('operations');
    if(shop.platform==='淘宝')taobaoUploadForm();else if(shop.platform==='拼多多')pddUploadForm();else importForm();return;
@@ -178,7 +178,6 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(action==='rates'){b.disabled=true;const list=await api('/api/rates',{month:month()});toast(list.length?`汇率：${list.filter(x=>x.status==='ok'||x.status==='existing').length} 个日期可用，${list.filter(x=>x.status==='failed').length} 个失败`:'本月没有需要折算的外币记录');render();}
 }catch(err){toast(err.message);}finally{if(b.isConnected)b.disabled=false;}});
 $('#dialog-close').onclick=()=>closeDialog();$('#dialog').addEventListener('cancel',e=>{e.preventDefault();closeDialog();});
-$('#period').onchange=()=>{state.period=$('#period').value;if(['reconciliation','sources','imports','close','manual'].includes(state.view)){history.replaceState(null,'',contextRoute(state.view,state.accountSettlements?{mode:'settlements'}:{}));}render();};
 $('#shop').onchange=()=>{state.shop=$('#shop').value;if(state.view==='reconciliation'){state.accountSettlements=false;location.hash=contextRoute('reconciliation');}else{if(['sources','imports','close','manual'].includes(state.view))history.replaceState(null,'',contextRoute(state.view));render();}};
 window.addEventListener('hashchange',()=>{readRoute();render();});
 window.addEventListener('focus',()=>{if(boot)void refreshPersonnelSession();});
@@ -190,6 +189,7 @@ try{
  if(requestedRole){await api('/api/personnel/session',{role:requestedRole});Object.assign(boot,await api('/api/bootstrap'));}
  if(initialURL.searchParams.has('identity')){initialURL.searchParams.delete('identity');history.replaceState(null,'',initialURL.pathname+initialURL.search+initialURL.hash);}
  state.period=boot.month;$('#shop').insertAdjacentHTML('beforeend',shopOptions()+'<option value="shared" hidden>多店共用</option>');readRoute();
+ const periodRoot=$('[data-picker="sales-main"]');periodRoot.dataset.grain=state.grain;periodRoot.dataset.period=state.period;periodPicker=mountPeriodPickers(periodRoot,{onChange:({grain,period})=>{state.grain=grain;state.period=period;if(['reconciliation','sources','imports','close','manual'].includes(state.view))history.replaceState(null,'',contextRoute(state.view,state.accountSettlements?{mode:'settlements'}:{}));render().catch(error=>toast(error.message));}}).get('sales-main');
  pddUI=createPddUI({$,esc,money,number,api,dialog,toast,boot,state,render,upload:pddUploadForm});
  freightUI=createFreightUI({$,esc,money,api,boot,state,dialog,closeDialog,toast,render,addChart:c=>charts.push(c),addTable:t=>tables.push(t)});
  applyPersonnelUI();$('#demo-banner').hidden=!boot.demo;await render();
@@ -197,5 +197,8 @@ try{
 
 function shopCreateForm(){
  dialog('新增自己的店铺',`<form id="shop-create-form"><div class="form-grid"><label class="field">平台<select name="platform">${options(['淘宝','拼多多','京东','闲鱼','抖店','Ozon','线下','代发'].map(x=>[x,x]))}</select></label>${field('店铺名称','name','','text','required maxlength="80"')}</div>${actionFooter('创建店铺')}</form>`);
- $('#shop-create-form').onsubmit=e=>{e.preventDefault();submitForm(e.target,async data=>{await api('/api/shops',data);Object.assign(boot,await api('/api/bootstrap'));$('#shop').innerHTML='<option value="all">全部店铺与渠道</option>'+shopOptions()+'<option value="shared" hidden>多店共用</option>';state.shop='all';syncPeriodControls();history.replaceState(null,'',contextRoute(state.view));closeDialog();toast('店铺已创建');await render();});};
+ $('#shop-create-form').onsubmit=e=>{e.preventDefault();submitForm(e.target,async data=>{await api('/api/shops',data);Object.assign(boot,await api('/api/bootstrap'));$('#shop').innerHTML='<option value="all">全部店铺与渠道</option>'+shopOptions()+'<option value="shared" hidden>多店共用</option>';state.shop='all';syncPeriodUI();history.replaceState(null,'',contextRoute(state.view));closeDialog();toast('店铺已创建');await render();});};
 };
+
+// Presentation only: keep each chart's data, callbacks and explicit options intact.
+function createThemedChart(...args){applyChartDefaults(Chart,Number(getComputedStyle(document.documentElement).getPropertyValue('--font-scale'))||1);return new Chart(...args);}

@@ -1,0 +1,62 @@
+{
+  "policy": "只降不升；按每次出现计数；移动端主题单独统计，不在采购台重复计数。",
+  "groups": {
+    "purchase": {
+      "label": "采购台",
+      "directory": "apps/purchase/public",
+      "exclude": [
+        "mobile.css",
+        "surface-theme.css"
+      ],
+      "maxColors": 0,
+      "documentedBaseline": 419
+    },
+    "sales": {
+      "label": "销售台",
+      "directory": "apps/sales/public",
+      "maxColors": 0,
+      "documentedBaseline": 495
+    },
+    "overview": {
+      "label": "经营总览",
+      "directory": "apps/overview/public",
+      "maxColors": 0,
+      "documentedBaseline": 135
+    },
+    "warehouse": {
+      "label": "云仓",
+      "source": "warehouse",
+      "directory": "desktop/renderer",
+      "maxColors": 0,
+      "documentedBaseline": 102
+    },
+    "launcher": {
+      "label": "工作台外壳",
+      "directory": "desktop/launcher",
+      "maxColors": 0,
+      "documentedBaseline": 62
+    },
+    "mobile": {
+      "label": "移动端主题",
+      "directory": "apps/purchase/public",
+      "include": [
+        "mobile.css",
+        "surface-theme.css"
+      ],
+      "maxColors": 0,
+      "documentedBaseline": 54
+    },
+    "exporter": {
+      "label": "导出器",
+      "directory": "apps/exporter/src/renderer/src",
+      "include": [
+        "style.css",
+        "order-browser.css"
+      ],
+      "maxColors": 0,
+      "documentedBaseline": null,
+      "includeScopedVue": true
+    }
+  },
+  "initialization": "2026-11-01 用户批准按实测值初始化；移动端单列、不重复计数；后续仅降不升。"
+}

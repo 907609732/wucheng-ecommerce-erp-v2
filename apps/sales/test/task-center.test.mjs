@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {monthlyTaskModel,createTaskCenter,taskFlowStages} from '../public/task-center.js';
+import {monthlyTaskModel,createTaskCenter as createRealTaskCenter,taskFlowStages} from '../public/task-center.js';
+import {parsePeriod} from '../public/ui/period-picker.mjs';
+import {periodPickerFixture} from './period-picker-fixture.mjs';
+function createTaskCenter(ctx){return createRealTaskCenter({...periodPickerFixture(ctx.state?.period),...ctx});}
 
 const shops=[{id:'pdd',name:'测试拼多多',platform:'拼多多',manual:false},{id:'tb',name:'测试淘宝',platform:'淘宝',manual:false},{id:'offline',name:'线下测试',platform:'线下',manual:true}];
 const month='2026-09';
@@ -94,14 +97,16 @@ test('空店铺legacy任务只提示配置，不再生成登记任务或创建�
 test('任务页用路由切换月份与店铺，非法月份不改变任务状态',async t=>{
   const nodes={'#content':{innerHTML:''},'#task-month':{value:month},'#task-shop':{value:'offline'}};
   const state={period:month,shop:'all'},messages=[];
+  let changePeriod,selectedMonth=month;
+  const picker={get:()=>({grain:'month',period:selectedMonth}),set:({grain,period})=>{if(!parsePeriod(grain,period))return false;selectedMonth=period;return true;}};
   const previousLocation=globalThis.location;globalThis.location={hash:''};
   t.after(()=>{if(previousLocation===undefined)delete globalThis.location;else globalThis.location=previousLocation;});
-  const ui=createTaskCenter({$:selector=>nodes[selector],esc:value=>String(value??''),money:value=>String(value),api:async url=>url.startsWith('/api/close')?{month,coverage:[]}:url.includes('/statement?')?{shop_id:'pdd',months:[]}:[],boot:{shops},state,toast:message=>messages.push(message)});
+  const ui=createTaskCenter({$:selector=>nodes[selector],esc:value=>String(value??''),money:value=>String(value),api:async url=>url.startsWith('/api/close')?{month,coverage:[]}:url.includes('/statement?')?{shop_id:'pdd',months:[]}:[],boot:{shops},state,toast:message=>messages.push(message),disposePeriodPickers:()=>{},mountPeriodPickers:(_root,options)=>{changePeriod=options.onChange;return new Map([['sales-task-month',picker]]);}});
   await ui.render();
-  assert.match(nodes['#content'].innerHTML,/id="task-month"/);assert.match(nodes['#content'].innerHTML,/id="task-shop"/);
-  nodes['#task-month'].value='2026-08';nodes['#task-month'].onchange();
+  assert.match(nodes['#content'].innerHTML,/data-picker="sales-task-month"/);assert.match(nodes['#content'].innerHTML,/id="task-shop"/);
+  changePeriod({grain:'month',period:'2026-08'});
   assert.equal(globalThis.location.hash,'#tasks?month=2026-08&shop_id=offline');assert.deepEqual(state,{period:month,shop:'all'});
   nodes['#task-shop'].value='tb';nodes['#task-shop'].onchange();assert.equal(globalThis.location.hash,'#tasks?month=2026-08&shop_id=tb');
-  nodes['#task-month'].value='2026-13';nodes['#task-month'].onchange();
-  assert.equal(globalThis.location.hash,'#tasks?month=2026-08&shop_id=tb');assert.equal(nodes['#task-month'].value,month);assert.equal(messages.length,1);
+  changePeriod({grain:'month',period:'2026-13'});
+  assert.equal(globalThis.location.hash,'#tasks?month=2026-08&shop_id=tb');assert.equal(selectedMonth,month);assert.equal(messages.length,1);
 });

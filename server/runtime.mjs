@@ -12,6 +12,7 @@ const assetVersion = () =>
   createHash("sha256")
     .update(fs.readFileSync(path.join(publicDir, "shell.js")))
     .update(fs.readFileSync(path.join(publicDir, "shell.css")))
+    .update(fs.readFileSync(path.join(publicDir, "tokens.css")))
     .digest("hex")
     .slice(0, 16);
 export async function createWebRuntime(
@@ -84,6 +85,10 @@ export async function createWebRuntime(
                   "/web/shell.css?v=" + assetVersion(),
                 )
                 .replaceAll(
+                  "/web/tokens.css",
+                  "/web/tokens.css?v=" + assetVersion(),
+                )
+                .replaceAll(
                   "/web/shell.js",
                   "/web/shell.js?v=" + assetVersion(),
                 ),
@@ -92,6 +97,7 @@ export async function createWebRuntime(
         for (const [name, type] of [
           ["shell.js", "text/javascript"],
           ["shell.css", "text/css"],
+          ["tokens.css", "text/css"],
         ])
           app.get("/web/" + name, async (q, r) => {
             const bytes = fs.readFileSync(path.join(publicDir, name)),

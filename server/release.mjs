@@ -65,7 +65,7 @@ export async function prepareRelease(target, { install = true } = {}) {
     .filter(Boolean)
     .filter(
       (n) =>
-        /^(?:server\/|shared\/)/.test(n) ||
+        /^(?:server\/|shared\/|ui\/)/.test(n) ||
         /^apps\/(?:purchase|sales|overview)\/(?:server\.mjs$|package(?:-lock)?\.json$|workbench-manifest\.json$|lib\/|public\/)/.test(
           n,
         ),
