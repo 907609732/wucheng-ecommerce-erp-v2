@@ -32,12 +32,13 @@
   </aside>
   <div class="lt-main">
     <header class="topbar lt-topbar">
-      <div><div class="eyebrow">LINGTU / E-COMMERCE SALES DESK</div><h1 id="page-title">运营总览</h1></div>
+      <div class="lt-breadcrumb">工作空间 <span>/</span> <b>销售台</b></div>
       <a id="task-return" class="task-return" href="#operations" hidden>返回运营总览 <span aria-hidden="true">↗</span></a>
       <span id="lock-status" hidden></span>
     </header>
     <div id="demo-banner" hidden class="notice warning">演示验证环境 · 全部为合成测试数据，与正式账本隔离</div>
-    <div class="toolbar">
+    <div class="lt-content lt-page-heading"><div class="page-heading"><div><h1 id="page-title">运营总览</h1><p>按真实业务记录查看经营与对账。</p></div></div></div>
+    <div class="toolbar lt-workspace-toolbar">
       <div class="lt-period" data-period-picker data-picker="sales-main" data-grains="day,month,year" data-stepper="true" data-label="统计时间" data-store-key="sales-main"></div>
       <label class="inline-label">店铺<select id="shop" aria-label="筛选店铺"><option value="all">全部店铺与渠道</option></select></label>
       <label class="inline-label" id="freight-channel-label" hidden>类型<select id="freight-channel" aria-label="筛选运费类型"><option value="all">全部类型</option><option value="warehouse">云仓发货</option><option value="merchant">商家寄件</option><option value="sf">顺丰快递</option></select></label>

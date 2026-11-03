@@ -34,7 +34,7 @@ controller.set({grain:'month',period:'2026-10'},{silent:true});
 disposePeriodPickers(root);
 ```
 
-`data-clearable="true"` 允许全部月份（period=null）；`data-strip="months"` 或 `months-all` 显示快捷月份条；`data-store-key` 在本机记忆选择；`data-min` / `data-max` 限制范围。每个控件使用独立的 picker/store key。
+`data-clearable="true"` 允许全部月份（period=null）；统计筛选不再使用快捷月份条；`data-store-key` 在本机记忆选择；`data-min` / `data-max` 限制范围。每个控件使用独立的 picker/store key。始终显示“日/月/年”，`data-grains`声明可用粒度，其余项禁用并通过title与aria-label解释。路由切换使用`controller.setGrains(['month'], {reason:'本页按月度账期处理'})`限制粒度，不派发选择事件；调用方同步返回的grain/period，业务请求仍遵守原接口粒度。
 
 业务只接收 grain 与 ISO period：day=YYYY-MM-DD、month=YYYY-MM、year=YYYY。中文显示仅负责展示，不改变金额、业务日期、锁月或统计口径。发生日期表单保留日期语义，不把月份当作实际记账日期。
 

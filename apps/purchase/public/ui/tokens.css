@@ -48,7 +48,7 @@
   --lt-space-1:4px;  --lt-space-2:8px;  --lt-space-3:12px; --lt-space-4:16px;
   --lt-space-5:20px; --lt-space-6:24px; --lt-space-7:32px; --lt-space-8:40px;
   --lt-sidebar-w:222px; --lt-topbar-h:74px;
-  --lt-content-pad:32px 40px 40px; --lt-content-max:1700px;
+  --lt-content-gutter:40px; --lt-content-pad:32px var(--lt-content-gutter) 40px; --lt-content-max:none;
   --lt-control-h:38px; --lt-btn-h:38px; --lt-control-h-sm:32px; --lt-control-h-touch:44px;
   --lt-tag-h:22px; --lt-row-pad:16px 16px; --lt-table-head-pad:12px 16px;
 
@@ -79,7 +79,7 @@
 }
 
 /* 断点 */
-@media (max-width:1120px){ :root{ --lt-sidebar-w:180px; --lt-content-pad:24px 24px; } }
-@media (max-width:860px){ :root{ --lt-sidebar-w:74px; --lt-topbar-h:60px; --lt-content-pad:20px 16px; } }
+@media (max-width:1120px){ :root{ --lt-sidebar-w:180px; --lt-content-gutter:24px; --lt-content-pad:24px var(--lt-content-gutter); } }
+@media (max-width:860px){ :root{ --lt-sidebar-w:74px; --lt-topbar-h:60px; --lt-content-gutter:16px; --lt-content-pad:20px var(--lt-content-gutter); } }
 
 /* 字号缩放下的栅格折叠由 base.css 的 [data-large-type="true"] 规则承担 */

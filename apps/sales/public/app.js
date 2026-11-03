@@ -89,7 +89,9 @@ async function render(){
  const isFreight=state.view==='freight';
  $('#freight-channel-label').hidden=!isFreight;
  $('.toolbar').hidden=false;$('#task-return').hidden=true;$('#task-return').href=contextRoute('operations');
- $('.segmented').hidden=['reconciliation','sources','imports','close','manual'].includes(state.view);
+ const monthOnly=['reconciliation','sources','imports','close','manual','pdd-details','tb-details'].includes(state.view);
+ if(periodPicker){const selected=periodPicker.setGrains(monthOnly?['month']:['day','month','year'],{reason:'本页按月度账期处理'});state.grain=selected.grain;state.period=selected.period;}
+ $('[data-picker="sales-main"]').hidden=isDetail;
  $('#period-note').textContent=isFreight?'按费用所属期间统计，月汇总不分摊到每天':'业务日期按来源报表记录';
  const sharedOption=$('#shop option[value="shared"]');if(sharedOption)sharedOption.hidden=!isFreight;
  if(!isFreight&&state.shop==='shared'){state.shop='all';$('#shop').value='all';}
