@@ -303,3 +303,32 @@ for(const corruption of ['unexpected-file','changed-hash','symlink'])test('local
   assert.equal(w.summary().submitted,3);assert.equal(w.detail('first').error,null);assert.equal(fs.existsSync(first.eventDir),true);assert.equal(fs.readFileSync(outside,'utf8'),'preserve');
   const queue=new DatabaseSync(path.join(f.config.dataVersion.dir,'queue.sqlite'),{readOnly:true});const maintenance=queue.prepare('SELECT error FROM data_version_maintenance WHERE id=?').get('first');queue.close();assert.match(maintenance.error,/^DATA_VERSION_/);assert.ok(warnings.length>0);assert.ok(!JSON.stringify(warnings).includes(f.root));
 });
+
+test('large manifests use short official stdin add/checkin commands with every Unicode path and a longer checkin timeout',async t=>{
+  const f=fixture(t),{event,eventDir}=f.event('large-manifest');event.attachments=[];
+  const body=Buffer.from('synthetic evidence'),sha=crypto.createHash('sha256').update(body).digest('hex');
+  for(let i=0;i<400;i++){
+    const relative='attachments/正式 采购原件 '+String(i).padStart(4,'0')+' '+'long-name-'.repeat(8)+'.txt';fs.writeFileSync(path.join(eventDir,relative),body);event.attachments.push({path:relative,sha256:sha,bytes:body.length});
+  }
+  const calls=[];const adapter=createUvcsAdapter({...f.config.dataVersion,run:async(_file,args,options)=>{calls.push({args,options});return {stdout:args[0]==='fileinfo'?'synthetic@localhost:8087':args[0]==='checkin'?'Created changeset cs:73@br:/main':'',code:0};}});
+  await adapter.commit(event,eventDir);const add=calls.find(call=>call.args[0]==='add'&&call.options.input),checkin=calls.find(call=>call.args[0]==='checkin');
+  assert.ok(add,'bulk add must use stdin');assert.ok(checkin.options.input,'bulk checkin must use stdin');
+  for(const call of calls){assert.ok(call.args.join(' ').length<16000);assert.equal(call.options.timeout,call.args[0]==='checkin'?600000:60000);}
+  const target=path.join(f.config.dataVersion.workspace,event.module),expectedFiles=[path.join(target,'snapshot.json'),...event.attachments.map(item=>path.join(target,item.path)),path.join(target,'event.json')];
+  assert.deepEqual(add.options.input.trimEnd().split(/\r?\n/),expectedFiles);assert.deepEqual(checkin.options.input.trimEnd().split(/\r?\n/),[target,path.join(target,'attachments'),...expectedFiles]);
+  assert.ok(add.args.includes('-'));assert.ok(checkin.args.includes('-'));assert.ok(add.options.input.endsWith('\n\n'));assert.ok(checkin.options.input.endsWith('\n\n'));assert.ok(!checkin.options.input.includes('.lingtu-data-version-staging'));
+});
+
+test('official runner sends stdin as UTF8 terminated by a blank line without shell quoting paths',async t=>{
+  const f=fixture(t),input='C:\\版本 工作区\\采购原件 一.txt\nC:\\版本 工作区\\附件 二.txt';
+  const result=await runCm(process.execPath,['-e',"process.stdin.setEncoding('utf8');let input='';process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>process.stdout.write(input));"],{cwd:f.config.dataVersion.workspace,timeout:5000,input});
+  assert.equal(result.stdout,input+'\n\n');
+});
+
+test('stdin stream failure safely terminates the child and waits for close before releasing its lease',{timeout:5000},async t=>{
+  const f=fixture(t),child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.pid=process.pid;let signalSpawned,signalKilled;const spawned=new Promise(resolve=>signalSpawned=resolve),killed=new Promise(resolve=>signalKilled=resolve);child.kill=()=>{signalKilled();return true;};
+  const running=runCm(process.execPath,[],{cwd:f.config.dataVersion.workspace,timeout:1000,input:'file.txt',spawnProcess:(_file,_args,options)=>{assert.equal(options.stdio[0],'pipe');signalSpawned();return child;}});
+  const rejected=assert.rejects(running,/UVCS_STDIN_UNAVAILABLE/);await spawned;child.stdin.emit('error',Object.assign(Error('broken input'),{code:'EPIPE'}));await killed;
+  assert.equal(fs.existsSync(path.join(f.config.dataVersion.workspace,'.lingtu-data-version-staging','command-lease.json')),true);child.emit('close',1);await rejected;
+  assert.equal(fs.existsSync(path.join(f.config.dataVersion.workspace,'.lingtu-data-version-staging','command-lease.json')),false);
+});

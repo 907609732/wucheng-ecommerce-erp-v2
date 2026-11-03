@@ -96,7 +96,7 @@ export async function inspectOrphanProcesses({ownerPid,executable}) {
   const output=await new Promise((resolve,reject)=>{
     const child=spawn(powershell,['-NoProfile','-NonInteractive','-Command',script],{shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});
     let text='',bytes=0,bad=false;
-    const timer=setTimeout(()=>{bad=true;child.kill();},5000);
+    const timer=setTimeout(()=>{bad=true;child.kill();},30000);
     child.on('error',()=>{clearTimeout(timer);reject(fail('UVCS_COMMAND_LEASE_UNVERIFIED'));});
     for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{bytes+=chunk.length;if(bytes>65536){bad=true;child.kill();}else if(stream===child.stdout)text+=chunk.toString('utf8');});
     child.on('close',code=>{clearTimeout(timer);if(bad||code!==0)reject(fail('UVCS_COMMAND_LEASE_UNVERIFIED'));else resolve(text);});
@@ -154,7 +154,7 @@ export async function runCm(file, args, options) {
       // must verify this exact child has exited, and never kill an unrelated PID.
       killTimer=setTimeout(()=>settle(terminalError),options.killGraceMs??5000);
     };
-    try {child=(options.spawnProcess??spawn)(file,args,{cwd:workspace,shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});}
+    try {child=(options.spawnProcess??spawn)(file,args,{cwd:workspace,shell:false,windowsHide:true,stdio:[options.input===undefined?'ignore':'pipe','pipe','pipe']});}
     catch {try{clearLease();}catch{}settle(fail('UVCS_UNAVAILABLE'));return;}
     child.on('error',()=>{terminalError??=fail('UVCS_UNAVAILABLE');});
     child.on('close',async code=>{
@@ -172,6 +172,13 @@ export async function runCm(file, args, options) {
       try{durableJson(leaseFile,lease);}catch{killAndWait(fail('UVCS_COMMAND_LEASE_UNVERIFIED'));}
     }
     timer=setTimeout(()=>killAndWait(fail('UVCS_TIMEOUT')),options.timeout??60000);
+    if(options.input!==undefined) {
+      try {
+        if(!child.stdin)throw Error();
+        child.stdin.on('error',()=>killAndWait(fail('UVCS_STDIN_UNAVAILABLE')));
+        child.stdin.end(String(options.input).replace(/[\r\n]*$/,'')+'\n\n','utf8');
+      }catch{killAndWait(fail('UVCS_STDIN_UNAVAILABLE'));}
+    }
   });
 }
 
@@ -181,12 +188,19 @@ const moduleLabels = {purchase:'采购',sales:'销售',overview:'经营总览'};
 export function createUvcsAdapter({cmPath,workspace,repository,run=runCm}) {
   if (!text(cmPath,4096) || !path.isAbsolute(workspace??'') || !text(repository,1000) || !repository || /['"\u0000-\u001f]/.test(repository)) throw fail('UVCS_CONFIG_INVALID');
   workspace=path.resolve(workspace);
-  async function command(args) {
+  async function command(args,input) {
     let result;
-    try {result=await run(cmPath,args,{cwd:workspace,shell:false,windowsHide:true,timeout:60000,maxBuffer:1024*1024});}
+    try {result=await run(cmPath,args,{cwd:workspace,shell:false,windowsHide:true,timeout:args[0]==='checkin'?600000:60000,maxBuffer:1024*1024,...(input===undefined?{}:{input})});}
     catch(error){throw error.code?.startsWith('UVCS_') ? error : fail('UVCS_UNAVAILABLE');}
     if (result?.code && result.code!==0) throw fail('UVCS_UNAVAILABLE');
     return typeof result==='string'?result:String(result?.stdout??'');
+  }
+  function pathCommand(prefix,paths,suffix=[]) {
+    const args=[...prefix,...paths,...suffix];
+    // Windows CreateProcess is limited to 32767 UTF-16 code units. Reserve
+    // space for executable/escaping and use the official stdin path-list mode.
+    const commandLength=cmPath.length+args.reduce((length,arg)=>length+arg.length*2+3,0);
+    return commandLength>16000?command([...prefix,'-',...suffix],paths.join('\n')+'\n\n'):command(args);
   }
   async function checkWorkspace() {
     assertNoLinks(workspace);
@@ -314,14 +328,14 @@ export function createUvcsAdapter({cmPath,workspace,repository,run=runCm}) {
     }
     const removed=deletedFiles(stage).map(item=>path.join(target,item.path));
     for(const directory of newDirectories)await command(['add','--ignorefailed',directory]);
-    await command(['add','--ignorefailed',...paths]);
+    await pathCommand(['add','--ignorefailed'],paths);
     for(const file of removed)if(fs.existsSync(file))await command(['remove',file]);
     inspectTarget(stage);
     const clean=value=>value.replace(/[\r\n\u0000-\u001f|]/g,' ').slice(0,120);
     const comment=`${moduleLabels[event.module]}｜${clean(event.action)}｜新增${event.counts.insert}条、修改${event.counts.update}条、删除${event.counts.delete}条｜操作人：${clean(event.actor.label)}｜[事件：${event.id}]`;
     // Even an already absent file remains in this explicit list: its cm delete
     // may still be pending after the previous process's interrupted checkin.
-    const output=await command(['checkin',...newDirectories,...paths,...removed,'--all',`-c=${comment}`]);
+    const output=await pathCommand(['checkin'],[...newDirectories,...paths,...removed],['--all',`-c=${comment}`]);
     const ids=[...output.matchAll(/\bcs:(\d+)(?=@|\b)/g)].map(match=>match[1]);
     if(new Set(ids).size!==1) throw fail('UVCS_CHANGESET_UNCONFIRMED');
     clearConfirmedStage(stage);
