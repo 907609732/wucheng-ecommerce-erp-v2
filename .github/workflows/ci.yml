@@ -28,12 +28,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            apps/purchase/package-lock.json
-            apps/sales/package-lock.json
-            apps/overview/package-lock.json
+          package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm ci --prefix apps/purchase --ignore-scripts
       - run: npm ci --prefix apps/sales --ignore-scripts
