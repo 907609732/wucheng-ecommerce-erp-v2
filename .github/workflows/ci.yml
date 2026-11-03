@@ -43,5 +43,14 @@ jobs:
       - run: npm test
       - run: npm run test:purchase
       - run: npm run test:sales
-      - run: npm run test:overview
+      - name: Verify real Windows DPAPI without competing business fixtures
+        working-directory: apps/overview
+        run: node --test tests/cainiao-auth.test.mjs
+      - name: Verify remaining overview business rules
+        working-directory: apps/overview
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem tests/*.test.mjs | Where-Object Name -ne 'cainiao-auth.test.mjs' | ForEach-Object FullName)
+          node --test --test-concurrency=2 $tests
+          if ($LASTEXITCODE -ne 0) { throw 'Overview business tests failed' }
       - run: npm audit --omit=dev --audit-level=high
