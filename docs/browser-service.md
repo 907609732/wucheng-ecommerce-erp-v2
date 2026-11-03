@@ -86,7 +86,7 @@ npm.cmd run web:update -- --config E:\WuchengERP\config.json --candidate E:\Wuch
 
 备份目标必须为新目录；恢复只写入新目录，禁止覆盖现有账本。备份不包含历史备份、运行锁、日志、临时下载和采集助手连接记录。数据库与附件通过 SHA-256 和 SQLite integrity_check 校验。外部副本仍须复制到实际可信的外部存储并做恢复演练；源码版本管理不能替代业务备份。网关配置、身份和审计目录在 `stateDir/gateway`，应另随主机配置备份；更新过程持续保留该目录。
 
-Unity Version Control 管理源码、配置模板与变更历史；忽略规则模板为 `docs/uvcs-ignore.conf`，根目录没有 `ignore.conf` 时可复制使用，已有规则须合并保留。正式配置、密钥、授权、SQLite、附件、运行状态及备份不提交。运行目录放在仓库外，开发产物位于已忽略的 `.codex-artifacts/`。
+Unity Version Control 源码仓库管理源码、配置模板与变更历史；忽略规则模板为 `docs/uvcs-ignore.conf`，根目录没有 `ignore.conf` 时可复制使用，已有规则须合并保留。正式配置、密钥、授权、SQLite、附件、运行状态及备份不提交源码仓库。运行目录放在仓库外，开发产物位于已忽略的 `.codex-artifacts/`。0.14.0 支持将白名单业务快照和必要附件托管到另一个独立私有 UVCS 数据仓库，详见[正式数据版本托管](data-version-operations.md)；登录授权仍不进入该数据仓库。
 
 ## 验收边界
 
