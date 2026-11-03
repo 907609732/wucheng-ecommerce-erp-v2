@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>数据版本 · 五成 ERP</title>
+  <link rel="stylesheet" href="/web/tokens.css" />
+  <link rel="stylesheet" href="/web/data-versions.css" />
+  <script type="module" src="/web/data-versions.js"></script>
+</head>
+<body>
+  <main>
+    <div class="page-heading"><div><p class="eyebrow">业务数据保护</p><h1>数据版本</h1><p class="intro">查看每次业务保存的版本与云端托管进度。</p></div><button id="refresh" type="button">刷新记录</button></div>
+    <section class="summary" aria-label="托管概况">
+      <div><span>等待托管</span><strong id="pending-count">—</strong></div>
+      <div><span>托管异常</span><strong id="failed-count">—</strong></div>
+      <div><span>已托管</span><strong id="submitted-count">—</strong></div>
+      <p id="summary-note" role="status">正在查询托管状态…</p>
+    </section>
+    <form id="filters" class="filters">
+      <label>模块<select name="module"><option value="">全部模块</option><option value="purchase">采购</option><option value="sales">销售</option><option value="overview">经营总览</option></select></label>
+      <label>操作人<input name="actor" placeholder="成员名称或标识" maxlength="200" /></label>
+      <label>状态<select name="status"><option value="">全部状态</option><option value="pending">等待托管</option><option value="failed">托管异常</option><option value="submitted">已托管</option></select></label>
+      <label>开始日期<input name="from" type="date" /></label>
+      <label>结束日期<input name="to" type="date" /></label>
+      <button type="submit" class="primary">查询</button><button id="reset-filters" type="button">重置</button>
+    </form>
+    <p id="notice" role="status" aria-live="polite">正在读取版本记录…</p>
+    <section class="records" aria-label="版本记录">
+      <table><thead><tr><th>业务摘要</th><th>发生时间</th><th>操作人</th><th>模块</th><th>托管状态</th><th>提交号</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="records"></tbody></table>
+      <p id="empty" hidden>此筛选范围内暂无数据版本。</p>
+    </section>
+    <div class="pagination"><span id="total"></span><button id="previous" type="button" disabled>上一页</button><button id="next" type="button" disabled>下一页</button></div>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="detail-heading"><h2 id="detail-title">版本详情</h2><button id="close-detail" type="button" aria-label="关闭版本详情">关闭</button></div>
+    <div id="detail-content"></div>
+    <p id="retry-message" role="status" aria-live="polite"></p>
+    <button id="retry-hosting" class="primary" type="button" hidden>重试托管</button>
+  </dialog>
+</body>
+</html>

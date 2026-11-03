@@ -1,3 +1,4 @@
+import {installDataVersioning,disableDataVersioning,dataVersionBaselineRequired} from '../../../shared/data-version-capture.mjs';
 import {createPurchaseActorContext} from './actor-context.mjs';
 import {openOrderAttachments} from './order-attachments.mjs';
 import {preserveShipments} from '../public/shipments.mjs';
@@ -17,6 +18,9 @@ import {importRules} from '../public/import-rules.mjs';
 export function openStore(dir){
  fs.mkdirSync(dir,{recursive:true});for(const folder of ['originals','staging','backups'])fs.mkdirSync(path.join(dir,folder),{recursive:true});
  const db=new DatabaseSync(path.join(dir,'purchases.sqlite')),actors=createPurchaseActorContext(),auditActor=actors.json;
+
+ if(!process.env.LINGTU_DATA_VERSION_DIR&&process.env.LINGTU_DATA_VERSION_MODE==='disabled')disableDataVersioning(db);
+ const dataVersioning=process.env.LINGTU_DATA_VERSION_DIR?installDataVersioning({db,module:'purchase',dataDir:dir,versionDir:process.env.LINGTU_DATA_VERSION_DIR,initializing:true}):null;
  db.function('purchase_admin_allowed',()=>0);db.function('purchase_admin_batch',()=> '');
  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
  CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, platform TEXT NOT NULL, account TEXT NOT NULL, order_no TEXT NOT NULL, date TEXT NOT NULL, paid_at TEXT NOT NULL, supplier TEXT NOT NULL, status TEXT NOT NULL, amount_cents INTEGER NOT NULL, refund_cents INTEGER NOT NULL, shipping_cents INTEGER NOT NULL, note TEXT NOT NULL, items TEXT NOT NULL, fingerprint TEXT NOT NULL, source_id TEXT, original TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(platform,account,order_no));
@@ -131,7 +135,7 @@ export function openStore(dir){
   db.prepare('INSERT INTO audit(order_id,action,before_json,after_json,created_at,actor_json) VALUES (?,?,?,?,?,?)').run(id,'create',null,JSON.stringify(get(id)),now,auditActor());return get(id);
  });
  let transactionDepth=0;
- const transaction=fn=>{if(transactionDepth)return fn();db.exec('BEGIN IMMEDIATE');transactionDepth++;try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}finally{transactionDepth--;}};
+ const transaction=fn=>{if(transactionDepth)return fn();db.exec('BEGIN IMMEDIATE');transactionDepth++;try{const r=fn();db.exec('COMMIT');return r;}catch(e){if(db.isTransaction)db.exec('ROLLBACK');throw e;}finally{transactionDepth--;}};
  const monthLocks=openMonthLocks(db,{list,transaction});
  attachments=openOrderAttachments({db,dir,get,transaction,update:(id,input)=>api.update(id,input)});
  const classify=(id,version,value,batchId)=>{
@@ -235,6 +239,7 @@ export function openStore(dir){
   async backup(file){await backup(db,file);},
   close(){db.close();}
  };
+ if(process.env.LINGTU_DATA_VERSION_DIR){api.dataVersioning=dataVersioning;dataVersioning.refresh();if(!db.prepare('SELECT 1 FROM data_version_events LIMIT 1').get()||dataVersionBaselineRequired(db))dataVersioning.baseline();const withActor=api.withActor;api.withActor=(actor,fn)=>api.dataVersioning.run({actor},()=>withActor(actor,fn));}
  return api;
 }
 export const included=includedInSpend;

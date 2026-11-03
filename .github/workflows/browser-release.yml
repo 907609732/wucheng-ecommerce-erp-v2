@@ -1,5 +1,5 @@
 name: Browser release package
-run-name: Browser service 0.12.0 · ${{ github.sha }}
+run-name: Browser service · ${{ github.sha }}
 on:
   workflow_dispatch:
 permissions:
@@ -28,6 +28,13 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Read service version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid service version' }
+          "version=$version" >> $env:GITHUB_OUTPUT
       - run: npm ci --ignore-scripts
       - run: npm ci --prefix apps/purchase --ignore-scripts
       - run: npm ci --prefix apps/sales --ignore-scripts
@@ -62,15 +69,18 @@ jobs:
           if ($forbidden) { throw 'Package contains local data or configuration' }
           Copy-Item docs/browser-service.md "$candidate/OPERATIONS.md"
           Copy-Item docs/browser-release.md "$candidate/README.md"
-          @{ commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; version='0.12.0'; target='windows-x64'; node=(node --version) } | ConvertTo-Json | Set-Content -Encoding utf8 "$candidate/build-info.json"
+          Copy-Item docs/data-version-operations.md "$candidate/DATA-VERSIONS.md"
+          $version = '${{ steps.version.outputs.version }}'
+          @{ commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; version=$version; target='windows-x64'; node=(node --version) } | ConvertTo-Json | Set-Content -Encoding utf8 "$candidate/build-info.json"
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          $zip = 'dist/WuchengERP-Browser-0.12.0-windows-x64.zip'
+          $zipName = "WuchengERP-Browser-$version-windows-x64.zip"
+          $zip = Join-Path dist $zipName
           Compress-Archive -Path "$candidate/*" -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  WuchengERP-Browser-0.12.0-windows-x64.zip" | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          "$hash  $zipName" | Set-Content -Encoding ascii dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v7
         with:
-          name: browser-service-0.12.0-${{ github.run_id }}
+          name: browser-service-${{ steps.version.outputs.version }}-${{ github.run_id }}
           path: dist/*
           retention-days: 14
           if-no-files-found: error
