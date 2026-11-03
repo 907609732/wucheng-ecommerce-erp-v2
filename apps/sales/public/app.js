@@ -1,3 +1,4 @@
+document.documentElement.dataset.businessStarted='true';
 import {applyChartDefaults,themeColor,chartPalette} from './ui/chart-theme.mjs';
 import {loadingMarkup} from './loading-screen.mjs';
 import {mountPeriodPickers,disposePeriodPickers} from './ui/period-picker.mjs';

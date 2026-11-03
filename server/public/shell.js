@@ -45,7 +45,8 @@ frame.addEventListener("load", () => {
   if (!connected) return;
   try {
     const doc = frame.contentDocument;
-    if (!doc?.querySelector(".lt-loading")) return;
+    if (doc?.documentElement.dataset.businessStarted === "true" ||
+        !doc?.querySelector("[data-business-startup]")) return;
     const failed = frame.contentWindow.performance
       .getEntriesByType("resource")
       .some((entry) => /\.m?js(?:\?|$)/.test(entry.name) &&
