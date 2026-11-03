@@ -702,6 +702,15 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "overview:GET:/workbench-base.js"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/payroll/sheet",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/payroll/sheet"
     }
   ]
 }

@@ -11,6 +11,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {openStore} from './lib/store.mjs';
+import {savePayrollSheet} from './lib/payroll-sheet.mjs';
 import {loadSources,defaultPaths,sourceRecords,sourceOriginal} from './lib/sources.mjs';
 import {report,selectRows} from './lib/report.mjs';
 import {dashboard} from './lib/dashboard.mjs';
@@ -43,6 +44,7 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  app.get('/api/source/:source/:id/original',(req,res)=>{if(!['purchase','sales'].includes(req.params.source))throw fail('来源无效');const o=sourceOriginal(healthy(),req.params.source,req.params.id);res.download(o.file,o.name);});
  app.post('/api/coverage',(_req,res)=>res.status(410).json({code:'FEATURE_RETIRED',error:'待补数据与完整性确认已停用；原始记录继续保留'}));
  app.post('/api/source-classification',(req,res)=>{const x=healthy(),key=required(req.body.key,'来源'),r=sourceRecords(x).find(r=>r.key===key);if(!r)throw fail('来源不存在',404);if(r.sourceHash!==req.body.sourceHash)throw fail('源记录已变化',409);required(req.body.reason,'核对原因',500);let bucket=req.body.bucket,refundDate='';if(r.bucket==='pendingRefund'){refundDate=date(req.body.refundDate);bucket='purchase';}else if(r.source!=='sales'||!['income','refund','platformFee','transfer','excluded'].includes(bucket)||r.currency!=='CNY')throw fail('分类无效或外币尚不支持折算');s.tx(()=>{s.run('INSERT INTO overrides VALUES(?,?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET source_hash=excluded.source_hash,bucket=excluded.bucket,refund_date=excluded.refund_date,reason=excluded.reason,updated_at=excluded.updated_at',key,r.sourceHash,bucket,refundDate,req.body.reason,now());s.audit('source.classify',key,req.body);});res.json({ok:true});});
+ app.post('/api/payroll/sheet',(req,res)=>res.json(savePayrollSheet(s,healthy(),req.body)));
  app.get('/api/bills',(req,res)=>{const payments=s.payments();res.json(s.bills().filter(b=>(!req.query.kind||b.kind===req.query.kind)&&(!req.query.period||b.period===req.query.period)).map(b=>({...b,paidCents:s.paid(b.id),pendingCents:b.amountCents-s.paid(b.id),payments:payments.filter(p=>p.billId===b.id)})));});
  app.get('/api/freight/export',async(req,res)=>{const period=month(req.query.period||lastMonth()),template=req.query.template==='1';const bytes=await freightWorkbook(s,healthy(),{period,owner:req.query.owner||'all',q:req.query.q||'',allPeriods:req.query.allPeriods==='1',template});res.attachment('freight-'+period+(template?'-template':'-maintenance')+'.xlsx').send(Buffer.from(bytes));});
  app.get('/api/bills/:id',(req,res)=>{const b=s.bill(req.params.id);res.json({...b,payments:s.payments().filter(p=>p.billId===b.id),paidCents:s.paid(b.id),audit:s.all('SELECT * FROM audit WHERE entity=? ORDER BY id',b.id),original:b.batchId?'/api/imports/'+b.batchId+'/original':null});});
