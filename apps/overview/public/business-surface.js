@@ -3,7 +3,7 @@ export function controlledLocator(target={}){
  if(!target||typeof target!=='object'||!modules.has(target.module)||Object.keys(target).some(key=>!['module','recordId','sourceId','batchId','period','basis','view'].includes(key)))throw Error('来源定位参数无效');
  const result={module:target.module};for(const key of ['recordId','sourceId','batchId','basis','view'])if(target[key]!=null){if(typeof target[key]!=='string'||target[key].length>500||/[\x00-\x1f]/.test(target[key]))throw Error('来源定位字段无效');result[key]=target[key];}
  for(const key of ['recordId','sourceId','batchId'])if(result[key]!==undefined&&(!result[key]||/[\/\\?#]/.test(result[key])||/^\.{1,2}$/.test(result[key])))throw Error('来源记录标识无效');
- if(result.view!==undefined&&(result.module!=='overview'||!['overview','freight','expenses','payroll','gaps'].includes(result.view)))throw Error('目标页面不在受控白名单');
+ if(result.view!==undefined&&(result.module!=='overview'||!['overview','freight','expenses','payroll','payroll-dashboard','gaps'].includes(result.view)))throw Error('目标页面不在受控白名单');
  if(target.period!=null){if(!/^20\d{2}(-(0[1-9]|1[0-2]))?$/.test(target.period))throw Error('来源期间无效');result.period=target.period;}return result;
 }
 export function installBusinessSurface({getContext,navigate,isSaving=()=>false,hasExtraDraft=()=>false,discardExtra=()=>{}}){

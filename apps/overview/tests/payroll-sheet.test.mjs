@@ -6,10 +6,12 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {openStore} from '../lib/store.mjs';
 import {savePayrollSheet} from '../lib/payroll-sheet.mjs';
-import {parsePayrollAmount,payrollRows,isEmptyPayrollDraft} from '../public/payroll-model.mjs';
+import {parsePayrollAmount,payrollRows,isEmptyPayrollDraft,packPayrollGrid,flattenPayrollGrid} from '../public/payroll-model.mjs';
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'erp-payroll-sheet-')),s=openStore(dir);t.after(()=>{s.close();fs.rmSync(dir,{recursive:true,force:true});});return s;}
 const sources={shops:[]},row=(extra={})=>({key:randomUUID(),date:'2026-10-31',name:'测试人员',amount:'1234.56',note:'测试',...extra});
 const request=rows=>({requestId:randomUUID(),month:'2026-10',rows});
+test('同一日期多人并排，默认两人，保存投影保留各自账单与金额',()=>{const flat=[{...row({name:'甲',amount:'10'}),billId:'bill-a',version:1,editable:true},{...row({name:'乙',amount:'20'}),billId:'bill-b',version:2,editable:true}];const g=packPayrollGrid(flat);assert.equal(g.count,2);assert.equal(g.rows.length,1);const projected=flattenPayrollGrid(g.rows,g.count);assert.equal(projected.length,2);assert.deepEqual(new Set(projected.map(x=>x.billId)),new Set(['bill-a','bill-b']));g.rows[0].date='2026-10-30';assert.ok(flattenPayrollGrid(g.rows,2).every(x=>x.date==='2026-10-30'));});
+test('第三人自动扩展，不合并同人同日的多笔工资；空人员组不产生工资',()=>{const flat=['甲','乙','丙','甲'].map(name=>({...row({name,amount:'10'}),editable:true}));const g=packPayrollGrid(flat);assert.equal(g.count,3);assert.equal(g.rows.length,2);assert.equal(flattenPayrollGrid(g.rows,4).length,4);const empty=packPayrollGrid([]);assert.equal(empty.count,2);assert.equal(flattenPayrollGrid(empty.rows,2).length,0);empty.rows[0].date='2026-10-31';assert.equal(flattenPayrollGrid(empty.rows,2).length,1);});
 test('金额严格校验，不补零、不接受超精度和浮点误差',()=>{assert.equal(parsePayrollAmount('1,234.56'),123456);for(const v of ['',null,'-1','0','1.001','1e3','Infinity','10000000000.01'])assert.throws(()=>parsePayrollAmount(v));});
 test('空白新增占位行可忽略，清空已有工资绝不能当成空白占位行',()=>{const empty={date:'',name:'',amount:'',note:''};assert.equal(isEmptyPayrollDraft(empty),true);assert.equal(isEmptyPayrollDraft({...empty,billId:'saved-bill'}),false);assert.equal(isEmptyPayrollDraft({...empty,name:'待填写'}),false);});
 test('批量新增应付不自动付款；相同请求幂等，不同内容拒绝',t=>{const s=fixture(t),input=request([row(),row({name:'另一人员',amount:'20'})]);const result=savePayrollSheet(s,sources,input);assert.equal(s.bills().length,2);assert.equal(s.payments().length,0);assert.equal(s.bills().reduce((n,b)=>n+b.amountCents,0),125456);assert.deepEqual(savePayrollSheet(s,sources,input),result);assert.equal(s.bills().length,2);assert.throws(()=>savePayrollSheet(s,sources,{...input,rows:[row()]}),/请求.*内容/);});

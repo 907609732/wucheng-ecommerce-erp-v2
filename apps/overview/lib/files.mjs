@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
 import {id,hash,fail,BUCKETS} from './util.mjs';
 import {selectRows} from './report.mjs';
+import {dashboardVisuals,dashboardExpenseKeys} from '../public/dashboard-model.mjs';
 import {DOWNLOAD_PATH,MAX_BYTES} from './cainiao-files.mjs';
 const downloadManifest=/^downloads\/cainiao\/[a-f0-9]{16}\/20\d{2}-(0[1-9]|1[0-2])\/[a-f0-9-]{36}\/manifest\.json$/;
 const allowedBackupPath=p=>p==='overview.sqlite'||/^originals\/[a-f0-9-]+\.(xlsx|csv)$/.test(p)||DOWNLOAD_PATH.test(p)||downloadManifest.test(p);
@@ -25,8 +26,22 @@ export async function restoreBackup(buffer,parent){
  for(const [p,m]of Object.entries(manifest.files)){if(!allowedBackupPath(p))throw fail('备份包含非法路径');if(!Number.isInteger(m.bytes)||m.bytes<0||(total+=m.bytes)>300*1024*1024)throw fail('备份超过 300 MB 限制');const f=zip.file(p);if(!f)throw fail('备份缺少 '+p);if(f._data?.uncompressedSize!==m.bytes)throw fail('备份文件大小不符');const b=await f.async('nodebuffer');if(b.length!==m.bytes||hash(b)!==m.sha256)throw fail('备份校验失败：'+p);files[p]=b;}
  const target=path.join(parent,'restored-'+id());fs.mkdirSync(target,{recursive:true});try{for(const [p,b]of Object.entries(files)){const f=path.join(target,p);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,b,{flag:'wx'});}const d=new DatabaseSync(path.join(target,'overview.sqlite'),{readOnly:true});try{if(d.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw fail('数据库完整性校验未通过');const refs=[...d.prepare('SELECT path FROM imports').all(),...downloadRefs(d)];for(const r of refs){if(!files[r.path])throw fail('备份缺少已引用原件');if(r.sha256&&hash(files[r.path])!==r.sha256)throw fail('备份原件与下载记录不符');}d.prepare('SELECT COUNT(*) FROM bills').get();}finally{d.close();}return {path:target,files:Object.keys(files).length};}catch(e){throw fail('恢复校验未通过，独立副本保留在 '+target+'：'+e.message);}
 }
-export async function exportReport(r,q={}){const w=new ExcelJS.Workbook();w.creator='灵兔经营收支总览';const summary=w.addWorksheet(r.grain==='year'?'年度看板':'月度总览');summary.addRows([['期间',r.period||r.month],['统计说明',r.definitions],['数据状态',r.unavailable?'源账本不可用':r.complete?'已核对':'存在缺项'],['已录收支参考差额',r.difference==null?'待补':r.difference/100],...Object.entries(r.totals).map(([k,v])=>[BUCKETS[k],v==null?'待补':v/100]),['待付账单',r.pendingCents/100]]);summary.columns=[{width:30},{width:105}];
- if(r.trend){const trend=w.addWorksheet(r.grain==='year'?'月度趋势':'每日趋势');trend.addRow(['期间','平台业务入账（元）','支出净额（元）','已录收支参考差额（元）','数据状态']);for(const x of r.trend)trend.addRow([x.period,...['income','outflow','difference'].map(k=>x[k]==null?'待补':x[k]/100),({full:'已确认',partial:'有记录，待核对',missing:'待补',future:'未到期',unavailable:'读取失败'})[x.status]]);trend.columns=[{width:16},{width:26},{width:23},{width:30},{width:24}];for(let i=2;i<=4;i++)trend.getColumn(i).numFmt='#,##0.00;[Red]-#,##0.00';summary.addRow(['待付余额截止月份',r.balanceMonth]);}
+export async function exportReport(r,q={}){const w=new ExcelJS.Workbook();w.creator='灵兔经营收支总览';const summary=w.addWorksheet(r.grain==='year'?'年度看板':'月度总览');summary.addRows([['期间',r.period||r.month],['统计说明',r.definitions],['数据状态',r.unavailable?'源账本不可用':r.complete?'已核对':'存在缺项'],['已录收支参考差额',r.difference==null?'待补':r.difference/100],...Object.entries(r.totals).map(([k,v])=>[BUCKETS[k],v==null?'待补':v/100]),[r.grain?'本期账单期末待付':'待付账单',r.pendingCents/100]]);summary.columns=[{width:30},{width:105}];
+ if(r.trend){
+  const trend=w.addWorksheet(r.grain==='year'?'月度趋势':'每日趋势'),visuals=dashboardVisuals(r),cell=v=>v==null?'待补':v/100;
+  trend.addRow(['期间','平台业务入账（元）','支出净额（元）','已录收支参考差额（元）','数据状态',...dashboardExpenseKeys.map(k=>BUCKETS[k]+'（元）')]);
+  for(const x of r.trend)trend.addRow([x.period,...['income','outflow','difference'].map(k=>cell(x[k])),({full:'已确认',partial:'有记录，待核对',missing:'待补',future:'未到期',unavailable:'读取失败'})[x.status],...dashboardExpenseKeys.map(k=>cell(x.totals[k]==null?null:-x.totals[k]))]);
+  trend.columns=[{width:16},{width:26},{width:23},{width:30},{width:24},...dashboardExpenseKeys.map(()=>({width:24}))];
+  for(const i of [2,3,4,6,7,8,9,10,11])trend.getColumn(i).numFmt='#,##0.00;[Red]-#,##0.00';
+  const cumulative=w.addWorksheet('累计趋势');cumulative.addRow(['期间','累计业务入账（元）','累计净支出（元）','累计参考差额（元）']);
+  for(const x of visuals.cumulative)cumulative.addRow([x.period,cell(x.income),cell(x.outflow),cell(x.difference)]);
+  cumulative.columns=[{width:16},{width:26},{width:26},{width:26}];for(let i=2;i<=4;i++)cumulative.getColumn(i).numFmt='#,##0.00;[Red]-#,##0.00';
+  const owners=w.addWorksheet('归属收支');owners.addRow(['店铺/归属','业务入账（元）','净支出（元）','参考差额（元）','有效收支记录']);
+  for(const x of visuals.owners)owners.addRow([x.name,cell(x.income),cell(x.outflow),cell(x.difference),x.records]);
+  owners.columns=[{width:30},{width:24},{width:24},{width:24},{width:20}];for(let i=2;i<=4;i++)owners.getColumn(i).numFmt='#,##0.00;[Red]-#,##0.00';
+  summary.addRow(['待付余额截止月份',r.balanceMonth]);summary.addRow(['待付账单范围','只含所选期间所属账单，按期间末付款计算']);
+ }
+
  const detail=w.addWorksheet('筛选明细');detail.columns=[{header:'日期',key:'date',width:14},{header:'类别',key:'bucket',width:24},{header:'金额（元）',key:'amount',width:20},{header:'币种',key:'currency',width:10},{header:'单位/店铺',key:'party',width:24},{header:'编号',key:'number',width:36},{header:'说明',key:'title',width:38},{header:'来源文件/账单',key:'sourceFile',width:50},{header:'源行号',key:'sourceRow',width:12},{header:'统计说明',key:'reason',width:50}];for(const x of selectRows(r,q).rows)detail.addRow({...x,bucket:BUCKETS[x.bucket],amount:x.amountCents/100,number:String(x.number||''),reason:[x.estimated?'付款日期缺失，暂估':null,x.reason].filter(Boolean).join('；')});detail.getColumn('number').numFmt='@';detail.getColumn('amount').numFmt='#,##0.00;[Red]-#,##0.00';
  const issues=w.addWorksheet('待补数据');issues.addRow(['项目','数量','金额（元）']);r.issues.forEach(x=>issues.addRow([x.title,x.count,x.amountCents==null?'':x.amountCents/100]));issues.columns=[{width:85},{width:14},{width:20}];
  const debts=w.addWorksheet('待付款');debts.addRow(['账单编号','收款单位/人员','所属月份','应付','截至月末已付','待付','关联来源']);r.debts.forEach(b=>debts.addRow([b.billNo,b.party,b.period,b.amountCents/100,b.paidCents/100,b.pendingCents/100,b.linkedSource]));debts.columns=[{width:30},{width:24},{width:15},{width:20},{width:20},{width:20},{width:40}];
