@@ -15,10 +15,13 @@
 
 剩余私有构建配置和可能独立的发票源码先保存至 E:/WuchengERP/migration-backups/legacy-workspace-private-20261103，设置了受限 ACL；不把私有配置作为普通源码提交。历史桌面源码可从 Git 追溯。开发数据 .codex-artifacts/web-dev/data、正式账本、附件、登录资料和 SCM 元数据保留。
 
+## 正式入口切换
+
+Tailscale 已恢复在线。用户完成管理员安装后，WinSW WuchengERPWeb 已运行并配置为自动延迟启动。原 ERP HTTPS 的 8443 入口已切到浏览器网关，443 配置保留；三模块直接读取原正式账本，网关 serverId/dataSetId 与审计保留。真实 HTTPS 会话、三个页面及 bootstrap 均返回 200，缺少身份访问返回 401。浏览器采购看板已显示正式记录。旧 ERP 已退出，旧开机启动项关闭；桌面已提供浏览器入口。
+
 ## 尚未完成
 
-- Tailscale 系统服务运行但客户端报告 NoState，当前进程重启服务被系统权限拒绝；需要管理员恢复后再确认真实 MagicDNS/HTTPS。
-- WinSW 尚未注册；正式入口未切换。因此旧安装版暂时保留，不能用删除工作区代码冒充已卸载安装版。
+- 旧安装版保留用于人工回退。禁止新旧程序同时写同一账本。
 - 真实双机 Tailscale、Windows 开机恢复、真实平台采集及完整人工导入导出尚未验收。
 - 三个业务模块继承的运行依赖仍有 npm audit 报告（各有 2 个 high）；本次没有做可能破坏业务的强制大版本升级。根宿主依赖审计为零。
 

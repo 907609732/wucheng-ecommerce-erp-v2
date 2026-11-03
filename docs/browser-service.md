@@ -71,7 +71,7 @@ npm.cmd run web:collector -- --config E:\WuchengERP\config.json
 node server/service-config.mjs E:\WuchengERP\config.json C:\ProgramData\WuchengERP\tools\WinSW-x64.exe E:\WuchengERP\service
 ```
 
-该命令生成 XML 与固定的服务启动入口，并记录 wrapper 配置。核对输出后，使用返回的 install/start 命令注册和启动。启动入口每次读取当前 releaseRoot，更新程序无需重装服务。XML 配置开机启动、异常重启、日志轮转和 90 秒优雅停止；采集助手仍运行在用户会话中。Windows 服务账户须能访问版本和数据目录，不把浏览器授权改为系统级凭据。
+该命令生成 XML 与固定的服务启动入口，并记录 wrapper 配置。核对输出后，使用返回的 install/start 命令注册和启动。启动入口每次读取当前 releaseRoot，更新程序无需重装服务。XML 配置开机启动、异常重启、日志轮转和 90 秒优雅停止；采集助手仍运行在用户会话中。服务以 LocalSystem 运行时，更新、停止及控制命名管道的维护命令应在管理员 PowerShell 执行；浏览器日常使用不需要管理员权限。Windows 服务账户须能访问版本和数据目录，不把浏览器授权改为系统级凭据。
 
 ## 备份、更新与回退
 
