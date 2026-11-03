@@ -134,6 +134,13 @@ function startDetached(configFile, folder) {
     fs.closeSync(log);
   }
 }
+export function resolveCommandConfig(command, file) {
+  const config = file ? loadConfig(file) :
+    ["dev", "status"].includes(command) ? developmentConfig() : loadConfig(file);
+  if (command === "dev" && config.mode !== "development")
+    throw Error("开发启动必须使用 development 隔离配置，不能连接正式账本");
+  return config;
+}
 export async function main(argv = process.argv.slice(2)) {
   const command = argv[0] || "dev",
     o = args(argv.slice(1)),
@@ -144,14 +151,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (!o.backup || !o.target) throw Error("需要 --backup 和 --target");
     return restoreSnapshot(o.backup, path.resolve(o.target));
   }
-  const config =
-    command === "dev"
-      ? developmentConfig()
-      : file
-        ? loadConfig(file)
-        : command === "status"
-          ? developmentConfig()
-          : loadConfig(file);
+  const config = resolveCommandConfig(command, file);
   if (command === "status") {
     let runtime;
     try {
