@@ -1,0 +1,4 @@
+.month-picker-input{min-width:112px;cursor:pointer;background-color:#fff}
+.flatpickr-calendar.monthSelect{width:256px;padding:4px}
+.flatpickr-calendar.monthSelect .flatpickr-monthSelect-months{display:flex;flex-wrap:wrap}
+.flatpickr-calendar.monthSelect .flatpickr-monthSelect-month{width:32%;padding:9px 4px;font-size:calc(13px * var(--font-scale, 1))}

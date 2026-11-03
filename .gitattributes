@@ -1,0 +1,13 @@
+* text=auto
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.zip binary
+*.xlsx binary
+*.xls binary
+*.woff2 binary
+
+scripts/public-scan/scan-stage-public.mjs text eol=lf
+scripts/public-scan/gitleaks-v8.30.1.official.toml text eol=lf

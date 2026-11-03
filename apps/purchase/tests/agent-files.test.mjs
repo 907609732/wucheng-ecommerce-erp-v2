@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import {randomUUID,createHash} from 'node:crypto';
+
+import {openStore} from '../lib/store.mjs';
+import {createPurchaseAgentFiles} from '../lib/agent-files.mjs';
+import {signWorkbenchActor,verifyWorkbenchActor,provisionWorkbenchKey} from '../lib/workbench-actor.mjs';
+const owner='agent-test-owner';
+const ctx=(key=randomUUID(),id=owner,role='editor')=>({actor:{id,role,modules:['purchase']},idempotencyKey:key,taskId:'agent-file-task'});
+function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-agent-files-')),store=openStore(dir),files=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>{files.close();store.close();fs.rmSync(dir,{recursive:true,force:true});});return {dir,store,files};}
+const csv=Buffer.from('订单编号,下单日期,供应商,商品名称,实付金额\nAGENTFILE001,2026-06-05,测试供应商,螺丝,123.45\n');
+const put=(files,buffer=csv,name='采购原件.csv',c=ctx())=>files.upload({filename:name,dataBase64:buffer.toString('base64')},c);
+test('real signed HTTP upload owns opaque files, rejects paths, encoding, size, viewer and forged actor',async t=>{
+ const {dir,files}=fixture(t),app=express(),key=provisionWorkbenchKey(dir);app.use(express.json({limit:'12mb'}));
+ files.installRoutes(app,q=>{const actor=verifyWorkbenchActor(q.headers,key,{module:'purchase',method:q.method,path:q.originalUrl});return {actor,idempotencyKey:q.headers['x-idempotency-key']};});app.use((e,q,r,n)=>r.status(e.status||e.statusCode||400).json({error:e.message}));
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));const base='http://127.0.0.1:'+server.address().port;
+ async function call(route,body,{id=owner,role='editor',signature=true,requestKey=randomUUID()}={}){const now=Date.now(),method=body?'POST':'GET',actor={v:1,module:'purchase',method,path:route,issuedAt:now,expiresAt:now+30000,id,login:id,role,modules:['purchase'],canRunTasks:false,channel:'mcp',sessionId:'files-test',requestId:randomUUID()},r=await fetch(base+route,{method,headers:{'content-type':'application/json','x-idempotency-key':requestKey,...(signature?signWorkbenchActor(actor,key):{})},body:body?JSON.stringify(body):undefined});return {status:r.status,body:r.headers.get('content-type')?.includes('json')?await r.json():Buffer.from(await r.arrayBuffer())};}
+ const payload={filename:'原件.csv',dataBase64:csv.toString('base64')},saved=await call('/agent/files',payload,{requestKey:'same-upload'});assert.equal(saved.status,200);assert.match(saved.body.sha256,/^[a-f0-9]{64}$/);assert.equal(saved.body.bytes,csv.length);assert.equal(JSON.stringify(saved.body).includes(dir),false);
+ assert.deepEqual((await call('/agent/files',payload,{requestKey:'same-upload'})).body,saved.body);assert.equal((await call('/agent/files/'+saved.body.fileId,undefined,{signature:false})).status,401);
+ assert.equal((await call('/agent/files/'+saved.body.fileId,undefined,{id:'other'})).status,404);assert.deepEqual((await call('/agent/files/'+saved.body.fileId+'/download')).body,csv);
+ for(const filename of ['../secret.csv','C:\\secret.csv'])assert.equal((await call('/agent/files',{...payload,filename})).status,400);
+ assert.equal((await call('/agent/files',{...payload,dataBase64:'not base64'})).status,413);assert.equal((await call('/agent/files',payload,{role:'viewer'})).status,200);assert.throws(()=>put(files,Buffer.alloc(8*1024*1024+1)),/8MiB/);
+});
+test('persistent table analyze/remap/review imports real source once, isolates owners and cleans external rollback files',async t=>{
+ const {files,store,dir}=fixture(t),file=put(files),analyzed=await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信',account:'测试采购号'},ctx()),preview=analyzed.data;assert.equal(preview.summary.ready,1);assert.equal(store.list().length,0);
+ files.close();const reopened=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>reopened.close());assert.equal(reopened.ops['import.preview'].query({previewId:preview.previewId},ctx()).summary.ready,1);assert.throws(()=>reopened.metadata(file.fileId,ctx('other','other')),/不属于/);
+ const mapped=await reopened.ops['import.remap'].execute({previewId:preview.previewId,mapping:preview.mapping,account:'新采购号'},ctx());assert.equal(mapped.data.account,'新采购号');
+ const detail=reopened.ops['import.commit'].prepare({previewId:preview.previewId,indices:[0]},ctx());assert.equal(detail.commitData.orders[0].order.amountCents,12345);let cleanup;assert.throws(()=>store.transaction(()=>{reopened.ops['import.commit'].commit({},detail.commitData,{...ctx(),onRollback:fn=>cleanup=fn});throw Error('outer receipt failed');}),/outer receipt failed/);cleanup();assert.equal(store.list().length,0);assert.equal(fs.readdirSync(path.join(dir,'originals')).length,0);
+ const result=store.transaction(()=>reopened.ops['import.commit'].commit({},detail.commitData,ctx()));assert.equal(result.imported,1);assert.deepEqual(fs.readFileSync(path.join(dir,store.db.prepare('SELECT file_path FROM imports').get().file_path)),csv);assert.equal(reopened.ops['import.preview'].query({previewId:preview.previewId},ctx()).summary.duplicate,1);assert.throws(()=>reopened.ops['import.commit'].prepare({previewId:preview.previewId,indices:[0]},ctx()),/重复/);assert.equal(store.imports()[0].metadata.importReport.imported,1);
+});
+
+
+test('locks and content hashes reject stale or damaged source without creating original files',async t=>{
+ const {files,store,dir}=fixture(t),file=put(files),p=(await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信'},ctx())).data;
+ const prepared=files.ops['import.commit'].prepare({previewId:p.previewId,indices:[0]},ctx());
+ await store.monthLocks.setPassword({password:'Agent-files-isolated-29487',confirmation:'Agent-files-isolated-29487'});store.monthLocks.confirm(store.monthLocks.preview('2026-06','微信'));
+ assert.equal(files.ops['import.preview'].query({previewId:p.previewId},ctx()).summary.locked,1);assert.throws(()=>files.ops['import.commit'].prepare({previewId:p.previewId,indices:[0]},ctx()),/锁定/);assert.throws(()=>store.transaction(()=>files.ops['import.commit'].commit({},prepared.commitData,ctx())),{code:'MONTH_LOCKED'});assert.equal(fs.readdirSync(path.join(dir,'originals')).length,0);assert.equal(store.list().length,0);
+ fs.writeFileSync(path.join(dir,'agent-files',file.fileId),'tampered');assert.throws(()=>files.resource(file.fileId,ctx()),/摘要不符/);
+});
+
+test('9MiB chunk upload survives restart, binds owner and offsets, verifies full hash and deduplicates real bytes',async t=>{
+ const {files,store,dir}=fixture(t),buffer=Buffer.alloc(9*1024*1024,0x5a),sha256=createHash('sha256').update(buffer).digest('hex'),base={filename:'large-original.pdf',totalBytes:buffer.length,sha256},first={...base,offset:0,dataBase64:buffer.subarray(0,8*1024*1024).toString('base64')};
+ const p=files.uploadPart(first,ctx('part-first'));assert.equal(p.state,'uploading');assert.equal(p.nextOffset,8*1024*1024);assert.equal(p.fileId,undefined);assert.deepEqual(files.uploadPart(first,ctx('part-first')),p);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_file_parts').get().n,1);files.close();
+ const restored=createPurchaseAgentFiles({store,dataDir:dir});t.after(()=>restored.close());
+ assert.throws(()=>restored.uploadPart({...base,uploadId:p.uploadId,offset:p.nextOffset+1,dataBase64:Buffer.from('x').toString('base64')},ctx()),/偏移不连续/);
+ assert.throws(()=>restored.uploadPart({...base,uploadId:p.uploadId,offset:p.nextOffset,dataBase64:buffer.subarray(p.nextOffset).toString('base64')},ctx('other-owner','other-owner')),/不属于/);
+ const final={...base,uploadId:p.uploadId,offset:p.nextOffset,dataBase64:buffer.subarray(p.nextOffset).toString('base64')},done=restored.ops['files.upload.part'].execute(final,ctx('part-final')).data;assert.equal(done.state,'completed');assert.equal(done.bytes,buffer.length);assert.equal(done.sha256,sha256);assert.deepEqual(restored.resource(done.fileId,ctx()).buffer,buffer);
+ assert.deepEqual(restored.uploadPart(final,ctx('part-final')),done);assert.equal(restored.uploadPart({...first,uploadId:p.uploadId},ctx('replayed-first')).fileId,done.fileId);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_files').get().n,1);assert.equal(fs.readdirSync(path.join(dir,'agent-files')).filter(n=>n.endsWith('.part')).length,0);
+ assert.throws(()=>restored.uploadPart({...base,offset:0,totalBytes:50*1024*1024+1,dataBase64:'eA=='},ctx()),/50MiB/);
+ assert.throws(()=>restored.uploadPart({...base,offset:0,dataBase64:buffer.toString('base64')},ctx()),/8MiB/);
+ assert.throws(()=>restored.uploadPart({filename:'bad.bin',totalBytes:3,offset:0,dataBase64:'YWJj',sha256:'0'.repeat(64)},ctx()),/完整文件摘要不符/);assert.equal(store.db.prepare('SELECT count(*) n FROM agent_files').get().n,1);
+});
+
+test('unrecognized spreadsheet retains preview ID and field instructions for explicit remapping',async t=>{
+ const {files}=fixture(t),raw=Buffer.from('业务号,业务日,合作方,物料,支付数\nREMAP001,2026-06-06,供应商,螺丝,12.34\n'),file=put(files,raw,'自定义表格.csv');
+ const first=await files.ops['import.analyze'].execute({fileId:file.fileId,platform:'微信',account:'映射测试'},ctx());assert.ok(first.data.previewId);assert.equal(first.data.summary.ready,0);assert.ok(first.data.issues.length);assert.equal(first.data.fields.amount.label,'实付金额');
+ const second=await files.ops['import.remap'].execute({previewId:first.data.previewId,headerRow:1,mapping:{orderNo:0,date:1,supplier:2,title:3,amount:4},amountMode:'order'},ctx());assert.equal(second.data.summary.ready,1,JSON.stringify(second.data));assert.equal(second.data.orders[0].amountCents,1234);
+});

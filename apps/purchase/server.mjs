@@ -1,0 +1,293 @@
+import {createManualReceipts} from './lib/manual-receipts.mjs';
+import {createPurchaseAgentFiles} from './lib/agent-files.mjs';
+import {openPurchasePersonnel} from './lib/purchase-personnel.mjs';
+import {createPurchaseAgentService,installPurchaseAgentRoutes,purchaseAgentRequestContext} from './lib/agent-service.mjs';
+import {purchaseAgentOperations} from './lib/agent-operations.mjs';
+import {openTaskAssignment} from './lib/task-assignment.mjs';
+import {openTaskCenter} from './lib/task-center.mjs';
+import {MAX_FILES,MAX_FILE_BYTES,MAX_TOTAL_BYTES,validateUploadLimits} from './public/upload-limits.mjs';
+import {installLocalIntegration} from './lib/local-integration.mjs';
+import {installWorkbenchMigration} from './lib/workbench-migration-routes.mjs';
+import {createWorkbenchMigration} from './lib/workbench-migration.mjs';
+import {installWorkbenchAudit} from './lib/workbench-module.mjs';
+import {installPurchaseEdits} from './lib/integration-edits.mjs';
+import {openOrderTransfers} from './lib/order-transfer.mjs';
+import {registerTransferRoutes} from './lib/transfer-routes.mjs';
+import {supplierSummary} from './lib/suppliers.mjs';
+import {shipmentText} from './public/shipments.mjs';
+import {includedInSpend,spendSettingLabel} from './public/order-attributes.mjs';
+import {openOrderImages} from './lib/order-images.mjs';
+import {allocations,classificationLabel,classificationDescription,unallocatedRefund,categories,contribution} from './public/classification.mjs';
+import express from 'express';
+import multer from 'multer';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {randomUUID,randomBytes,createHash} from 'node:crypto';
+import {} from 'node:child_process';
+import archiver from 'archiver';
+import {readTable,normalizeTable,validateOrder,fields} from './lib/importer.mjs';
+import {openStore,summarize} from './lib/store.mjs';
+
+import {filterOrders,sortOrders,orderUploadDate} from './public/order-query.mjs';
+import {platformMapping} from './lib/import-rules.mjs';
+import {importRules} from './public/import-rules.mjs';
+
+import {reviewImportOrders,importReportDraft} from './lib/import-review.mjs';
+import {appVersion} from './lib/app-info.mjs';
+import {openAddresses,quickTags as addressQuickTags} from './lib/addresses.mjs';
+import {createMobileAccess} from './lib/mobile-access.mjs';
+import {openSupplierManagement} from './lib/supplier-management.mjs';
+
+const root=path.dirname(fileURLToPath(import.meta.url));
+export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root,'data'),imageDownloader,mobileNow=Date.now,mobilePolicyFile,agentManaged=process.env.LINGTU_AGENT_MANAGED==='1',mobileAgentManaged=agentManaged}={}){
+ const app=express(),store=openStore(dataDir),previews=new Map(),jobs=new Map();let mobile,agentFiles;
+ if(agentManaged)app.use((req,res,next)=>{
+  // Header presence is only an early requirement. installWorkbenchModule below
+  // verifies the HMAC before any of these business handlers can execute.
+  if(/^\/api\/integration\/v1\/(?:agent\/|orders$|transfers(?:\/|$)|edits(?:\/|$)|review-session$)/.test(req.path)&&!req.headers['x-workbench-actor']&&!req.headers['x-workbench-actor-signature'])return res.status(401).json({error:'业务操作需要真实工作台签名身份',code:'WORKBENCH_LOGIN_REQUIRED'});
+  next();
+ });
+ const taskCenter=openTaskCenter(store),personnel=openPurchasePersonnel(store),taskBoard=openTaskAssignment(store,taskCenter,personnel);
+ const transfers=openOrderTransfers(store);
+ const integration=installLocalIntegration(app,{id:'purchase-desk',version:appVersion,root,dataDir,busy:()=>agentFiles?.busy()||transfers.busy()||edits.busy()||mobile?.busy()||orderImages.busy(),capabilities:['orders.read','transfers.prepare','transfers.review-ui','transfers.verify','edits.prepare','edits.review-ui']});
+ const edits=installPurchaseEdits(integration,store);
+ registerTransferRoutes(integration,transfers,store);installWorkbenchMigration(integration,store,createWorkbenchMigration);installWorkbenchAudit(integration,store);integration.finish();
+ const orderImages=openOrderImages(store,{downloader:imageDownloader});
+ const attachments=store.attachments;
+ const addresses=openAddresses(store);
+ const supplierManagement=openSupplierManagement(store,addresses);
+
+ try{attachments.sweepOrphans();}catch{}
+
+
+ const token=randomBytes(32).toString('hex');
+ const confirmationMode=agentManaged?'signed-review':'password';
+ const uiReview=(req)=>{
+  const a=req.workbenchActor;
+  if(!a?.id||a.channel!=='ui'||!a.sessionId||!a.requestId)throw Object.assign(Error('需要真实登录的人工复核会话'),{status:403,code:'MONTH_REVIEW_REQUIRED'});
+  if(req.body.ack!==true)throw Object.assign(Error('请核对当前范围并明确勾选确认'),{status:400,code:'MONTH_ACK_REQUIRED'});
+  if(Object.keys(req.body).some(k=>['actor','actorId','approval','approvalId','authorization','confirmed'].includes(k)))throw Object.assign(Error('复核身份不能由表单提供'),{status:400,code:'UNTRUSTED_REVIEW'});
+  const reason=typeof req.body.reason==='string'?req.body.reason.trim():'';
+  if(/cancel/.test(req.path)&&(!reason||reason.length>2000))throw Object.assign(Error('请填写取消确认的原因（最多2000字）'),{status:400,code:'MONTH_REASON_REQUIRED'});
+  return {authorization:'workbench-ui-review',actorId:a.id,actorLabel:a.label||a.login||a.id,sessionId:a.sessionId,requestId:a.requestId,...(reason?{reason}:{})};
+ };
+
+ // Locked orders cannot be modified through password headers; cancel confirmation first.
+ const write=(req,fn)=>req.mobileSubmission?mobile.commit(req,fn):fn();
+ app.disable('x-powered-by');
+ app.use((req,res,next)=>{
+  const host=req.headers.host?.split(':')[0];if(!['127.0.0.1','localhost','[::1]'].includes(host))return res.status(403).json({error:'仅支持本机访问'});
+  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
+  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'none'");
+  if(req.path.startsWith('/api'))res.setHeader('Cache-Control','no-store');
+  if(agentManaged&&req.path.startsWith('/api/')&&req.path!=='/api/health'&&!req.workbenchActor)return res.status(401).json({error:'请从工作台登录后打开采购页面',code:'WORKBENCH_LOGIN_REQUIRED'});
+  if(!req.workbenchActor&&!['GET','HEAD'].includes(req.method)&&req.headers['x-purchase-token']!==token)return res.status(403).json({error:'页面会话已更新，请刷新后重试'});
+  next();
+ });
+ app.use(express.json({limit:'12mb'}));
+ const manualReceipts=agentManaged?createManualReceipts(store):null;
+ if(manualReceipts)app.use(manualReceipts.middleware);
+ const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1}});
+ const attachmentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_FILE_BYTES,files:MAX_FILES}});
+
+ const hash=b=>createHash('sha256').update(b).digest('hex');
+ const cleanName=n=>{try{return Buffer.from(n,'latin1').toString('utf8').includes('\ufffd')?n:Buffer.from(n,'latin1').toString('utf8');}catch{return n;}};
+ // 订单保存时一并绑定的暂存附件 ID；先暂存（order_id 为空），保存成功后 bind。
+ const stash=(buffer,filename)=>{const id=randomUUID(),ext=path.extname(filename).toLowerCase();const filePath=`originals/${id}${ext}`;fs.writeFileSync(path.join(dataDir,filePath),buffer);return {id,filename,hash:hash(buffer),filePath};};
+ const describe=p=>{
+  let parsed;
+  try{parsed=normalizeTable(p.table,p.options);}catch(e){parsed={orders:[],issues:[{row:p.table.headerRow,message:e.message}],lineCount:p.table.rows.length};}
+  parsed.orders=reviewImportOrders(parsed.orders,store);
+  p.parsed=parsed;
+  const {orders,issues,lineCount}=parsed;
+  return {id:p.id,filename:p.filename,options:p.options,fields,sheets:p.table.sheets,sheet:p.table.sheet,headers:p.table.headers,sample:p.table.rows.slice(0,3).map(r=>r.cells),mapping:p.options.mapping||p.table.mapping,lineCount,issues,orders:orders.map(({raw,...o})=>o),summary:{orders:orders.length,valid:orders.filter(o=>o.importStatus==='ready').length,duplicates:orders.filter(o=>o.importStatus==='duplicate').length,conflicts:orders.filter(o=>o.importStatus==='conflict').length,invalid:orders.filter(o=>o.importStatus==='invalid').length,locked:orders.filter(o=>o.importStatus==='locked').length,amountCents:orders.filter(o=>o.importStatus==='ready').reduce((s,o)=>s+o.amountCents,0)}};
+ };
+ app.all(/^\/api\/ocr(?:\/|$)/,(_req,res)=>res.status(410).json({code:'FEATURE_RETIRED',error:'图片、PDF及文本识别已停用，请使用手工录入或表格导入'}));
+ app.get('/api/health',(req,res)=>res.json({ok:true,app:'purchase-desk',version:appVersion,features:['procurement-classification','monthly-confirmation','batch-order-attributes','order-audit-rollback','order-attachments','address-book','item-tracking','supplier-view','item-shipments','atomic-order-attributes','contact-snapshots','atomic-attachments','upload-limits-v2','monthly-task-center','assigned-task-board'],uploadLimits:{files:MAX_FILES,fileBytes:MAX_FILE_BYTES,totalBytes:MAX_TOTAL_BYTES}}));
+;
+ app.get('/api/bootstrap',(req,res)=>res.json({token,orders:store.list(),imports:store.imports(),pendingEditsCount:Number(store.db.prepare("SELECT count(*) AS n FROM integration_edit_drafts WHERE state='draft'").get().n),personnel:personnel.current(req),agentManaged,localDesktop:req.workbenchActor?.localDesktop===true,confirmationMode,adminConfigured:store.monthLocks.configured(),monthConfirmations:store.monthLocks.confirmations()}));
+ app.get('/api/personnel/session',(req,res)=>res.json(personnel.current(req)));
+ app.post('/api/personnel/session',(req,res)=>res.json(personnel.select(req,res,req.body)));
+ app.get('/api/personnel',(req,res)=>res.json({staff:personnel.list(req)}));
+ app.post('/api/personnel',(req,res)=>{const saved=personnel.save(req,req.body);res.json({saved,staff:personnel.list(req)});});
+ app.get('/api/manual-receipts/:key',(req,res)=>{if(!manualReceipts||!req.workbenchActor)return res.status(404).json({error:'回执不存在'});res.json(manualReceipts.read(req.workbenchActor,req.params.key));});
+ app.get('/api/task-board',(req,res)=>res.json(taskBoard.overview(req,req.query.month)));
+ app.post('/api/task-board/action',(req,res)=>res.json(taskBoard.act(req,req.body)));
+ // Task submission and monthly financial confirmation are separate responsibilities.
+ app.use((req,res,next)=>{
+  if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/tasks(?:\/|$)/.test(req.path)||/^\/api\/month-confirmations(?:\/|$)/.test(req.path)||req.path==='/api/admin/password')){
+   const identity=personnel.current(req);
+   if(identity.readOnly||identity.role==='employee'||!identity.selected&&String(req.headers.cookie||'').split(';').some(part=>part.trim().startsWith('purchase_personnel=')))return res.status(403).json({error:'请由老板验收或处理月度确认；员工请在自己的任务中提交资料',code:'PURCHASE_BOSS_REQUIRED'});
+  }
+  next();
+ });
+ app.get('/api/tasks',(req,res)=>res.json(taskCenter.overview(req.query.month)));
+ app.post('/api/tasks',(req,res)=>{let input=req.body;if(agentManaged){const identity=personnel.current(req),selected=input.operatorStaffId?personnel.list(req).find(s=>s.id===input.operatorStaffId):null;if(input.operatorStaffId&&!selected)throw Object.assign(Error('经办人不存在，请明确选择历史人员ID'),{status:400,code:'TASK_OPERATOR_SELECTION_REQUIRED'});const operator=selected?.name||identity.staff?.name||req.workbenchActor.login||req.workbenchActor.id;if(input.operator&&input.operator!==operator&&!selected)throw Object.assign(Error('请明确选择经办人员，实际操作者由登录会话记录'),{status:400,code:'TASK_OPERATOR_SELECTION_REQUIRED'});input={...input,operator:operator.slice(0,100)};}res.json(taskCenter.update(input));});
+ app.get('/api/month-confirmations',(req,res)=>res.json({...store.monthLocks.overview(req.query.month),confirmationMode}));
+ app.get('/api/month-confirmations/preview',(req,res)=>res.json(store.monthLocks.preview(req.query.month,req.query.platform)));
+ app.get('/api/month-confirmations/history',(req,res)=>res.json(store.monthLocks.history(req.query.month,req.query.platform)));
+ app.post('/api/month-confirmations',(req,res)=>res.json(agentManaged?store.monthLocks.confirmWithReview(req.body,uiReview(req)):store.monthLocks.confirm(req.body)));
+ app.post('/api/month-confirmations/confirm-batch',(req,res)=>res.json(agentManaged?store.monthLocks.confirmBatchWithReview(req.body.confirmations,uiReview(req)):store.monthLocks.confirmBatch(req.body)));
+ app.post('/api/month-confirmations/cancel',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelWithReview(req.body,uiReview(req)):await store.monthLocks.cancel(req.body)));
+ app.post('/api/month-confirmations/cancel-batch',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelBatchWithReview(req.body.confirmations,uiReview(req)):await store.monthLocks.cancelBatch(req.body)));
+ app.post('/api/admin/password',async(req,res)=>{if(agentManaged)return res.status(410).json({error:'工作台月结使用真实登录和复核，不再设置独立管理员密码',code:'FEATURE_REMOVED'});res.json(await store.monthLocks.setPassword(req.body));});
+ app.get('/api/dashboard',(req,res)=>res.json(summarize(store.list(),req.query.year||new Date().getFullYear(),req.query.basis||'paid',req.query.platform||'全部',req.query.category||'',req.query.month||'')));
+ app.post('/api/import/preview',upload.single('file'),async(req,res)=>{
+  if(!req.file)throw Error('请选择表格');if(previews.size>=15)previews.delete(previews.keys().next().value);
+  const filename=cleanName(req.file.originalname),table=await readTable(req.file.buffer,filename),id=randomUUID();
+  const platform=req.body.platform;
+  const mapping=platformMapping(table,platform);
+  const options={platform,account:req.body.account||importRules[platform].account,amountMode:'order',mapping};
+  const p={id,filename,buffer:req.file.buffer,table,options};previews.set(id,p);res.json(describe(p));
+ });
+ app.post('/api/import/:id/remap',async(req,res)=>{
+  const p=previews.get(req.params.id);if(!p)throw Error('预览已过期，请重新选择文件');
+  if(req.body.platform&&req.body.platform!==p.options.platform)throw Error('切换平台后请重新上传文件');
+  const table=req.body.sheet&&req.body.sheet!==p.table.sheet?await readTable(p.buffer,p.filename,req.body.sheet):p.table;
+  const detected=platformMapping(table,p.options.platform);
+  const mapping=table!==p.table?detected:{...(req.body.mapping||p.options.mapping)};
+  mapping.platform='';
+  if(req.body.amountMode&&!['order','line'].includes(req.body.amountMode))throw Error('无效金额含义');
+  p.table=table;p.options={...p.options,mapping,...Object.fromEntries(['account','amountMode'].filter(k=>req.body[k]).map(k=>[k,req.body[k]]))};res.json(describe(p));
+ });
+ app.post('/api/import/:id/commit',async(req,res)=>{
+  const p=previews.get(req.params.id);if(!p)throw Error('预览已过期，请重新选择文件');
+  if(!Array.isArray(req.body.indices)||!req.body.indices.length)throw Error('请勾选需要入库的订单');
+  const indices=[...new Set(req.body.indices)],fresh=describe(p);
+  if(indices.some(i=>!Number.isInteger(i)||i<0||i>=p.parsed.orders.length))throw Error('订单选择无效，请重新核对预览');
+  const selected=indices.map(i=>p.parsed.orders[i]);
+  if(selected.some(o=>o.importStatus!=='ready')){
+   const locked=selected.some(o=>o.importStatus==='locked');
+   throw Object.assign(Error(locked?'本批次 0 笔入库：所选订单包含已锁定月份，请核对未导入清单后重新选择。':'本批次 0 笔入库：所选订单包含重复、冲突或无效数据，请重新核对预览。'),{status:locked?423:409,code:locked?'MONTH_LOCKED':'IMPORT_REVIEW_CHANGED',preview:fresh,report:importReportDraft(p.filename,p.parsed.orders,p.parsed.issues,indices,{aborted:true})});
+  }
+  const orders=selected.map(o=>({index:o.index,order:validateOrder(o),original:{headers:p.table.headers,rows:o.raw,normalized:o}}));
+  let source,result;
+  try{
+   result=await write(req,()=>{
+    store.monthLocks.assertWritable(orders.filter(e=>!store.find(e.order)).map(e=>e.order));
+    source=stash(p.buffer,p.filename);
+    return store.importBatch(orders,{...source,lineCount:p.parsed.lineCount,metadata:{sheet:p.table.sheet,...p.options,issues:p.parsed.issues,selected:indices.length,importReport:importReportDraft(p.filename,p.parsed.orders,p.parsed.issues,indices)}});
+   });
+  }catch(e){
+   if(source)fs.unlinkSync(path.join(dataDir,source.filePath));
+   if(e.code==='MONTH_LOCKED'||e.message==='MONTH_LOCKED')Object.assign(e,{status:423,code:'MONTH_LOCKED',message:'本批次 0 笔入库：月份已锁定，请核对未导入清单后重新选择。',preview:describe(p),report:importReportDraft(p.filename,p.parsed.orders,p.parsed.issues,indices,{aborted:true})});
+   throw e;
+  }
+  previews.delete(p.id);res.json(result);
+ });
+ const saveOrder=async(req,res)=>{if(req.body.ocrJobId)throw Object.assign(Error('单据识别已移除，请手工填写或导入表格'),{status:410,code:'FEATURE_REMOVED'});const o=validateOrder(req.body);if(store.find(o))throw Error('同一平台、账号和订单号已存在');const created=await write(req,()=>store.insert(o,null,req.body));res.json(created);};
+ app.post('/api/orders',saveOrder);
+ app.get('/api/order-logs',(req,res)=>res.json(store.auditLog.list(req.query)));
+ app.get('/api/order-logs/:id',(req,res)=>res.json(store.auditLog.detail(req.params.id)));
+ app.post('/api/order-logs/rollback-preview',(req,res)=>res.json(store.auditLog.preview(req.body)));
+ app.post('/api/order-logs/rollback',(req,res)=>res.json(store.auditLog.rollback(req.body)));
+ app.get('/api/suppliers',(req,res)=>res.json(supplierSummary(store.list(),req.query)));
+ app.get('/api/supplier-management',(_req,res)=>res.json(supplierManagement.list(_req.query)));
+ app.get('/api/supplier-management/choices',(_req,res)=>res.json(supplierManagement.profiles()));
+ app.get('/api/supplier-management/:id/history',(req,res)=>res.json(supplierManagement.history(req.params.id)));
+ app.post('/api/supplier-management',(req,res)=>res.json(supplierManagement.save(null,req.body)));
+ app.put('/api/supplier-management/:id',(req,res)=>res.json(supplierManagement.save(req.params.id,req.body)));
+ app.get('/api/orders',(req,res)=>res.json(filterOrders(store.list(),req.query,req.query.basis)));
+ app.get('/api/orders/:id',(req,res)=>{const order=store.get(req.params.id);if(!order)return res.status(404).json({error:'订单不存在'});res.json(order);});
+ app.patch('/api/orders/:id/classification',async(req,res)=>{if(!req.body.classification)throw Error('请提交采购分类');res.json(await write(req,()=>store.classify(req.params.id,req.body)));});
+ app.post('/api/orders/attributes/batch',async(req,res)=>res.json(await write(req,()=>store.attributesBatch(req.body))));
+ app.post('/api/orders/classification/batch',async(req,res)=>res.json(await write(req,()=>store.classifyBatch(req.body))));
+ app.put('/api/orders/:id',async(req,res)=>res.json(await write(req,()=>store.update(req.params.id,req.body))));
+ app.patch('/api/orders/:id/note',async(req,res)=>{
+  const o=store.get(req.params.id);if(!o)throw Error('订单不存在');
+  if(typeof req.body.note!=='string')throw Error('备注必须为文字');
+  res.json(await write(req,()=>store.update(o.id,{...o,note:req.body.note,updatedAt:req.body.updatedAt})));
+ });
+ app.post('/api/orders/:id/images/prepare',async(req,res)=>res.json(await orderImages.prepare(req.params.id)));
+ app.post('/api/orders/:id/images/:imageId/cache',async(req,res)=>res.json(await orderImages.cache(req.params.id,req.params.imageId)));
+ app.get('/api/images/:assetId',(req,res,next)=>{const image=orderImages.resource(req.params.assetId,req.query.size||'full');res.type(image.mime);res.setHeader('Cache-Control','private, max-age=86400');res.sendFile(path.basename(image.path),{root:path.dirname(image.path)},err=>{if(err){res.removeHeader('Content-Type');res.setHeader('Cache-Control','no-store');next(err);}});});
+// 采购单附件：先暂存（order_id 为空），订单保存时绑定；已绑定附件不可删除。
+app.post('/api/attachments',attachmentUpload.array('files',MAX_FILES),async(req,res)=>{
+ if(!req.files?.length)throw Error('请选择要上传的附件');
+ validateUploadLimits(req.files.map(f=>({name:cleanName(f.originalname),size:f.size})));
+ const saved=[];
+ try{for(const f of req.files)saved.push(await attachments.stash(f.buffer,cleanName(f.originalname),f.mimetype));}catch(e){for(const a of saved)attachments.remove(a.id);throw e;}
+ res.json(saved);
+});
+app.delete('/api/attachments/:id',(req,res)=>{attachments.remove(req.params.id);res.json({ok:true});});
+app.get('/api/orders/:id/attachments',(req,res)=>{if(!store.get(req.params.id))return res.status(404).json({error:'订单不存在'});res.json(attachments.list(req.params.id));});
+app.get('/api/attachments/:id/thumb',(req,res)=>{const a=attachments.resource(req.params.id,'thumb');res.type(a.mime).sendFile(a.path);});
+app.get('/api/attachments/:id',(req,res,next)=>{
+ const a=attachments.resource(req.params.id,req.query.size==='thumb'?'thumb':'full'),thumb=req.query.size==='thumb';
+ res.type(a.mime);res.setHeader('Cache-Control','private, max-age=86400');
+ res.setHeader('Content-Disposition',(thumb||req.query.preview==='1'&&/^image\/(png|jpeg|webp|gif)$/.test(a.mime)?'inline':'attachment')+"; filename*=UTF-8''"+encodeURIComponent(a.filename));
+ res.sendFile(path.basename(a.path),{root:path.dirname(a.path)},err=>{if(err)next(err);});
+});
+// 地址库：收货地址与供应商地址二合一，自由标签筛选；与订单无外键，删除不影响订单。
+app.get('/api/addresses',(req,res)=>res.json(addresses.list({q:req.query.q,tag:req.query.tag})));
+app.post('/api/addresses',(req,res)=>res.json(addresses.create(req.body)));
+app.put('/api/addresses/:id',(req,res)=>res.json(addresses.update(req.params.id,req.body)));
+app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.id,req.body)));
+ app.get('/api/orders/:id/history',(req,res)=>res.json(store.history(req.params.id)));
+ app.get('/api/orders/:id/supplements',(req,res)=>res.json(store.supplements(req.params.id)));
+ app.get('/api/source/:id',(req,res)=>{
+  const row=store.db.prepare('SELECT file_path,filename FROM imports WHERE id=?').get(req.params.id);if(!row?.file_path)return res.status(404).json({error:'原始文件不存在'});res.download(path.join(dataDir,row.file_path),row.filename);
+ });
+ ;
+
+ ;
+ ;
+ const csv=(rows)=>'\uFEFF'+rows.map(row=>row.map(v=>{const s=String(v??'');return '"'+(typeof v!=='number'&&/^[=+@\-\t\r]/.test(s)||/^\d{16,}$/.test(s)?"'":'')+s.replace(/"/g,'""')+'"';}).join(',')).join('\r\n');
+ app.get('/api/export',(req,res)=>{
+  let sorters=[];try{sorters=JSON.parse(req.query.sorters||'[]');}catch{throw Error('排序参数无效');}if(!Array.isArray(sorters))throw Error('排序参数无效');
+  const orders=sortOrders(filterOrders(store.list(),req.query,req.query.basis),sorters,req.query.basis);
+  res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent('采购订单.csv'));res.type('text/csv').send(csv([['采购平台','账号','订单编号','下单日期','付款日期','供应商','实付金额','已退款金额','运费','订单状态','商品名称','商品规格','单价(元)','数量','单位','商品行运单号','商品行物流公司','收货人姓名','收货地址','联系手机','物流公司','运单号','备注','采购类别','分类金额分配','待分配退款','支出归属','筛选类别实付','筛选类别已分配退款','筛选类别净支出','支出统计设置','计入看板','计入采购净支出','上传日期','数据来源','录入人'],...orders.map(o=>[o.platform,o.account,o.orderNo,o.date,o.paidAt,o.supplier,(o.amountCents/100).toFixed(2),(o.refundCents/100).toFixed(2),(o.shippingCents/100).toFixed(2),o.status,o.items.map(i=>`${i.title} × ${i.qty}${i.unit||''}`).join('；'),...['spec','unitPriceCents','qty','unit','trackingNo','logisticsCompany'].map(k=>o.items.map((i,n)=>(o.items.length>1?`${n+1}. `:'')+(k==='unitPriceCents'?(i[k]==null?'':(i[k]/100).toFixed(2)):(['trackingNo','logisticsCompany'].includes(k)?shipmentText(i,k):String(i[k]??'')))).join('\n')),o.recipient,o.address,o.phone,o.logisticsCompany,o.trackingNo,o.note,classificationLabel(o),classificationDescription(o),(unallocatedRefund(o)/100).toFixed(2),'公司共用',...(req.query.category?Object.values(contribution(o,req.query.category)).map(v=>(v/100).toFixed(2)):['','','']),spendSettingLabel(o),includedInSpend(o)?'是':'否',((includedInSpend(o)?contribution(o,req.query.category).netCents:0)/100).toFixed(2),orderUploadDate(o.createdAt),o.sourceLabel,o.uploadedBy])]));
+ });
+ app.get('/api/classification-export',(req,res)=>{
+  const orders=filterOrders(store.list(),req.query,req.query.basis),rows=[];
+  for(const o of orders){
+   const common=[o.id,o.platform,o.account,o.orderNo,o.date,o.paidAt,o.supplier,o.status,includedInSpend(o)?'是':'否','公司共用'];
+   for(const p of allocations(o).filter(p=>!req.query.category||p.category===req.query.category))rows.push([...common,categories[p.category],(p.amountCents/100).toFixed(2),(p.refundCents/100).toFixed(2),'0.00',((p.amountCents-p.refundCents)/100).toFixed(2),o.note,spendSettingLabel(o),((includedInSpend(o)?p.amountCents-p.refundCents:0)/100).toFixed(2)]);
+   if(!req.query.category&&unallocatedRefund(o))rows.push([...common,'待分配退款','0.00','0.00',(unallocatedRefund(o)/100).toFixed(2),Number((-unallocatedRefund(o)/100).toFixed(2)),'退款类别待核对',spendSettingLabel(o),Number(((includedInSpend(o)?-unallocatedRefund(o):0)/100).toFixed(2))]);
+  }
+  res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent('采购支出分类明细.csv'));res.type('text/csv').send(csv([['订单ID','采购平台','账号','订单编号','下单日期','付款日期','供应商','订单状态','计入看板','支出归属','采购类别','分类实付','已分配退款','待分配退款','净支出调整','备注','支出统计设置','计入采购净支出'],...rows]));
+ });
+ app.get('/api/monthly-export',(req,res)=>{const year=req.query.year||2026,s=summarize(store.list(),year,req.query.basis||'paid',req.query.platform||'全部',req.query.category||'');res.setHeader('Content-Disposition',`attachment; filename="monthly-${year}.csv"`);res.type('text/csv').send(csv([['月份','有效采购实付','已记录退款','净采购支出','有效订单数'],...s.months.map(m=>[`${year}-${String(m.month).padStart(2,'0')}`,(m.amountCents/100).toFixed(2),(m.refundCents/100).toFixed(2),(m.netCents/100).toFixed(2),m.count])]));});
+ app.get('/api/template',(req,res)=>{res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent('采购导入模板.csv'));res.type('text/csv').send(csv([['采购平台','采购账号','订单编号','下单日期','付款日期','供应商','商品名称','规格型号','数量','单位','单价','实付金额','已退款金额','运费','订单状态','收货人姓名','收货地址','联系手机','物流公司','运单号','备注']]));});
+ app.post('/api/backup',async(req,res)=>{
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-'),filename=`purchase-backup-${stamp}.zip`,dbPath=path.join(dataDir,'backups',stamp+'.sqlite'),zipPath=path.join(dataDir,'backups',filename);await store.backup(dbPath);
+  await new Promise((resolve,reject)=>{const out=fs.createWriteStream(zipPath),archive=archiver('zip',{zlib:{level:6}});out.on('close',resolve);out.on('error',reject);archive.on('error',reject);archive.pipe(out);archive.file(dbPath,{name:'purchases.sqlite'});archive.directory(path.join(dataDir,'originals'),'originals');archive.directory(path.join(dataDir,'attachments'),'attachments');for(const name of fs.readdirSync(path.join(dataDir,'images')).filter(n=>/^[a-f0-9]{64}(?:\.thumb)?\.(jpg|png|webp|gif|avif)$/.test(n)))archive.file(path.join(dataDir,'images',name),{name:'images/'+name});archive.append(JSON.stringify({version:1,createdAt:new Date().toISOString(),orders:store.list().length},null,2),{name:'manifest.json'});archive.finalize();});fs.unlinkSync(dbPath);res.json({filename,url:'/api/backup/'+filename});
+ });
+ app.get('/api/backup/:file',(req,res)=>{if(!/^purchase-backup-[\dTZ-]+\.zip$/.test(req.params.file))throw Error('无效备份文件');res.download(path.join(dataDir,'backups',req.params.file));});
+ app.get('/vendor/address-parse.js',(req,res)=>res.sendFile('bundle.js',{root:path.join(root,'node_modules/address-parse/dist')}));
+ app.get('/vendor/chart.js',(req,res)=>res.sendFile('chart.umd.js',{root:path.join(root,'node_modules/chart.js/dist')}));
+ app.get('/vendor/tabulator.js',(req,res)=>res.sendFile('tabulator.min.js',{root:path.join(root,'node_modules/tabulator-tables/dist/js')}));
+ app.get('/vendor/tabulator.css',(req,res)=>res.sendFile('tabulator.min.css',{root:path.join(root,'node_modules/tabulator-tables/dist/css')}));
+ app.use(express.static(path.join(root,'public')));
+ app.use((err,req,res,next)=>{if(res.headersSent)return next(err);let message=err.message||'操作失败';if(message.includes('UNIQUE constraint'))message='该平台、账号下的订单号已存在';if(err.code==='LIMIT_FILE_SIZE')message=['/api/attachments','/api/ocr'].includes(req.path)?'单个文件超过限制，最多 50 MB，请缩小后重试':'文件不能超过 25 MB';if(err.code==='LIMIT_FILE_COUNT'||err.code==='LIMIT_UNEXPECTED_FILE')message='一次最多上传 20 个文件，请减少后重试';if(message==='MONTH_LOCKED'){err.status=423;err.code='MONTH_LOCKED';message='该月份的平台采购数据已锁定，请先到「月度确认」取消确认后再修改。';}res.status(err.status||400).json({error:message,code:err.code,conflicts:err.conflicts,locks:err.locks,availableOn:err.availableOn,availableAt:err.availableAt,preview:err.preview,report:err.report});});
+ mobile=createMobileAccess({store,addresses,supplierManagement,jobs,saveOrder,attachmentUpload,root,desktopApp:app,now:mobileNow,policyFile:mobilePolicyFile,agentManaged:mobileAgentManaged,isMaintenance:integration.maintenance});
+ const agentOperations=purchaseAgentOperations({store,taskBoard,taskCenter,supplierManagement,addresses,attachments,jobs,personnel});
+ agentOperations.edits={query:i=>i.id?edits.get(i.id):edits.list()};
+ agentOperations['edit.commit']={async:true,prepare:i=>{const d=edits.previewAgent(i.id,i.revision);return {summary:'复核并保存历史待确认修改',scope:{draftId:d.id,orderId:d.target},evidence:[{id:d.id,revision:d.revision,reason:d.reason}],changes:[{before:d.before,after:d.proposed}],commitData:{revision:d.revision}};},commit:(i,d,c)=>edits.commitAgent(i.id,d.revision,c),recover:i=>{const d=edits.get(i.id);return d.state==='committed'&&d.result?.verified?{...d.result,postVerified:true}:null;}};
+ agentOperations['image.file']={query:i=>{const item=orderImages.list(i.id).images.find(g=>g.assetId===i.assetId);if(!item)throw Error('缓存图片不属于所选订单');const file=orderImages.resource(i.assetId,'full');return {assetId:i.assetId,filename:i.assetId+path.extname(file.path),sha256:createHash('sha256').update(fs.readFileSync(file.path)).digest('hex'),downloadUrl:'/api/images/'+encodeURIComponent(i.assetId)};}};
+ agentOperations.transfers={query:i=>i.id?transfers.preview(i.id):{batches:transfers.list()}};
+ agentOperations['transfer.verify']={query:i=>({id:i.id,preview:transfers.preview(i.id),differences:transfers.verify(i.id)})};
+ agentOperations['transfer.save']={execute:(i,c)=>{const data=transfers.saveAgent(i.id,{revision:i.revision,decisions:i.decisions},c);return {summary:'已保存历史订单核对选择，尚未入账',data,blocks:[{type:'table',rows:data.rows}],evidence:[{id:data.id,revision:data.revision,total:data.total}]};}};
+ agentOperations['transfer.commit']={async:true,prepare:(i,c)=>transfers.prepareAgent(i.id,{revision:i.revision},c),commit:(i,data,c)=>transfers.commitAgent(i.id,data,c),recover:i=>transfers.preview(i.id).result};
+ agentOperations['transfer.rollback']={prepare:(i,c)=>{const p=transfers.preview(i.id);return {summary:'撤销整批历史订单导入',scope:{transferId:i.id},evidence:[p],changes:[{action:'rollback-transfer',id:i.id,reason:i.reason,orders:p.result?.orders}],commitData:{}};},commit:i=>transfers.rollback(i.id,i.reason)};
+ agentOperations['image.prepare']={execute:async i=>{const data=await orderImages.prepare(i.id);return {summary:'已提取来源图片索引',data,evidence:[{orderId:i.id}],blocks:[{type:'table',rows:data}]};}};
+ agentOperations['image.cache']={execute:async i=>{const data=await orderImages.cache(i.id,i.imageId);return {summary:'已缓存订单图片',data,evidence:[{orderId:i.id,imageId:i.imageId}],blocks:[{type:'table',rows:data}]};}};
+ agentFiles=createPurchaseAgentFiles({store,dataDir});
+ Object.assign(agentOperations,agentFiles.ops);
+ agentOperations['files.upload']={execute:(input,ctx)=>{const data=agentFiles.upload(input,ctx);return {summary:'采购原件已保存',data,evidence:[data]};}};
+ const closeStore=store.close;store.close=()=>{agentFiles.close();closeStore();};
+ const agentService=createPurchaseAgentService({store,key:integration.workbench.key,binding:()=>({dataSetId:integration.state.dataSetId,revision:integration.state.revision}),operations:agentOperations});
+ installPurchaseAgentRoutes(integration.router,agentService);
+ agentFiles.installRoutes(integration.router,purchaseAgentRequestContext);
+ integration.workbench.finalize();
+ return {app,store,mobile,integration,transfers};
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ const {app,store,mobile,integration}=createApp();const port=Number(process.env.PORT||17868);const server=app.listen(port,'127.0.0.1',()=>console.log(`灵兔采购台已启动：http://127.0.0.1:${port}`));integration.attach(server);
+ const mobileServer=mobile.app.listen(Number(process.env.PURCHASE_MOBILE_PORT||17869),'127.0.0.1',()=>console.log('手机配对管理：http://127.0.0.1:'+port+'/phone'));
+ mobileServer.on('error',err=>console.error('手机入口未启动：'+err.message));
+ server.on('error',err=>{console.error(err.code==='EADDRINUSE'?'端口已占用，请打开现有灵兔采购台。':err.message);store.close();process.exit(1);});
+ const shutdown=()=>{mobileServer.close();server.close(()=>{store.close();process.exit(0);});};integration.onStop=shutdown;
+ for(const signal of ['SIGINT','SIGTERM'])process.on(signal,shutdown);
+}

@@ -1,0 +1,71 @@
+:root {
+  font-family: "Microsoft YaHei", system-ui, sans-serif;
+  color: #1e293b;
+  background: #f6f8fb;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header {
+  height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 24px;
+  background: white;
+  border-bottom: 1px solid #dce3ec;
+}
+nav {
+  display: flex;
+  gap: 8px;
+}
+a,
+button {
+  font: inherit;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 16px;
+  text-decoration: none;
+  color: #334155;
+  background: transparent;
+  cursor: pointer;
+}
+a[aria-current="page"],
+button {
+  background: #e9f0ff;
+  color: #235bd5;
+}
+#status {
+  margin-left: auto;
+  font-size: 13px;
+}
+main {
+  height: calc(100dvh - 58px);
+}
+iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+#message {
+  padding: 32px;
+  white-space: pre-line;
+}
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 680px) {
+  header {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  a {
+    padding: 8px;
+  }
+  #status {
+    max-width: 120px;
+  }
+}

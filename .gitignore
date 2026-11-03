@@ -30,3 +30,18 @@ ignore.conf
 nas-video-service/.env
 nas-video-service/data/
 nas-video-service/config/cameras.json
+
+# Local agent evidence, browser state, and generated outputs
+.codex-artifacts/
+.accio/
+.buyer-execution-hooks/
+tmp/
+.tmp/
+out/
+发票核对/_run/
+
+# Incremental build cache and isolated task outputs
+.turbo/
+tooling/build-units/*/artifact/
+tooling/build-units/*/.verification/
+tooling/build-units/*/dependencies/

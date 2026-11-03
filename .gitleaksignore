@@ -1,0 +1,21 @@
+# Reviewed synthetic idempotency key in gateway retry test; not an API credential.
+# Match only this baseline commit, file, rule and line. No production paths excluded.
+bbff8c3f139fc63f5fb0dd7648a9bb60e0885079:tests/workbench-gateway.test.mjs:generic-api-key:79
+tests/workbench-gateway.test.mjs:generic-api-key:79
+# Reviewed Hermes source SHA256, boolean expression, and synthetic review fixture.
+# Each exception is limited to its exact commit/file/rule/line; no secret values.
+c12cf2b797e6df6f199f615b67d2a1c405624f26:desktop/agent-runtime/hermes-compatibility.json:generic-api-key:11
+desktop/agent-runtime/hermes-compatibility.json:generic-api-key:11
+c12cf2b797e6df6f199f615b67d2a1c405624f26:desktop/agent-runtime/settings.mjs:generic-api-key:19
+desktop/agent-runtime/settings.mjs:generic-api-key:19
+c12cf2b797e6df6f199f615b67d2a1c405624f26:tests/agent-runtime.test.mjs:generic-api-key:51
+tests/agent-runtime.test.mjs:generic-api-key:51
+
+# Reviewed historical SHA256 fixture digests, a boolean expression and the official scanner regex.
+# Exact commit/file/rule/line fingerprints only; no operational credentials.
+a9953146df59343969a08d62e4e7cf9bfa0da764:scripts/public-scan/scan-stage-public.mjs:generic-api-key:44
+a9953146df59343969a08d62e4e7cf9bfa0da764:scripts/public-scan/scan-stage-public.mjs:generic-api-key:45
+294d888580f60caa02fb6aec91b34d34b1666a82:scripts/agent-beta-stage.mjs:generic-api-key:23
+294d888580f60caa02fb6aec91b34d34b1666a82:scripts/agent-beta-stage.mjs:generic-api-key:26
+0189af372cf544145ec8a7b69d16e2b4a3b2f284:scripts/agent-beta-scan-classification.mjs:generic-api-key:24
+a9953146df59343969a08d62e4e7cf9bfa0da764:scripts/public-scan/gitleaks-v8.30.1.official.toml:aws-amazon-bedrock-api-key-short-lived:232

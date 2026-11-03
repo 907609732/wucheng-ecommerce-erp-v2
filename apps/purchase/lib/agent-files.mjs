@@ -1,0 +1,89 @@
+import fs from 'node:fs';
+
+import path from 'node:path';
+import {randomUUID,createHash} from 'node:crypto';
+
+import {readTable,normalizeTable,validateOrder,fields} from './importer.mjs';
+import {platformMapping} from './import-rules.mjs';
+import {reviewImportOrders,importReportDraft} from './import-review.mjs';
+import {importRules} from '../public/import-rules.mjs';
+
+import {MAX_FILE_BYTES} from '../public/upload-limits.mjs';
+const hash=b=>createHash('sha256').update(b).digest('hex');
+const fail=(code,message,status=400)=>Object.assign(Error(message),{code,status});
+const MAX_BYTES=8*1024*1024;
+export function createPurchaseAgentFiles({store,dataDir=store.dir}){
+ const {db}=store,folder=path.resolve(dataDir,'agent-files'),workers=new Map();fs.mkdirSync(folder,{recursive:true});
+ db.exec(`CREATE TABLE IF NOT EXISTS agent_files(id TEXT PRIMARY KEY,owner TEXT NOT NULL,hash TEXT NOT NULL,filename TEXT NOT NULL,bytes INTEGER NOT NULL,created_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS agent_file_requests(owner TEXT NOT NULL,request_key TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(owner,request_key));
+ CREATE TABLE IF NOT EXISTS agent_file_previews(id TEXT PRIMARY KEY,owner TEXT NOT NULL,payload TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS agent_file_parts(id TEXT PRIMARY KEY,owner TEXT NOT NULL,filename TEXT NOT NULL,total_bytes INTEGER NOT NULL,sha256 TEXT NOT NULL,received INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'uploading');
+ CREATE TABLE IF NOT EXISTS agent_file_chunks(upload_id TEXT NOT NULL,offset INTEGER NOT NULL,bytes INTEGER NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(upload_id,offset));`);
+
+ const actor=(ctx,write=false)=>{const a=ctx?.actor;if(!a?.id||!a.modules?.includes('purchase'))throw fail('AGENT_ACTOR_REQUIRED','需要可信采购身份',403);return a;};
+ const owned=(table,id,ctx)=>{const a=actor(ctx),row=db.prepare('SELECT * FROM '+table+' WHERE id=?').get(id);if(!row||row.owner!==a.id)throw fail('FILE_NOT_FOUND','文件或识别任务不存在或不属于当前人员',404);return row;};
+ const filename=value=>{if(typeof value!=='string'||!value||value.length>180||/[<>:"|?*\\/\x00-\x1f]/.test(value)||value==='.'||value==='..')throw fail('FILENAME_INVALID','文件名不能包含路径或控制字符');return value;};
+ const bytes=(id,ctx)=>{const row=owned('agent_files',id,ctx),buffer=fs.readFileSync(path.join(folder,row.id));if(buffer.length!==row.bytes||hash(buffer)!==row.hash)throw fail('FILE_CHANGED','文件原件摘要不符',409);return {row,buffer};};
+ const metadata=(id,ctx)=>{const r=owned('agent_files',id,ctx);return {fileId:r.id,filename:r.filename,bytes:r.bytes,sha256:r.hash,createdAt:r.created_at,downloadUrl:'/api/integration/v1/agent/files/'+r.id+'/download'};};
+ const request=(name,input,ctx,fn)=>{const a=actor(ctx,true),key=ctx.idempotencyKey;if(typeof key!=='string'||!key||key.length>300)throw fail('IDEMPOTENCY_REQUIRED','需要运行时持久请求键',409);const digest=hash(JSON.stringify({name,input})),old=db.prepare('SELECT * FROM agent_file_requests WHERE owner=? AND request_key=?').get(a.id,key);if(old){if(old.digest!==digest)throw fail('IDEMPOTENCY_CONFLICT','相同请求键的内容变化',409);return JSON.parse(old.result);}db.prepare('INSERT INTO agent_file_requests VALUES(?,?,?,?)').run(a.id,key,digest,JSON.stringify({state:'processing',ok:false}));const save=result=>{db.prepare('UPDATE agent_file_requests SET result=? WHERE owner=? AND request_key=?').run(JSON.stringify(result),a.id,key);return result;};try{const value=fn(a);return value?.then?value.then(save,error=>{save({state:'failed',ok:false,error:error.message});throw error;}):save(value);}catch(error){save({state:'failed',ok:false,error:error.message});throw error;}};
+ function upload(payload,ctx){
+  if(!payload||Object.keys(payload).some(k=>!['filename','dataBase64'].includes(k)))throw fail('UPLOAD_INPUT_INVALID','上传仅允许文件名及base64内容');
+  const name=filename(payload.filename),encoded=payload.dataBase64;if(typeof encoded!=='string'||encoded.length>Math.ceil(MAX_BYTES/3)*4||!encoded.length||encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw fail('UPLOAD_LIMIT','文件编码无效或超过8MiB限制',413);
+  const buffer=Buffer.from(encoded,'base64');if(!buffer.length||buffer.length>MAX_BYTES||buffer.toString('base64')!==encoded)throw fail('UPLOAD_LIMIT','文件编码无效或超过8MiB限制',413);
+  return request('upload',{filename:name,sha256:hash(buffer)},ctx,a=>{const id=randomUUID(),target=path.join(folder,id);fs.writeFileSync(target,buffer,{flag:'wx'});try{db.prepare('INSERT INTO agent_files VALUES(?,?,?,?,?,?)').run(id,a.id,hash(buffer),name,buffer.length,new Date().toISOString());}catch(e){fs.unlinkSync(target);throw e;}return metadata(id,ctx);});
+ }
+ function uploadPart(input,ctx){
+  actor(ctx,true);if(!input||Object.keys(input).some(k=>!['uploadId','filename','totalBytes','offset','dataBase64','sha256'].includes(k)))throw fail('UPLOAD_INPUT_INVALID','分片上传参数无效');
+  const name=filename(input.filename),encoded=input.dataBase64;
+  if(!Number.isSafeInteger(input.totalBytes)||input.totalBytes<1||input.totalBytes>MAX_FILE_BYTES)throw fail('UPLOAD_LIMIT','单文件最多50MiB',413);
+  if(!Number.isSafeInteger(input.offset)||input.offset<0||input.offset>=input.totalBytes||typeof input.sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.sha256))throw fail('UPLOAD_PART_INVALID','偏移或完整文件SHA256无效');
+  if(input.uploadId!==undefined&&(typeof input.uploadId!=='string'||!/^[a-f0-9-]{36}$/.test(input.uploadId)))throw fail('UPLOAD_ID_INVALID','上传标识无效');
+  if(typeof encoded!=='string'||!encoded.length||encoded.length>Math.ceil(MAX_BYTES/3)*4||encoded.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw fail('UPLOAD_LIMIT','每片编码无效或超过8MiB',413);
+  const buffer=Buffer.from(encoded,'base64'),chunkHash=hash(buffer);if(!buffer.length||buffer.length>MAX_BYTES||buffer.toString('base64')!==encoded||input.offset+buffer.length>input.totalBytes)throw fail('UPLOAD_PART_INVALID','分片长度不符合范围');
+  return request('upload.part',{uploadId:input.uploadId||null,filename:name,totalBytes:input.totalBytes,offset:input.offset,sha256:input.sha256,chunkHash},ctx,a=>{
+   let row;if(input.uploadId)row=owned('agent_file_parts',input.uploadId,ctx);else{if(input.offset!==0)throw fail('UPLOAD_OFFSET','首片偏移必须为0',409);const id=randomUUID();db.prepare('INSERT INTO agent_file_parts(id,owner,filename,total_bytes,sha256) VALUES(?,?,?,?,?)').run(id,a.id,name,input.totalBytes,input.sha256);row=owned('agent_file_parts',id,ctx);}
+   if(row.filename!==name||row.total_bytes!==input.totalBytes||row.sha256!==input.sha256)throw fail('UPLOAD_METADATA_CHANGED','文件名、大小或完整摘要已变化',409);
+   if(row.status==='failed')throw fail('UPLOAD_HASH_MISMATCH','本次上传摘要失败，请重新创建上传',409);
+   if(input.offset>row.received)throw fail('UPLOAD_OFFSET','分片偏移不连续，当前应从'+row.received+'开始',409);
+   if(input.offset<row.received){const prior=db.prepare('SELECT * FROM agent_file_chunks WHERE upload_id=? AND offset=?').get(row.id,input.offset);if(!prior||prior.bytes!==buffer.length||prior.sha256!==chunkHash)throw fail('UPLOAD_PART_CHANGED','已保存分片内容不符',409);}
+   else{
+    const chunkPath=path.join(folder,row.id+'.'+input.offset+'.part');if(fs.existsSync(chunkPath)){if(hash(fs.readFileSync(chunkPath))!==chunkHash)throw fail('UPLOAD_PART_CHANGED','已有暂存分片摘要不符',409);}else fs.writeFileSync(chunkPath,buffer,{flag:'wx'});
+    store.transaction(()=>{db.prepare('INSERT INTO agent_file_chunks VALUES(?,?,?,?)').run(row.id,input.offset,buffer.length,chunkHash);db.prepare('UPDATE agent_file_parts SET received=? WHERE id=?').run(input.offset+buffer.length,row.id);});row=owned('agent_file_parts',row.id,ctx);
+   }
+   if(row.received===row.total_bytes&&row.status!=='completed'){
+    const chunks=db.prepare('SELECT * FROM agent_file_chunks WHERE upload_id=? ORDER BY offset').all(row.id),buffers=[];let offset=0;
+    for(const chunk of chunks){if(chunk.offset!==offset)throw fail('UPLOAD_OFFSET','持久分片存在缺口',409);const part=fs.readFileSync(path.join(folder,row.id+'.'+chunk.offset+'.part'));if(part.length!==chunk.bytes||hash(part)!==chunk.sha256)throw fail('UPLOAD_PART_CHANGED','持久分片摘要不符',409);buffers.push(part);offset+=part.length;}
+    const complete=Buffer.concat(buffers);if(complete.length!==row.total_bytes||hash(complete)!==row.sha256){db.prepare("UPDATE agent_file_parts SET status='failed' WHERE id=?").run(row.id);throw fail('UPLOAD_HASH_MISMATCH','完整文件摘要不符，未生成文件ID',409);}
+    const target=path.join(folder,row.id);if(fs.existsSync(target)){if(hash(fs.readFileSync(target))!==row.sha256)throw fail('FILE_CHANGED','最终文件摘要不符',409);}else fs.writeFileSync(target,complete,{flag:'wx'});
+    store.transaction(()=>{db.prepare('INSERT OR IGNORE INTO agent_files VALUES(?,?,?,?,?,?)').run(row.id,a.id,row.sha256,name,row.total_bytes,new Date().toISOString());db.prepare("UPDATE agent_file_parts SET status='completed' WHERE id=?").run(row.id);});row=owned('agent_file_parts',row.id,ctx);
+    for(const chunk of chunks)try{fs.unlinkSync(path.join(folder,row.id+'.'+chunk.offset+'.part'));}catch{}
+   }
+   return {uploadId:row.id,state:row.status,nextOffset:row.received,totalBytes:row.total_bytes,...(row.status==='completed'?metadata(row.id,ctx):{})};
+  });
+ }
+ const previewRow=(id,ctx)=>{const row=owned('agent_file_previews',id,ctx);return JSON.parse(row.payload);};
+ const describe=p=>{let parsed;try{parsed=normalizeTable(p.table,p.options);}catch(e){parsed={orders:[],issues:[{row:p.table.headerRow,message:e.message}],lineCount:p.table.rows.length};}const orders=reviewImportOrders(parsed.orders,store);return {fields,previewId:p.id,fileId:p.fileId,filename:p.filename,platform:p.options.platform,account:p.options.account,amountMode:p.options.amountMode,mapping:p.options.mapping,headers:p.table.headers,headerRow:p.table.headerRow,sample:p.table.rows.slice(0,3),sheet:p.table.sheet,sheets:p.table.sheets,orders:orders.map(({raw,...o})=>o),issues:parsed.issues,summary:{total:orders.length,ready:orders.filter(o=>o.importStatus==='ready').length,duplicate:orders.filter(o=>o.importStatus==='duplicate').length,conflict:orders.filter(o=>o.importStatus==='conflict').length,locked:orders.filter(o=>o.importStatus==='locked').length,invalid:orders.filter(o=>o.importStatus==='invalid').length}};};
+ const savePreview=(p,ctx)=>{db.prepare('INSERT OR REPLACE INTO agent_file_previews VALUES(?,?,?)').run(p.id,actor(ctx,true).id,JSON.stringify(p));return describe(p);};
+ async function analyze(input,ctx){return request('import.analyze',input,ctx,async()=>{const {row,buffer}=bytes(input.fileId,ctx);if(row.bytes>25*1024*1024)throw fail('UPLOAD_LIMIT','采购表格最多25MiB',413);if(!/\.(csv|xlsx?|xml)$/i.test(row.filename))throw fail('TABLE_FORMAT','请选择CSV或Excel表格');const table=await readTable(buffer,row.filename,input.sheet,{headerRow:input.headerRow}),mapping=platformMapping(table,input.platform),p={id:randomUUID(),fileId:row.id,filename:row.filename,table,options:{platform:input.platform,account:input.account||importRules[input.platform].account,amountMode:'order',mapping}};return savePreview(p,ctx);});}
+ async function remap(input,ctx){return request('import.remap',input,ctx,async()=>{const p=previewRow(input.previewId,ctx),{buffer}=bytes(p.fileId,ctx);if(input.platform&&input.platform!==p.options.platform)throw fail('PLATFORM_CHANGED','切换平台须重新分析原件');if(input.amountMode&&!['order','line'].includes(input.amountMode))throw fail('AMOUNT_MODE','金额含义无效');if(input.headerRow!==undefined||input.sheet&&input.sheet!==p.table.sheet){p.table=await readTable(buffer,p.filename,input.sheet||p.table.sheet,{headerRow:input.headerRow});p.options.mapping=platformMapping(p.table,p.options.platform);}if(input.mapping){const mapping={...input.mapping};for(const [k,v]of Object.entries(mapping))if(k!=='platform'&&!Object.hasOwn(fields,k)||v!==''&&(!/^\d+$/.test(String(v))||Number(v)>=p.table.headers.length))throw fail('MAPPING_INVALID','映射列不在表格范围内');mapping.platform='';p.options.mapping=mapping;}if(input.account)p.options.account=input.account;if(input.amountMode)p.options.amountMode=input.amountMode;return savePreview(p,ctx);});}
+
+
+
+
+
+ function sourceMeta(fileId,ctx){const {row,buffer}=bytes(fileId,ctx);return {fileId,filename:row.filename,hash:row.hash,bytes:row.bytes,buffer};}
+ function commitBatch(data,ctx){
+  actor(ctx,true);const source=sourceMeta(data.fileId,ctx);if(source.hash!==data.hash)throw fail('FILE_CHANGED','提交原件变化',409);for(const entry of data.orders){if(store.find(entry.order))throw fail('IMPORT_REVIEW_CHANGED','订单已存在，请重新核对预览',409);}store.monthLocks.assertWritable(data.orders.map(e=>e.order));
+  const rel='originals/'+randomUUID()+path.extname(source.filename).toLowerCase(),absolute=path.join(dataDir,rel);fs.writeFileSync(absolute,source.buffer,{flag:'wx'});try{ctx.onRollback?.(()=>{try{fs.unlinkSync(absolute);}catch{}});return store.importBatch(data.orders,{filename:source.filename,hash:source.hash,filePath:rel,lineCount:data.lineCount,metadata:data.metadata});}catch(e){fs.unlinkSync(absolute);throw e;}
+ }
+ const ops={
+  'files.upload.part':{execute:(i,c)=>{const data=uploadPart(i,c);if(data?.ok===false)return data;return {summary:data.fileId?'分片原件上传完成':'原件分片已保存',data,blocks:[{type:'table',rows:[data]}],evidence:[data]};}},
+  'files.get':{query:(i,c)=>metadata(i.fileId,c)},
+  'attachment.stage':{execute:async(i,c)=>{const data=await request('attachment.stage',i,c,async()=>{const {row,buffer}=bytes(i.fileId,c),mime=/\.png$/i.test(row.filename)?'image/png':/\.jpe?g$/i.test(row.filename)?'image/jpeg':/\.webp$/i.test(row.filename)?'image/webp':/\.pdf$/i.test(row.filename)?'application/pdf':'application/octet-stream',attachment=await store.attachments.stash(buffer,row.filename,mime);return {fileId:row.id,attachmentId:attachment.id,filename:row.filename,sha256:row.hash};});if(data?.ok===false)return data;return {summary:'暂存采购单附件',data,blocks:[{type:'table',rows:[data]}],evidence:[data]};}},
+  'import.analyze':{execute:async(i,c)=>{const data=await analyze(i,c);if(data?.ok===false)return data;return {summary:'分析采购表格原件',data,blocks:[{type:'table',rows:data.orders||[]}],evidence:[data]};}},'import.remap':{execute:async(i,c)=>{const data=await remap(i,c);if(data?.ok===false)return data;return {summary:'重新映射采购表格字段',data,blocks:[{type:'table',rows:data.orders||[]}],evidence:[data]};}},'import.preview':{query:(i,c)=>describe(previewRow(i.previewId,c))},
+
+
+  'import.commit':{prepare:(i,c)=>{actor(c,true);const p=previewRow(i.previewId,c),parsed=normalizeTable(p.table,p.options),orders=reviewImportOrders(parsed.orders,store),indices=i.indices;if(!Array.isArray(indices)||!indices.length||new Set(indices).size!==indices.length||indices.some(n=>!Number.isInteger(n)||!orders[n]||orders[n].importStatus!=='ready'))throw fail('IMPORT_REVIEW_CHANGED','所选订单包含重复、冲突、无效或锁定数据',409);const selected=indices.map(n=>orders[n]),file=sourceMeta(p.fileId,c);return {summary:'导入 '+selected.length+' 笔采购订单',scope:{platform:p.options.platform,account:p.options.account},evidence:[metadata(p.fileId,c)],blocks:[{type:'table',rows:selected.map(({raw,...o})=>o)}],changes:selected.map(o=>({action:'add',orderNo:o.orderNo,amountCents:o.amountCents,refundCents:o.refundCents})),commitData:{fileId:p.fileId,hash:file.hash,orders:selected.map(o=>({index:o.index,order:validateOrder(o),original:{headers:p.table.headers,rows:o.raw,normalized:o}})),lineCount:parsed.lineCount,metadata:{sheet:p.table.sheet,...p.options,issues:parsed.issues,importReport:importReportDraft(p.filename,orders,parsed.issues,indices)}}};},commit:(_i,d,c)=>commitBatch(d,c)}
+ };
+ return {ops,upload,uploadPart,metadata,busy:()=>false,resource(id,ctx){const {row,buffer}=bytes(id,ctx);return {filename:row.filename,buffer,mime:'application/octet-stream'};},installRoutes(router,resolveContext){const wrap=fn=>async(q,r,next)=>{try{await fn(q,r,resolveContext(q));}catch(e){next(e);}};router.post('/agent/files',wrap((q,r,c)=>r.json(upload(q.body,c))));router.get('/agent/files/:id',wrap((q,r,c)=>r.json(metadata(q.params.id,c))));router.get('/agent/files/:id/download',wrap((q,r,c)=>{const file=this.resource(q.params.id,c);r.set('Cache-Control','no-store');r.set('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent(file.filename));r.type(file.mime).send(file.buffer);}));},close(){}};
+}

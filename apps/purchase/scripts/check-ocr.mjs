@@ -1,0 +1,10 @@
+import {createCanvas,GlobalFonts} from '@napi-rs/canvas';
+import fs from 'node:fs';
+import {recognize} from '../lib/ocr.mjs';
+import assert from 'node:assert/strict';
+fs.mkdirSync('.tmp',{recursive:true});
+GlobalFonts.registerFromPath('C:/Windows/Fonts/msyh.ttc','YaHei');
+const canvas=createCanvas(1500,950),ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,1500,950);ctx.fillStyle='#111';ctx.font='42px YaHei';
+['采购订单','订单号: PO20261013001','供应商: 五金配件店','日期: 2026-10-13','商品: 门锁配件','数量: 2','实付金额: 128.50'].forEach((line,i)=>ctx.fillText(line,80,110+i*100));
+const png=canvas.toBuffer('image/png');fs.writeFileSync('.tmp/ocr-test.png',png);
+const r=await recognize(png,'test.png');console.log(JSON.stringify(r));assert.equal(r.order.amountCents,12850);assert.equal(r.order.date,'2026-10-13');assert.equal(r.order.orderNo,'PO20261013001');assert.ok(r.order.supplier);console.log('OCR IMAGE PASSED');

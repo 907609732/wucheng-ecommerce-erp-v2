@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "500b2b4dcdfb1ceec03172f19ba34e1e1b63e887",
+  "scope": [
+    "apps/purchase",
+    "apps/exporter"
+  ],
+  "purchase": {
+    "command": "node --test --test-concurrency=2 tests/*.test.mjs",
+    "tests": 192,
+    "passed": 192,
+    "failed": 0,
+    "durationMs": 262211.5462,
+    "syntaxCheck": "npm.cmd run check",
+    "capabilities": 42,
+    "registeredOperations": 178,
+    "realHttpDbFilesOcr": true
+  },
+  "exporter": {
+    "command": "npm.cmd test -- --maxWorkers=2",
+    "tests": 147,
+    "passed": 147,
+    "failed": 0,
+    "typecheck": "vue-tsc --noEmit: passed"
+  },
+  "isolatedSourceLoad": {
+    "passed": true,
+    "dependencies": "locked node_modules via junction",
+    "packagedRuntimeVerified": false
+  },
+  "boundaries": {
+    "realPlatformLogin": "main integration acceptance",
+    "companyApi": "main integration acceptance",
+    "installed": false,
+    "published": false,
+    "productionDataModified": false
+  },
+  "approvalHelperSha256": "1ca342e316eccb12b9fa69827dcac70cdd94023198fc2f16c475c3a43d6a588f"
+}
