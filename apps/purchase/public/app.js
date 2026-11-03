@@ -1,3 +1,4 @@
+document.documentElement.dataset.businessStarted='true';
 import {applyChartDefaults,themeColor,chartPalette} from './ui/chart-theme.mjs';
 import {mountPeriodPickers,disposePeriodPickers} from './ui/period-picker.mjs';
 const fontScale=()=>Number(getComputedStyle(document.documentElement).getPropertyValue('--font-scale'))||1;

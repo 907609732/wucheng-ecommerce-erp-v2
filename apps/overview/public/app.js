@@ -1,3 +1,4 @@
+document.documentElement.dataset.businessStarted='true';
 import {loadingMarkup} from './loading-screen.mjs';
 import {mountPeriodPickers,disposePeriodPickers,parsePeriod} from './ui/period-picker.mjs';
 import {renderFreight} from './freight.js';
