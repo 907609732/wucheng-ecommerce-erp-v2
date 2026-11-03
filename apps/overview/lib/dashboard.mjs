@@ -9,7 +9,7 @@ const localToday=()=>new Date().toLocaleDateString('sv-SE');
 const completeCoverage=r=>r.coverage.every(c=>['full','zero'].includes(c.status));
 
 // Reuse one read-only source snapshot and one normalization for all twelve months.
-// Annual cash movements add up; outstanding bills are a balance at December end.
+// Annual cash movements add up; outstanding selected-period bills use period-end payments.
 export function dashboard(s,sources,{grain='month',period=lastMonth(),today=localToday()}={}){
  if(!['month','year'].includes(grain))throw fail('看板周期无效');
  if(grain==='year'&&!/^20\d{2}$/.test(period))throw fail('年份格式应为 YYYY');
@@ -31,7 +31,8 @@ export function dashboard(s,sources,{grain='month',period=lastMonth(),today=loca
  const trend=grain==='year'?reports.map(r=>({period:r.month,label:Number(r.month.slice(5))+'月',income:r.totals.income,outflow:outflow(r.totals),difference:r.difference,totals:r.totals,
   records:r.rows.length,confirmed:completeCoverage(r),future:r.month>today.slice(0,7),status:r.unavailable?'unavailable':completeCoverage(r)?'full':r.rows.length?'partial':r.month>today.slice(0,7)?'future':'missing'})):dailyTrend(result,today);
  const shopIncome=result.shops.map(shop=>{const rows=result.rows.filter(r=>r.source==='sales'&&r.owner===shop.id&&r.bucket==='income'&&r.currency==='CNY');return {id:shop.id,name:shop.name,platform:shop.platform,amountCents:result.unavailable?null:rows.length?sum(rows.map(r=>r.amountCents)):shop.status==='full'?0:null,records:rows.length};}).sort((a,b)=>(b.amountCents??-Infinity)-(a.amountCents??-Infinity));
- return {...result,grain,period,periodLabel:grain==='year'?period+' 年':period.replace('-',' 年 ')+' 月',balanceMonth:months.at(-1),trend,shopIncome,
+ const debts=result.debts.filter(b=>grain==='year'?b.period.startsWith(period+'-'):b.period===period);
+ return {...result,debts,pendingCents:sum(debts.map(b=>b.pendingCents)),grain,period,periodLabel:grain==='year'?period+' 年':period.replace('-',' 年 ')+' 月',balanceMonth:months.at(-1),trend,shopIncome,
   dataMonths:reports.filter(r=>r.rows.length).length,confirmedMonths:reports.filter(completeCoverage).length,
   expenseBreakdown:expenseKeys.map(key=>({key,amountCents:result.totals[key]==null?null:-result.totals[key]||0}))};
 }

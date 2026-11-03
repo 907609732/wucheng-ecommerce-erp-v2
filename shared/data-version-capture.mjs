@@ -56,7 +56,7 @@ export function installDataVersioning({db,module,dataDir,versionDir,initializing
   const changes=nativePrepare('SELECT table_name,operation,n FROM data_version_changes ORDER BY table_name,operation').all();
   if(!actionOverride&&!changes.some(change=>isBusinessMutation(module,change.table_name))){rawRun('DELETE FROM data_version_changes');return null;}
   const current=context.getStore()||{},counts={insert:0,update:0,delete:0};for(const c of changes)if(PRIMARY_BUSINESS_TABLES[module].includes(c.table_name))counts[c.operation]+=c.n;
-  const id=randomUUID(),eventDir=path.join(versionDir,'events',module,id);noSymlinkAncestors(eventDir);fs.mkdirSync(eventDir,{recursive:true});
+  const paths=createCapturePathResolver(),id=randomUUID(),eventDir=path.join(versionDir,'events',module,id);paths.directory(eventDir);fs.mkdirSync(eventDir,{recursive:true});paths.directory(eventDir);
   const tables={},files=new Map(),names=new Set(businessTables().map(t=>t.name));
   const privateTables=nativePrepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t=>t.name).filter(name=>!names.has(name)&&!name.startsWith('sqlite_'));
   for(const name of names)for(const foreignKey of nativePrepare(`PRAGMA foreign_key_list(${qi(name)})`).all())if(!names.has(foreignKey.table))throw Error('DATA_VERSION_PRIVATE_SCHEMA_REFERENCE: '+name);
@@ -66,7 +66,7 @@ export function installDataVersioning({db,module,dataDir,versionDir,initializing
    for(const row of rows)for(const column of policy.files[table.name]||[]){
     if(!row[column])continue;let relative=String(row[column]);if(path.isAbsolute(relative)){relative=path.relative(dataDir,relative).split(path.sep).join('/');}else relative=relative.replaceAll('\\','/');
     if(!policy.folders.includes(relative.split('/')[0]))throw Error('Attachment path is outside business whitelist');
-    const source=safeDataVersionPath(dataDir,relative);if(!fs.statSync(source).isFile())throw Error('Attachment path is not a file');row[column]=relative;files.set(relative,source);
+    const source=paths.file(dataDir,relative,{required:true});row[column]=relative;files.set(relative,source);
    }
    tables[table.name]=rows;
   }
@@ -78,14 +78,14 @@ export function installDataVersioning({db,module,dataDir,versionDir,initializing
    return !privateTables.some(name=>new RegExp('\\b'+name.replace(/[^A-Za-z0-9_]/g,c=>'\\'+c)+'\\b','i').test(s.sql));
   });
   for(const name of names)if(!schema.some(item=>item.type==='table'&&item.name===name))throw Error('DATA_VERSION_SCHEMA_MISSING: '+name);
-  const attachments=[];for(const [relative,source]of [...files].sort(([a],[b])=>a.localeCompare(b))){const bytes=fs.readFileSync(source),relativeCopy='attachments/'+relative,destination=safeDataVersionPath(eventDir,relativeCopy);fs.mkdirSync(path.dirname(destination),{recursive:true});const digest=dataVersionDigest(bytes),blob=path.join(versionDir,'blobs',digest);noSymlinkAncestors(blob);fs.mkdirSync(path.dirname(blob),{recursive:true});if(fs.existsSync(blob)){if(dataVersionDigest(fs.readFileSync(blob))!==digest)throw Error('Attachment blob digest mismatch');}else durableWrite(blob,bytes);try{fs.linkSync(blob,destination);}catch(e){if(!['EPERM','ENOSYS','ENOTSUP','EXDEV'].includes(e.code))throw e;durableWrite(destination,bytes);}attachments.push({path:relativeCopy,sha256:dataVersionDigest(bytes),bytes:bytes.length});}
+  const attachments=[];for(const [relative,source]of [...files].sort(([a],[b])=>a.localeCompare(b))){const bytes=fs.readFileSync(source),relativeCopy='attachments/'+relative,destination=paths.file(eventDir,relativeCopy);fs.mkdirSync(path.dirname(destination),{recursive:true});paths.directory(path.dirname(destination));const digest=dataVersionDigest(bytes),blob=paths.file(versionDir,'blobs/'+digest);fs.mkdirSync(path.dirname(blob),{recursive:true});paths.directory(path.dirname(blob));if(fs.existsSync(blob)){if(dataVersionDigest(fs.readFileSync(blob))!==digest)throw Error('Attachment blob digest mismatch');}else durableWrite(blob,bytes);try{fs.linkSync(blob,destination);}catch(e){if(!['EPERM','ENOSYS','ENOTSUP','EXDEV'].includes(e.code))throw e;durableWrite(destination,bytes);}attachments.push({path:relativeCopy,sha256:dataVersionDigest(bytes),bytes:bytes.length});}
   const sequences=nativePrepare("SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").get()?nativePrepare('SELECT name,seq FROM sqlite_sequence').all().filter(row=>names.has(row.name)):[];
   const snapshot={schemaVersion:1,module,sequences,userVersion:nativePrepare('PRAGMA user_version').get().user_version,schema,tables};
-  const bytes=Buffer.from(JSON.stringify(snapshot,(_k,v)=>v instanceof Uint8Array?{$blob:Buffer.from(v).toString('base64')}:typeof v==='bigint'?{$integer:v.toString()}:v));durableWrite(path.join(eventDir,'snapshot.json'),bytes);
+  const bytes=Buffer.from(JSON.stringify(snapshot,(_k,v)=>v instanceof Uint8Array?{$blob:Buffer.from(v).toString('base64')}:typeof v==='bigint'?{$integer:v.toString()}:v));durableWrite(paths.file(eventDir,'snapshot.json'),bytes);
   const actor={id:String(current.actor?.id||'system'),label:String(current.actor?.label||'本机业务操作')},requestedAction=String(current.action||''),action=actionOverride||(/^(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+\//i.test(requestedAction)?'业务保存':requestedAction||(initializing?'系统迁移':'业务保存'));
   const label={purchase:'采购',sales:'销售',overview:'经营总览'}[module],containedRecords=PRIMARY_BUSINESS_TABLES[module].reduce((total,table)=>total+(tables[table]?.length||0),0),summary=actionOverride?`${label}｜${action}｜包含业务记录${containedRecords}条、附件${attachments.length}份｜操作人：${actor.label}`:`${label}｜${action}｜新增${counts.insert}条、修改${counts.update}条、删除${counts.delete}条｜操作人：${actor.label}`;
   const event={schemaVersion:1,id,module,createdAt:new Date().toISOString(),actor,action,summary,counts,snapshot:{path:'snapshot.json',sha256:dataVersionDigest(bytes)},attachments};
-  durableWrite(path.join(eventDir,'event.json'),Buffer.from(JSON.stringify(event)));
+  durableWrite(paths.file(eventDir,'event.json'),Buffer.from(JSON.stringify(event)));
   rawRun('INSERT INTO data_version_events(id,payload) VALUES(?,?)',id,JSON.stringify(event));rawRun('DELETE FROM data_version_changes');return event;
  }
  function finish(sql){try{internal=true;capture();nativeExec(sql);tracked=false;savepoints=[];}catch(e){if(db.isTransaction)nativeExec('ROLLBACK');tracked=false;savepoints=[];throw e;}finally{internal=false;}}
@@ -112,3 +112,23 @@ export function disableDataVersioning(db){
  db.exec('BEGIN IMMEDIATE');try{for(const trigger of triggers)db.exec('DROP TRIGGER '+qi(trigger.name));db.exec('CREATE TABLE IF NOT EXISTS data_version_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)');db.prepare("INSERT OR IGNORE INTO data_version_state(key,value) VALUES('unprotected_interval',?)").run(new Date().toISOString());if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_version_changes'").get())db.exec('DELETE FROM data_version_changes');db.exec('COMMIT');return {disabled:true,triggers:triggers.length};}catch(e){if(db.isTransaction)db.exec('ROLLBACK');throw e;}
 }
 export function dataVersionBaselineRequired(db){return !!db.prepare("SELECT value FROM data_version_state WHERE key='unprotected_interval'").get();}
+// A capture is synchronous. Cache only directories verified during this call;
+// every actual file is checked, and the next capture starts with an empty cache.
+function createCapturePathResolver(){
+ const verifiedDirectories=new Set();
+ function directory(target){
+  const absolute=path.resolve(target);if(verifiedDirectories.has(absolute))return;
+  const parent=path.dirname(absolute);if(parent!==absolute)directory(parent);
+  const stat=fs.lstatSync(absolute,{throwIfNoEntry:false});if(!stat)return;
+  if(stat.isSymbolicLink()||!stat.isDirectory())throw Error('Attachment directory path contains symlink or is not a directory');
+  verifiedDirectories.add(absolute);
+ }
+ function file(root,relative,{required=false}={}){
+  if(typeof relative!=='string'||!relative||relative.includes('\\')||relative.includes(':')||relative.split('/').some(part=>!part||part==='.'||part==='..')||path.isAbsolute(relative))throw Error('Invalid attachment path');
+  const base=path.resolve(root),target=path.resolve(base,relative);if(!target.startsWith(base+path.sep))throw Error('Invalid attachment path');
+  directory(path.dirname(target));const stat=fs.lstatSync(target,{throwIfNoEntry:false});
+  if(stat?.isSymbolicLink()||stat&&!stat.isFile())throw Error('Attachment file path contains symlink or is not a file');
+  if(required&&!stat)throw Error('Attachment file is missing');return target;
+ }
+ return {directory,file};
+}
