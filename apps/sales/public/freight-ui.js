@@ -1,8 +1,9 @@
+import {applyChartDefaults,themeColor,chartPalette} from './ui/chart-theme.mjs';
 import {openWarehouseImportAssistant} from './warehouse-import-assistant.js';
 const channels={warehouse:'云仓发货',merchant:'商家寄件',sf:'顺丰快递'};
 const modes={month:'按月汇总',day:'按日汇总',single:'单笔寄件'};
 const fees={shipping:'快递运费',packing:'打包费',materials:'耗材费',storage:'仓储费',other:'其他费用'};
-const colors=['#4676e8','#33a891','#eea844'];
+const colors=chartPalette();
 
 export function createFreightUI(ctx) {
   const {$,esc,money,api,boot,state,dialog,closeDialog,toast,render,addChart,addTable}=ctx;
@@ -40,8 +41,8 @@ export function createFreightUI(ctx) {
     $('#freight-show-void').onchange=e=>{showVoided=e.target.checked;render();};
     $('#freight-prev').onclick=()=>{page--;render();};$('#freight-next').onclick=()=>{page++;render();};
     const chartOptions={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true}}};
-    if($('#freight-trend'))addChart(new Chart($('#freight-trend'),{type:'bar',data:{labels:r.trend.map(t=>t.label),datasets:[{label:'费用合计（元）',data:r.trend.map(t=>t.total==null?null:t.total/100),backgroundColor:'#5d84e6',borderRadius:4,maxBarThickness:38}]},options:chartOptions}));
-    if($('#freight-share'))addChart(new Chart($('#freight-share'),{type:'doughnut',data:{labels:Object.values(channels),datasets:[{data:Object.keys(channels).map(c=>(r.channels[c].total||0)/100),backgroundColor:colors,borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'73%',plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:18}}}}}));
+    if($('#freight-trend'))addChart(createThemedChart($('#freight-trend'),{type:'bar',data:{labels:r.trend.map(t=>t.label),datasets:[{label:'费用合计（元）',data:r.trend.map(t=>t.total==null?null:t.total/100),backgroundColor:themeColor('--lt-brand'),borderRadius:4,maxBarThickness:38}]},options:chartOptions}));
+    if($('#freight-share'))addChart(createThemedChart($('#freight-share'),{type:'doughnut',data:{labels:Object.values(channels),datasets:[{data:Object.keys(channels).map(c=>(r.channels[c].total||0)/100),backgroundColor:colors,borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'73%',plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:18}}}}}));
     const t=new Tabulator('#freight-record-table',{data:list.rows,layout:'fitDataStretch',placeholder:'暂无账单，点击右上角“开始导入运费”',height:list.rows.length?Math.min(520,100+list.rows.length*50):130,columns:[
       {title:'期间',field:'period',width:120},{title:'录入方式',field:'mode_label',width:110},{title:'费用类型',field:'channel_label',width:110},
       {title:'归属',field:'shop',width:210,formatter:c=>esc(shopLabel(c.getRow().getData()))},
@@ -67,3 +68,6 @@ export function createFreightUI(ctx) {
 
   return {dashboard,canClose:()=>true};
 }
+
+// Presentation only: keep each chart's data, callbacks and explicit options intact.
+function createThemedChart(...args){applyChartDefaults(Chart,Number(getComputedStyle(document.documentElement).getPropertyValue('--font-scale'))||1);return new Chart(...args);}

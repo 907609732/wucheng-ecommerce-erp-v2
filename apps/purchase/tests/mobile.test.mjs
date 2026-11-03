@@ -39,7 +39,7 @@ test('手机收货地址共用电脑地址库，鉴权、去重和权限限制',
  const desktop=await fetch(f.desktopURL+'/api/addresses').then(r=>r.json());assert.equal(desktop[0].id,saved.data.id);
  assert.equal((await f.request('/api/mobile/addresses/'+saved.data.id,{}, {},'PUT')).status,404);
  const bundle=await f.download('/vendor/address-parse.js');assert.equal(bundle.status,200);assert.ok(bundle.body.length>1000);
- const theme=await f.download('/surface-theme.css');assert.equal(theme.status,200);assert.match(theme.body.toString(),/245bdb/i);
+ const theme=await f.download('/surface-theme.css');assert.equal(theme.status,200);assert.match(theme.body.toString(),/var\(--lt-brand\)/);
  const entry=await f.download('/');assert.equal(entry.status,200);assert.match(entry.body.toString(),/mobile\.css/);assert.doesNotMatch(entry.body.toString(),/surface-theme\.css/);
 });
 async function fixture(t,options={}){

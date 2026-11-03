@@ -1,0 +1,11 @@
+/* Cloud warehouse grid: theme only, retain Grid.js DOM, pagination and sorting. */
+.gridjs-container{font-family:var(--lt-font);color:var(--lt-ink);font-size:var(--lt-text-caption)}
+.gridjs-wrapper{border:var(--lt-border);border-radius:var(--lt-radius-panel);box-shadow:none}
+table.gridjs-table{font-size:var(--lt-text-caption);color:var(--lt-ink)}
+th.gridjs-th{padding:var(--lt-table-head-pad);background:var(--lt-surface-table-head);color:var(--lt-quiet);border-color:var(--lt-line);font-weight:var(--lt-weight-medium);font-size:var(--lt-text-caption)}
+td.gridjs-td{padding:var(--lt-row-pad);background:var(--lt-surface);border-color:var(--lt-line-row);font-size:var(--lt-text-caption)}
+.gridjs-tr:hover td.gridjs-td{background:var(--lt-surface-row-hover)}
+.gridjs-footer{background:var(--lt-surface);color:var(--lt-muted);border-color:var(--lt-line);box-shadow:none}
+.gridjs-pagination .gridjs-pages button{color:var(--lt-ink);background:var(--lt-surface);border-color:var(--lt-line);border-radius:var(--lt-radius-tag)}
+.gridjs-pagination .gridjs-pages button.gridjs-currentPage{color:var(--lt-surface);background:var(--lt-brand);border-color:var(--lt-brand)}
+.gridjs-input{color:var(--lt-ink);background:var(--lt-surface);border:var(--lt-border-control);border-radius:var(--lt-radius-control);min-height:var(--lt-control-h)}

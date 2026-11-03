@@ -24,7 +24,7 @@ function monthData(patch={}){
 function harness({hash='#reconciliation?shop_id=all&month=2026-08',months=[monthData(),monthData({month:'2026-09',income:98765400})]}={}){
   const nodes=new Map(),listeners=new Map(),requests=[],tables=[],dialogs=[];
   const $=selector=>{
-    if(!nodes.has(selector))nodes.set(selector,{innerHTML:'',value:'',classList:{add(){},remove(){}}});
+    if(!nodes.has(selector))nodes.set(selector,Object.assign(new EventTarget(),{innerHTML:'',value:'',classList:{add(){},remove(){}}}));
     return nodes.get(selector);
   };
   const location={hash};

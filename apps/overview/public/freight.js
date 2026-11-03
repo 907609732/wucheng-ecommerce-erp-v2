@@ -1,19 +1,21 @@
+import {mountPeriodPickers,disposePeriodPickers} from './ui/period-picker.mjs';
 let selectedOwner='all',allPeriods=false,search='';
 const expanded=new Set();
 let recordCount=null;
 export function getFreightContext(){return {owner:selectedOwner,allPeriods,q:search,recordCount};}
-export function renderFreight({month,shops,bills,esc,money,onBill,onImport,onExport,onMonth,onDownload}){
+export function renderFreight({month,shops,bills,esc,money,onBill,onImport,onExport,onMonth,onDownload,beforeChange}){
  const $=s=>document.querySelector(s);
  const owners=[...shops.map(s=>({id:s.id,name:s.name,platform:s.platform})),{id:'company',name:'公司共用',platform:'未归属店铺的运费'}];
  if(!owners.some(s=>s.id===selectedOwner))selectedOwner='all';
  const active=bills.filter(b=>!b.voided), ownerName=id=>owners.find(s=>s.id===id)?.name||id;
  const filtered=()=>active.filter(b=>(allPeriods||b.period===month)&&(selectedOwner==='all'||b.owner===selectedOwner)&&[b.billNo,b.party,b.title,ownerName(b.owner)].join(' ').toLowerCase().includes(search.toLowerCase()));
+ disposePeriodPickers($('#content'));
  $('#content').innerHTML=`<div class="freight-page">
   <div class="page-head freight-heading"><div><h1>运费账单</h1><p class="lead">按店铺查看已导入结果、付款与原件；新增及更正使用 AI 导入流程。</p></div>
    <div class="actions"><button id="freight-import" class="primary">导入运费</button><button id="freight-cloud">查看云仓下载与原件</button><button id="freight-export">导出已有账单</button></div>
   </div>
   <section class="card freight-ledger">
-   <div class="freight-controls"><div class="freight-month"><button id="freight-prev" aria-label="上个月">‹</button><input id="freight-month" type="month" min="2000-01" max="2099-12" value="${esc(month)}" aria-label="运费月份"><button id="freight-next" aria-label="下个月">›</button><span id="freight-scope" class="muted"></span></div><details id="freight-filter" class="freight-filter" ${selectedOwner!=='all'||search||allPeriods?'open':''}><summary>筛选<span id="freight-filter-count"></span></summary><div class="freight-filter-fields"><select id="freight-owner" aria-label="筛选店铺"><option value="all">全部店铺及公司共用</option>${owners.map(s=>`<option value="${esc(s.id)}" ${s.id===selectedOwner?'selected':''}>${esc(s.name+' · '+s.platform)}</option>`).join('')}</select><input id="freight-search" type="search" value="${esc(search)}" placeholder="店铺、物流公司或账单号" aria-label="搜索运费账单"><label class="checkbox"><input id="freight-all" type="checkbox" ${allPeriods?'checked':''}>所有月份</label><button id="freight-reset" type="button">清除筛选</button></div></details></div>
+   <div class="freight-controls"><div class="freight-period"><div class="lt-period" id="freight-month" data-period-picker data-picker="overview-freight" data-grains="month" data-period="${esc(month)}" data-stepper="true" data-size="sm" data-min="2000-01" data-max="2099-12" data-store-key="overview-freight" data-label="运费月份"></div><span id="freight-scope" class="muted"></span></div><details id="freight-filter" class="freight-filter" ${selectedOwner!=='all'||search||allPeriods?'open':''}><summary>筛选<span id="freight-filter-count"></span></summary><div class="freight-filter-fields"><select id="freight-owner" aria-label="筛选店铺"><option value="all">全部店铺及公司共用</option>${owners.map(s=>`<option value="${esc(s.id)}" ${s.id===selectedOwner?'selected':''}>${esc(s.name+' · '+s.platform)}</option>`).join('')}</select><input id="freight-search" type="search" value="${esc(search)}" placeholder="店铺、物流公司或账单号" aria-label="搜索运费账单"><label class="checkbox"><input id="freight-all" type="checkbox" ${allPeriods?'checked':''}>所有月份</label><button id="freight-reset" type="button">清除筛选</button></div></details></div>
    <div id="freight-totals" class="freight-summary" aria-live="polite"></div>
    <div class="table-wrap"><table class="simple freight-store-table"><thead><tr><th>店铺</th><th>登记情况</th><th class="number">运费金额（元）</th><th class="number">已付（元）</th><th class="number">待付（元）</th><th class="freight-action-cell">操作</th></tr></thead><tbody id="freight-shops"></tbody></table></div>
    <div class="table-note">“待导入”表示尚无已登记账单，不代表费用为零；付款在账单详情中单独登记。</div>
@@ -45,13 +47,10 @@ export function renderFreight({month,shops,bills,esc,money,onBill,onImport,onExp
   if(expand){expanded.has(expand.dataset.expand)?expanded.delete(expand.dataset.expand):expanded.add(expand.dataset.expand);render();$('#freight-shops').querySelector(`[data-expand="${CSS.escape(expand.dataset.expand)}"]`)?.focus();}
   if(bill)onBill(bill.dataset.bill);
  };
- const changeMonth=value=>{if(/^20\d{2}-(0[1-9]|1[0-2])$/.test(value)){allPeriods=false;onMonth(value);}};
- $('#freight-month').onchange=e=>changeMonth(e.target.value);
- const shiftMonth=delta=>{const d=new Date(month+'-01T00:00:00Z');d.setUTCMonth(d.getUTCMonth()+delta);changeMonth(d.toISOString().slice(0,7));};
- $('#freight-prev').onclick=()=>shiftMonth(-1);$('#freight-next').onclick=()=>shiftMonth(1);
+ const periodRoot=$('[data-picker="overview-freight"]');mountPeriodPickers(periodRoot,{beforeChange,onChange:({period})=>{allPeriods=false;onMonth(period);}});
  $('#freight-import').onclick=()=>onImport(selectedOwner);
  $('#freight-cloud').onclick=()=>onDownload();
  const query=()=>({period:month,owner:selectedOwner,q:search,allPeriods:allPeriods?'1':'0'});
  $('#freight-export').onclick=()=>onExport(query());
- return {destroy:()=>{}};
+ return {destroy:()=>disposePeriodPickers(periodRoot)};
 }

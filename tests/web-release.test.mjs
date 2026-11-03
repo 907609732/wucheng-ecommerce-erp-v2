@@ -13,6 +13,7 @@ test("release exports only web source and never marks an untested directory acce
     assert(!fs.existsSync(path.join(dir, "core")));
     assert(!fs.existsSync(path.join(dir, "desktop", "launcher")));
     assert(fs.existsSync(path.join(dir, "apps", "sales", "server.mjs")));
+    assert(fs.existsSync(path.join(dir, "ui", "period-picker.mjs")));
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json")));
     assert(!pkg.dependencies.electron);
     assert.equal(Object.keys(pkg.dependencies).length, 3);

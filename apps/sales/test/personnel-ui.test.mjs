@@ -1,3 +1,4 @@
+import {periodPickerFixture} from './period-picker-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {selectedSalesRole,canOpenSalesView,personnelCoverageDatasets,salesIdentityFromURL,personnelChoiceMarkup} from '../public/personnel.js';
@@ -17,7 +18,7 @@ function fixture(role,patch={},taskShops=shops){
   const $=selector=>selector==='#content'?content:selector==='#task-month'?monthNode:selector==='#task-shop'?shopNode:selector==='#task-hero-host'?heroHost:selector==='#task-detail-title'?detailTitle:content.innerHTML.includes('id="'+selector.slice(1)+'"')?(buttons.has(selector)?buttons.get(selector):buttons.set(selector,{disabled:false,isConnected:true}).get(selector)):null;
   const summary={...baseSummary,...patch,personnel:{selected:true,role}};
   const api=async(url,body)=>{requests.push({url,body});if(url.startsWith('/api/task-center?'))return summary;if(url==='/api/personnel/handoff')return {submission:{state:'submitted'}};throw Error('Unexpected API '+url);};
-  const ui=createTaskCenter({$,esc:value=>String(value??''),money:value=>'MONEY:'+value,api,boot:{shops:taskShops,personnel:{selected:true,role}},state:{period:month,shop:'all'},toast:message=>messages.push(message),render:async()=>{rendered++;}});
+  const ui=createTaskCenter({...periodPickerFixture(month),$,esc:value=>String(value??''),money:value=>'MONEY:'+value,api,boot:{shops:taskShops,personnel:{selected:true,role}},state:{period:month,shop:'all'},toast:message=>messages.push(message),render:async()=>{rendered++;}});
   return {ui,content,heroHost,detailTitle,requests,messages,buttons,get rendered(){return rendered;}};
 }
 

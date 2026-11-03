@@ -34,6 +34,7 @@ jobs:
       - run: npm ci --prefix apps/overview --ignore-scripts
       - run: npm run check
       - run: npm run sync:approval
+      - run: npm run check:ui
       - run: npm test
       - run: npm run test:purchase
       - run: npm run test:sales

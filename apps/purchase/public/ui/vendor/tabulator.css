@@ -1,0 +1,19 @@
+/* Theme only: retain Tabulator's layout, virtual scrolling and JS configuration. */
+.tabulator{background:var(--lt-surface);color:var(--lt-ink);border:var(--lt-border);font-family:var(--lt-font);font-size:var(--lt-text-caption)}
+.tabulator .tabulator-header{background:var(--lt-surface-table-head);color:var(--lt-quiet);border-color:var(--lt-line)}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content{padding:var(--lt-table-head-pad)}
+.tabulator .tabulator-tableholder .tabulator-table,.tabulator .tabulator-row{background:var(--lt-surface);color:var(--lt-ink)}
+.tabulator .tabulator-row .tabulator-cell{border-color:var(--lt-line-row);padding:var(--lt-row-pad)}
+.tabulator .tabulator-row:hover,.tabulator .tabulator-row.tabulator-selectable:hover{background:var(--lt-surface-row-hover)}
+.tabulator .tabulator-row.tabulator-selected{background:var(--lt-brand-soft)}
+.tabulator .tabulator-row .tabulator-cell.tabulator-frozen{background:inherit;border-color:var(--lt-line)}
+.tabulator .tabulator-header .tabulator-col.tabulator-frozen{background:var(--lt-surface-table-head);border-color:var(--lt-line)}
+.tabulator .tabulator-footer{background:var(--lt-surface);color:var(--lt-muted);border-color:var(--lt-line);padding:var(--lt-space-3)}
+.tabulator .tabulator-footer .tabulator-page{background:var(--lt-surface);color:var(--lt-ink);border:var(--lt-border);border-radius:var(--lt-radius-tag)}
+.tabulator .tabulator-footer .tabulator-page.active{background:var(--lt-brand);color:var(--lt-surface);border-color:var(--lt-brand)}
+.tabulator .tabulator-footer .tabulator-page:not(:disabled):hover{background:var(--lt-brand-soft);color:var(--lt-brand)}
+.tabulator .tabulator-tableholder{scrollbar-color:var(--lt-line-control) var(--lt-surface-track)}
+.tabulator .tabulator-tableholder::-webkit-scrollbar-thumb{background:var(--lt-line-control);border-radius:var(--lt-radius-pill)}
+.tabulator .tabulator-tableholder::-webkit-scrollbar-track{background:var(--lt-surface-track)}
+
+.tabulator .tabulator-header .tabulator-col{background:var(--lt-surface-table-head);border-color:var(--lt-line)}
