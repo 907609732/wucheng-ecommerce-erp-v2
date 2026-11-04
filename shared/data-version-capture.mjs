@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {AsyncLocalStorage} from 'node:async_hooks';
-import {DATA_VERSION_POLICY,PRIMARY_BUSINESS_TABLES,isBusinessMutation,isRecoverableBusinessRow,businessRowCondition,sanitizeBusinessRow,quoteIdentifier as qi} from './data-version-policy.mjs';
+import {DATA_VERSION_POLICY,embeddedBusinessFiles,PRIMARY_BUSINESS_TABLES,isBusinessMutation,isRecoverableBusinessRow,businessRowCondition,sanitizeBusinessRow,quoteIdentifier as qi} from './data-version-policy.mjs';
 
 export const dataVersionDigest=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function safeDataVersionPath(root,relative){
@@ -68,6 +68,7 @@ export function installDataVersioning({db,module,dataDir,versionDir,initializing
     if(!policy.folders.includes(relative.split('/')[0]))throw Error('Attachment path is outside business whitelist');
     const source=paths.file(dataDir,relative,{required:true});row[column]=relative;files.set(relative,source);
    }
+   for(const row of rows)for(const ref of embeddedBusinessFiles(module,table.name,row)){const source=paths.file(dataDir,ref.path,{required:true}),bytes=fs.readFileSync(source);if(bytes.length!==ref.bytes||dataVersionDigest(bytes)!==ref.sha256)throw Error('Payment evidence digest mismatch');files.set(ref.path,source);}
    tables[table.name]=rows;
   }
   const schema=nativePrepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END,name").all().filter(s=>{

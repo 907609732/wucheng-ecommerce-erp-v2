@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync,constants} from 'node:sqlite';
-import {DATA_VERSION_POLICY,quoteIdentifier as qi} from './data-version-policy.mjs';
+import {DATA_VERSION_POLICY,embeddedBusinessFiles,quoteIdentifier as qi} from './data-version-policy.mjs';
 import {dataVersionDigest,safeDataVersionPath} from './data-version-capture.mjs';
 
 /** Restore into a new isolated directory only; never replace an existing ledger. */
@@ -17,6 +17,7 @@ export function restoreDataVersion(options,target){
  const attachments=(event.attachments||[]).map(a=>{if(!a.path.startsWith('attachments/'))throw Error('Invalid attachment path');const relative=a.path.slice('attachments/'.length);if(!policy.folders.includes(relative.split('/')[0]))throw Error('Invalid attachment path');safeDataVersionPath(destination,relative);const content=fs.readFileSync(safeDataVersionPath(eventDir,a.path));if(content.length!==a.bytes||dataVersionDigest(content)!==a.sha256)throw Error('Attachment digest mismatch');return {relative,content};});
  const manifestPaths=new Set(attachments.map(item=>item.relative));
  for(const [table,rows]of Object.entries(snapshot.tables))for(const row of rows)for(const column of policy.files[table]||[]){if(!row[column])continue;safeDataVersionPath(destination,row[column]);if(!manifestPaths.has(row[column]))throw Error('Referenced attachment is missing from manifest');}
+ for(const [table,rows]of Object.entries(snapshot.tables))for(const row of rows)for(const ref of embeddedBusinessFiles(event.module,table,row)){const attachment=attachments.find(a=>a.relative===ref.path);if(!attachment||attachment.content.length!==ref.bytes||dataVersionDigest(attachment.content)!==ref.sha256)throw Error('Referenced payment evidence is missing or corrupt');}
  const parent=path.dirname(path.resolve(destination));fs.mkdirSync(parent,{recursive:true});const temporary=path.join(parent,'.data-version-restore-'+randomUUID());fs.mkdirSync(temporary);let db;
  try{
   const databasePath=path.join(temporary,policy.database);db=new DatabaseSync(databasePath);if(typeof db.setAuthorizer!=='function')throw Error('Isolated restore requires Node.js >=24.18 with SQLite authorizer support');db.setAuthorizer(action=>[constants.SQLITE_ATTACH,constants.SQLITE_DETACH].includes(action)?constants.SQLITE_DENY:constants.SQLITE_OK);db.exec('PRAGMA foreign_keys=OFF;BEGIN IMMEDIATE');

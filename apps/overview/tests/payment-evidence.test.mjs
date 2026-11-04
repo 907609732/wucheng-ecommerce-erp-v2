@@ -8,9 +8,15 @@ import {savePaymentWithEvidence,paymentEvidencePath,readPaymentEvidence} from '.
 import {makeBackup,restoreBackup} from '../lib/files.mjs';
 import {openStore} from '../lib/store.mjs';
 import {createApp} from '../server.mjs';
+import {restoreDataVersion} from '../../../shared/data-version-restore.mjs';
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII=','base64');
 const image=(extra={})=>({originalname:'付款.png',buffer:png,mimetype:'image/png',...extra});
 const input=b=>({version:b.version,date:'2026-09-30',direction:'pay',amountCents:1000,reference:'PAY-TEST',note:'付款测试'});
+test('付款凭证随数据版本快照恢复，缺少凭证时拒绝恢复',()=>{
+ const f=fixture(),previous=process.env.LINGTU_DATA_VERSION_DIR;let s;
+ try{process.env.LINGTU_DATA_VERSION_DIR=path.join(f.dir,'versions');s=openStore(path.join(f.dir,'versioned'));const b=s.createBill(bill(),f.sources()),p=savePaymentWithEvidence(s,b.id,input(b),[image()]);const event=JSON.parse(s.db.prepare('SELECT payload FROM data_version_events ORDER BY rowid DESC LIMIT 1').get().payload),eventDir=path.join(process.env.LINGTU_DATA_VERSION_DIR,'events','overview',event.id);assert.equal(event.attachments.length,1);const restored=restoreDataVersion(eventDir,path.join(f.dir,'recovered'));assert.deepEqual(fs.readFileSync(path.join(restored.destination,paymentEvidencePath(p.evidence[0]))),png);const file=path.join(eventDir,'event.json');fs.writeFileSync(file,JSON.stringify({...event,attachments:[]}));assert.throws(()=>restoreDataVersion(eventDir,path.join(f.dir,'broken')),/payment evidence/);
+ }finally{if(previous===undefined)delete process.env.LINGTU_DATA_VERSION_DIR;else process.env.LINGTU_DATA_VERSION_DIR=previous;s?.close();f.close();}
+});
 test('付款和图片同时保存，撤销仍保留历史凭证；备份恢复带回原图',async()=>{
  const f=fixture();try{const b=f.s.createBill(bill(),f.sources()),p=savePaymentWithEvidence(f.s,b.id,input(b),[image()]);assert.equal(f.s.paid(b.id),1000);assert.equal(p.evidence.length,1);assert.deepEqual(readPaymentEvidence(f.s,p.id,p.evidence[0].id).buffer,png);
   f.s.voidPayment(p.id,{reason:'撤销测试'});assert.deepEqual(readPaymentEvidence(f.s,p.id,p.evidence[0].id).buffer,png);

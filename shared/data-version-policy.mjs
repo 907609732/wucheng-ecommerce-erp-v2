@@ -5,6 +5,14 @@ export const DATA_VERSION_POLICY = Object.freeze({
  overview:{database:'overview.sqlite',tables:['bills','payments','imports','coverage','overrides','snapshots','audit','payroll_sheet_requests'],settings:[],folders:['originals'],files:{imports:['path']}}
 });
 export const quoteIdentifier=value=>'"'+String(value).replaceAll('"','""')+'"';
+export function embeddedBusinessFiles(module,table,row){
+ if(module!=='overview'||table!=='payments')return [];
+ const extensions={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+ return (JSON.parse(row.payload).evidence||[]).map(e=>{
+  if(!/^[a-f0-9-]{36}$/.test(e.id)||!extensions[e.mime]||!/^[a-f0-9]{64}$/.test(e.sha256)||!Number.isSafeInteger(e.bytes)||e.bytes<=0)throw Error('Invalid payment evidence metadata');
+  return {path:'originals/payment-'+e.id+'.'+extensions[e.mime],sha256:e.sha256,bytes:e.bytes};
+ });
+}
 // Review sessions are runtime capabilities, not recoverable business data.
 export function businessRowCondition(module,table,alias){
  if(module==='sales'&&table==='imports')return `${alias}.status IN ('committed','rolled_back')`;
