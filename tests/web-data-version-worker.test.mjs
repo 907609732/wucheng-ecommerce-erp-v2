@@ -286,6 +286,17 @@ test('production Windows orphan inspection finds the real matching child and con
   const after=await inspectOrphanProcesses({ownerPid:process.pid,executable:path.basename(process.execPath)});assert.ok(!after.some(row=>row.pid===child.pid));
 });
 
+test('production Linux orphan inspection finds a tagged CLI and confirms its exit', {skip:process.platform!=='linux'}, async t=>{
+  const token=crypto.randomUUID();
+  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{shell:false,stdio:'ignore',env:{...process.env,LINGTU_UVCS_COMMAND_TOKEN:token}});
+  t.after(()=>{if(child.exitCode===null)child.kill();});
+  await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
+  const query={ownerPid:process.pid,executable:path.basename(process.execPath),token};
+  const matches=await inspectOrphanProcesses(query);assert.ok(matches.some(row=>row.pid===child.pid));
+  await new Promise(resolve=>{child.once('exit',resolve);child.kill();});
+  const after=await inspectOrphanProcesses(query);assert.ok(!after.some(row=>row.pid===child.pid));
+});
+
 test('local retention releases only older confirmed snapshots per module and preserves pending data plus durable metadata',async t=>{
   const f=fixture(t);f.config.dataVersion.localHistoryCount=1;const first=f.event('first'),sales=f.event('sales-only','sales');let release,started;const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>started=resolve);
   const w=f.worker({...success,async commit(event){if(event.id==='second'){started();await gate;f.event('pending-after-confirmation');}return {changeset:'cs:42'};}});

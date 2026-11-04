@@ -33,6 +33,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Verify Linux data-version recovery
+        run: node --test tests/web-data-version-worker.test.mjs
       - name: Prepare and accept Linux release
         shell: bash
         run: |
