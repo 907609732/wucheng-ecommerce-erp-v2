@@ -297,6 +297,12 @@ test('production Linux orphan inspection finds a tagged CLI and confirms its exi
   const after=await inspectOrphanProcesses(query);assert.ok(!after.some(row=>row.pid===child.pid));
 });
 
+test('Linux command runner tags its spawned CLI with the durable lease token', {skip:process.platform!=='linux'}, async t=>{
+  const f=fixture(t);
+  const result=await runCm(process.execPath,['-e','process.stdout.write(process.env.LINGTU_UVCS_COMMAND_TOKEN??"")'],{cwd:f.config.dataVersion.workspace,timeout:5000});
+  assert.match(result.stdout,/^[a-f0-9-]{36}$/i);
+});
+
 test('local retention releases only older confirmed snapshots per module and preserves pending data plus durable metadata',async t=>{
   const f=fixture(t);f.config.dataVersion.localHistoryCount=1;const first=f.event('first'),sales=f.event('sales-only','sales');let release,started;const gate=new Promise(resolve=>release=resolve),entered=new Promise(resolve=>started=resolve);
   const w=f.worker({...success,async commit(event){if(event.id==='second'){started();await gate;f.event('pending-after-confirmation');}return {changeset:'cs:42'};}});

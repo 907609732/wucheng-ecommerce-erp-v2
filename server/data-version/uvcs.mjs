@@ -85,11 +85,42 @@ async function acquireCommandGuard(workspace) {
   });
 }
 
-// A parent can die between CreateProcess and persisting child.pid. Windows keeps
-// the original PPID, so inspect the exact executable under that deceased owner.
-// An unavailable inspector or a non-Windows unknown PID fails closed.
-export async function inspectOrphanProcesses({ownerPid,executable}) {
-  if(process.platform!=='win32' || !Number.isSafeInteger(ownerPid) || ownerPid<1 || !/^[a-zA-Z0-9_.-]+$/.test(executable))throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
+// A parent can die after spawning cm but before persisting child.pid. Linux
+// reparents the child, so the original PPID cannot identify it. The random
+// lease token is added to cm's initial environment and checked through /proc.
+function inspectLinuxOrphans(executable,token) {
+  if(!/^[a-f0-9-]{36}$/i.test(token??'') || typeof process.getuid!=='function')throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
+  const matches=[],uid=process.getuid(),marker=Buffer.from(`LINGTU_UVCS_COMMAND_TOKEN=${token}`);
+  const vanished=error=>error.code==='ENOENT'||error.code==='ESRCH';
+  try {
+    for(const entry of fs.readdirSync('/proc',{withFileTypes:true})) {
+      if(!entry.isDirectory() || !/^\d+$/.test(entry.name))continue;
+      const pid=Number(entry.name),root=`/proc/${entry.name}`;
+      let comm;
+      try{comm=fs.readFileSync(`${root}/comm`,'utf8').trim();}catch(error){if(vanished(error))continue;throw error;}
+      if(comm!==executable.slice(0,15))continue;
+      let status;
+      try{status=fs.readFileSync(`${root}/status`,'utf8');}catch(error){if(vanished(error))continue;throw error;}
+      const processUid=Number(status.match(/^Uid:\s+(\d+)/m)?.[1]);
+      if(!Number.isSafeInteger(processUid))throw Error('unknown process UID');
+      if(processUid!==uid)continue;
+      let actual;
+      try{actual=path.basename(fs.readlinkSync(`${root}/exe`).replace(/ \(deleted\)$/,''));}catch(error){if(vanished(error))continue;throw error;}
+      if(actual!==executable)continue;
+      let environ;
+      try{environ=fs.readFileSync(`${root}/environ`);}catch(error){if(vanished(error))continue;throw error;}
+      if(environ.toString('utf8').split('\0').some(value=>Buffer.from(value).equals(marker)))matches.push({pid});
+    }
+    return matches;
+  }catch{throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');}
+}
+
+// Windows keeps the original PPID, so inspect the exact executable under that
+// deceased owner. An unavailable inspector or unknown process fails closed.
+export async function inspectOrphanProcesses({ownerPid,executable,token}) {
+  if(!Number.isSafeInteger(ownerPid) || ownerPid<1 || !/^[a-zA-Z0-9_.-]+$/.test(executable))throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
+  if(process.platform==='linux')return inspectLinuxOrphans(executable,token);
+  if(process.platform!=='win32')throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
   const name=/\.exe$/i.test(executable)?executable:executable+'.exe';
   const script=`$ErrorActionPreference='Stop'; $items=@(Get-CimInstance Win32_Process -Filter "ParentProcessId = ${ownerPid} AND Name = '${name}'" | Select-Object ProcessId); ConvertTo-Json -Compress -InputObject $items`;
   const powershell=path.join(process.env.SystemRoot??'C:/Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
@@ -119,7 +150,7 @@ export async function runCm(file, args, options) {
     assertNoLinks(leaseFile);if(!fs.existsSync(leaseFile))return null;
     try {
       const record=JSON.parse(fs.readFileSync(leaseFile,'utf8'));
-      if(record.schemaVersion!==1 || !/^[a-f0-9-]{36}$/i.test(record.token) || !Number.isSafeInteger(record.ownerPid) || record.ownerPid<1 || !(record.childPid===null || Number.isSafeInteger(record.childPid)&&record.childPid>0) || !Number.isFinite(Date.parse(record.startedAt)) || !/^[a-zA-Z0-9_.-]+$/.test(record.executable))throw Error();
+      if(record.schemaVersion!==1 || !/^[a-f0-9-]{36}$/i.test(record.token) || !Number.isSafeInteger(record.ownerPid) || record.ownerPid<1 || !(record.childPid===null || Number.isSafeInteger(record.childPid)&&record.childPid>0) || !Number.isFinite(Date.parse(record.startedAt)) || !/^[a-zA-Z0-9_.-]+$/.test(record.executable) || !(record.markerVersion===undefined || record.markerVersion===1))throw Error();
       return record;
     }catch{throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');}
   };
@@ -129,15 +160,16 @@ export async function runCm(file, args, options) {
     if(previous) {
       if(processAlive(previous.ownerPid) || previous.childPid!==null&&processAlive(previous.childPid))throw fail('UVCS_COMMAND_BUSY');
       if(previous.childPid===null) {
+        if(process.platform==='linux' && previous.markerVersion!==1 && !options.inspectOrphanProcesses)throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
         let children;
-        try{children=await (options.inspectOrphanProcesses??inspectOrphanProcesses)({ownerPid:previous.ownerPid,executable:previous.executable});}
+        try{children=await (options.inspectOrphanProcesses??inspectOrphanProcesses)({ownerPid:previous.ownerPid,executable:previous.executable,token:previous.token});}
         catch{throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');}
         if(!Array.isArray(children) || children.some(child=>!Number.isSafeInteger(child.pid)||child.pid<1))throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
         if(children.length)throw fail('UVCS_COMMAND_BUSY');
       }
       fs.unlinkSync(leaseFile);syncLeaseDirectory(path.dirname(leaseFile));
     }
-    lease={schemaVersion:1,token:randomUUID(),ownerPid:process.pid,childPid:null,startedAt:new Date().toISOString(),executable:path.basename(file)};
+    lease={schemaVersion:1,token:randomUUID(),ownerPid:process.pid,childPid:null,startedAt:new Date().toISOString(),executable:path.basename(file),...(process.platform==='linux'?{markerVersion:1}:{})};
     if(!/^[a-zA-Z0-9_.-]+$/.test(lease.executable))throw fail('UVCS_COMMAND_LEASE_UNVERIFIED');
     durableJson(leaseFile,lease);
   }catch(error){await releaseGuard();throw error.code?.startsWith('UVCS_')?error:fail('UVCS_COMMAND_LEASE_UNVERIFIED');}
@@ -154,7 +186,7 @@ export async function runCm(file, args, options) {
       // must verify this exact child has exited, and never kill an unrelated PID.
       killTimer=setTimeout(()=>settle(terminalError),options.killGraceMs??5000);
     };
-    try {child=(options.spawnProcess??spawn)(file,args,{cwd:workspace,shell:false,windowsHide:true,stdio:[options.input===undefined?'ignore':'pipe','pipe','pipe']});}
+    try {child=(options.spawnProcess??spawn)(file,args,{cwd:workspace,shell:false,windowsHide:true,stdio:[options.input===undefined?'ignore':'pipe','pipe','pipe'],...(process.platform==='linux'?{env:{...process.env,LINGTU_UVCS_COMMAND_TOKEN:lease.token}}:{})});}
     catch {try{clearLease();}catch{}settle(fail('UVCS_UNAVAILABLE'));return;}
     child.on('error',()=>{terminalError??=fail('UVCS_UNAVAILABLE');});
     child.on('close',async code=>{
