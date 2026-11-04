@@ -92,10 +92,23 @@ export async function browserOperation(page,arg){
   await go(tasks);await page.getByRole('button',{name:'查询',exact:true}).waitFor({state:'visible'});await settled();
   for(let p=1;p<task.page;p++){await page.getByRole('button',{name:/^下一页/}).click();await settled();}
   const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:task.id,exact:true})});
-  let listener,timer;const ctx=page.context(),downloadPromise=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('下载未完成，请重新连接后继续')),45000);listener=d=>{clearTimeout(timer);resolve(d);};});downloadPromise.catch(()=>{});
-  const attach=p=>p.on('download',listener);for(const p of ctx.pages())attach(p);ctx.on('page',attach);
-  try{await row.getByRole('button',{name:'下载',exact:true}).click();const download=await downloadPromise;await download.saveAs(arg.target);if(await download.failure())throw Error('文件下载失败');return {filename:download.suggestedFilename()};}
-  finally{clearTimeout(timer);ctx.off('page',attach);for(const p of ctx.pages())p.off('download',listener);}
+  // 平台点"下载"是用 window.open 打开一个已签名的 OSS 地址，弹窗一加载就变成
+  // 浏览器下载，在 CDP/扩展连接下不会再抛 Playwright download 事件。先截获真实
+  // 地址，交给服务端直接取回；download 事件只作为兼容旧页面的兜底。
+  await page.evaluate(()=>{const open=window.open;window.__ltOpen=window.__ltOpen||open;window.__ltDownloadUrl='';window.open=function(url,...rest){try{window.__ltDownloadUrl=String(url||'')}catch{}return open.apply(this,[url,...rest]);};});
+  let listener,download=null;const ctx=page.context();listener=d=>{download=d;};for(const p of ctx.pages())p.on('download',listener);
+  const attach=p=>p.on('download',listener);ctx.on('page',attach);
+  try{
+   await row.getByRole('button',{name:'下载',exact:true}).click();
+   const deadline=Date.now()+30000;
+   while(true){
+    const url=await page.evaluate(()=>window.__ltDownloadUrl||'');
+    if(url){let name='';try{name=decodeURIComponent(url.split('/').pop().split('?')[0]);}catch{}return {url,filename:name||task.name+'.zip'};}
+    if(download){await download.saveAs(arg.target);if(await download.failure())throw Error('文件下载失败');return {filename:download.suggestedFilename()};}
+    if(Date.now()>=deadline)throw Error('下载未完成，请重新连接后继续');
+    await page.waitForTimeout(400);
+   }
+  }finally{ctx.off('page',attach);for(const p of ctx.pages())p.off('download',listener);await page.evaluate(()=>{if(window.__ltOpen){window.open=window.__ltOpen;delete window.__ltOpen;}}).catch(()=>{});}
  }
  throw Error('不支持的浏览器操作');
 }
