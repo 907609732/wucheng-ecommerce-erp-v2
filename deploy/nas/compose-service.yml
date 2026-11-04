@@ -1,23 +1,9 @@
 services:
-  tailscale:
-    image: ghcr.io/tailscale/tailscale:latest
-    hostname: wucheng-erp-nas
-    environment:
-      TS_HOSTNAME: wucheng-erp-nas
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_SERVE_CONFIG: /config/serve.json
-      TS_AUTH_ONCE: "true"
-      TS_USERSPACE: "true"
-    volumes:
-      - ./tailscale-state:/var/lib/tailscale
-      - ./tailscale-config:/config:ro
-    restart: unless-stopped
-
   erp:
     image: __ERP_IMAGE__
-    network_mode: service:tailscale
-    depends_on:
-      - tailscale
+    # The gateway binds 127.0.0.1; host networking lets the NAS Tailscale Serve
+    # proxy reach it without exposing a Docker port to the LAN.
+    network_mode: host
     volumes:
       - ./config.json:/var/lib/wucheng-erp/config.json:ro
       - ./state:/var/lib/wucheng-erp/state

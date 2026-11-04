@@ -33,6 +33,6 @@ NAS 的 `docker.fnnas.com` 镜像代理曾对 `node:24-bookworm-slim` 返回 401
 - 飞牛网页从 SSD 的 tar 文件导入镜像返回“参数错误:失败出错”，纯英文路径复试仍失败；改用“从 URL 添加”后，GHCR 镜像已成功拉取到 NAS。
 - 飞牛不允许在已有 Compose 项目的子目录创建另一个项目。独立团队目录 `wucheng-erp-acceptance` 中的 `docker-compose.yml` 已启动 `wucheng-erp-acceptance`，容器退出码为 0，日志中的采购、销售、总览三模块合成账本验收为 `"ok":true`。
 - 独立团队目录 `wucheng-erp-runtime-test/nas-runtime-test-41788288931` 存放仅含合成账本的常驻测试配置。`wucheng-erp-runtime-test` 的 ERP 和 Tailscale 容器均已运行；ERP 本机健康端点为 HTTP 200，三个 SQLite 文件的 `PRAGMA integrity_check` 均为 `ok`。
-- Tailscale 新节点仍待用户在官方登录页授权；尚未完成 Windows 客户端 HTTPS 验收。正式账本、附件与网关身份尚未迁移，Windows 正式写入口仍在运行。预迁移备份在普通权限下被 Windows LocalSystem 服务的维护管道拒绝，未创建备份目录；后续需通过管理员权限运行并校验。
+- 原侧车 Tailscale 容器的交互登录在约一分钟后超时并重启，授权过的设备没有成为当前运行实例；Windows HTTPS 握手失败。随后确认飞牛系统自带的 `wucheng-fnevo` Tailscale 节点已经在线（`100.125.50.16`）。按用户要求改为复用这个节点；侧车测试项目保留到原生入口切换完成，再停止。正式账本、附件与网关身份尚未迁移，Windows 正式写入口仍在运行。预迁移备份在普通权限下被 Windows LocalSystem 服务的维护管道拒绝，未创建备份目录；后续需通过管理员权限运行并校验。
 
-验收完成后，使用同次产物中的 `compose-service.yml` 放在 SSD 团队目录下独立的 `runtime` 文件夹，`serve.json` 放在 `runtime/tailscale-config/serve.json`。该配置不映射宿主机端口，ERP 只监听与 Tailscale 容器共享的 `127.0.0.1`。Tailscale 状态写在 `runtime/tailscale-state`，首次登录可在容器日志里取得交互授权链接；不要把授权密钥写进 Compose。`config-test.example.json` 仅用于隔离账本测试，必须先替换 HTTPS 域名并准备三个测试 SQLite 文件；正式迁移前还需启用数据版本和备份。
+下一步使用同次构建产物中的 `compose-service.yml` 在 SSD 独立目录部署 ERP。该配置只启动 ERP，使用 host 网络；网关继续仅绑定 NAS 的 `127.0.0.1:28430`，不映射 LAN 端口。先检查飞牛原生 Tailscale 已有 Serve 配置，再添加独立的 HTTPS 端口，将其代理到 `http://127.0.0.1:28430`，并核对实际注入的 `Tailscale-User-Login` 身份头。`config-test.example.json` 用于隔离账本测试，须将 `publicOrigin` 改为原生节点的 HTTPS 地址，并准备三个测试 SQLite 文件；正式迁移前还需启用数据版本和备份。历史 `serve.json` 属于侧车方案，原生方案不使用它。
