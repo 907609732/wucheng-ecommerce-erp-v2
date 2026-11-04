@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   image:
@@ -42,18 +43,28 @@ jobs:
           node --input-type=module -e "import {verifyRelease} from './server/release.mjs'; const m=verifyRelease(process.env.RUNNER_TEMP+'/nas-release'); if(!m.acceptance?.ok)process.exit(1); console.log(JSON.stringify({accepted:m.accepted,files:m.files.length,acceptance:m.acceptance}));"
       - name: Build and smoke-test image
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           image="wucheng-erp:nas-${GITHUB_SHA}"
-          docker build --platform linux/amd64 --file deploy/nas/Dockerfile.prebuilt --tag "$image" "$RUNNER_TEMP/nas-release"
+          registry_image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wucheng-erp-nas:nas-${GITHUB_SHA}"
+          docker build --platform linux/amd64 --file deploy/nas/Dockerfile.prebuilt --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --tag "$image" --tag "$registry_image" "$RUNNER_TEMP/nas-release"
           docker run --rm --network none "$image" node --input-type=module -e "import {verifyRelease} from './server/release.mjs'; const m=verifyRelease('/srv/erp'); if(!m.acceptance?.ok)process.exit(1); console.log('image release verified');"
           mkdir -p dist
           docker save --output dist/wucheng-erp-linux-amd64.tar "$image"
           sha256sum dist/wucheng-erp-linux-amd64.tar > dist/SHA256SUMS.txt
+          docker image rm "$image" "$registry_image"
+          docker load --input dist/wucheng-erp-linux-amd64.tar
+          docker run --rm --network none "$image" node --input-type=module -e "import {verifyRelease} from './server/release.mjs'; const m=verifyRelease('/srv/erp'); if(!m.acceptance?.ok)process.exit(1); console.log('saved image release verified');"
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker tag "$image" "$registry_image"
+          docker push "$registry_image"
           printf '%s\n' "$image" > dist/IMAGE.txt
+          printf '%s\n' "$registry_image" > dist/REGISTRY-IMAGE.txt
           printf '%s\n' "commit=${GITHUB_SHA}" "run_id=${GITHUB_RUN_ID}" "platform=linux/amd64" > dist/BUILD-INFO.txt
-          sed "s|__ERP_IMAGE__|$image|g" deploy/nas/compose-acceptance.yml > dist/compose-acceptance.yml
-          sed "s|__ERP_IMAGE__|$image|g" deploy/nas/compose-service.yml > dist/compose-service.yml
+          sed "s|__ERP_IMAGE__|$registry_image|g" deploy/nas/compose-acceptance.yml > dist/compose-acceptance.yml
+          sed "s|__ERP_IMAGE__|$registry_image|g" deploy/nas/compose-service.yml > dist/compose-service.yml
           docker compose -f dist/compose-acceptance.yml config --quiet
           docker compose -f dist/compose-service.yml config --quiet
       - uses: actions/upload-artifact@v4

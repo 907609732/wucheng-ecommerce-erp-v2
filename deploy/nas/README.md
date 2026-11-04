@@ -19,7 +19,7 @@ NAS 固态盘团队目录 `五成ERP-NAS` 当前布局：
         server/
 ```
 
-在 GitHub Actions 的 `NAS Linux image` 同次构建产物中下载镜像包、`SHA256SUMS.txt`、`IMAGE.txt` 和两份已写入提交号的 Compose 文件。先核对 SHA-256，再在飞牛 Docker 的“本地镜像”导入 `wucheng-erp-linux-amd64.tar`。将产物中的 `compose-acceptance.yml` 作为 `acceptance/docker-compose.yml` 创建 Compose 项目。该任务不映射端口、不挂载正式数据，结束后应显示成功退出码和 `"ok":true` 的三模块验收结果。
+在 GitHub Actions 的 `NAS Linux image` 同次构建产物中取得 `REGISTRY-IMAGE.txt` 和两份已写入提交号的 Compose 文件。镜像由该工作流发布到 GHCR；飞牛 Docker 可直接按 `REGISTRY-IMAGE.txt` 拉取，Compose 也使用同一个不可变标签。若仓库拉取不可用，产物仍有 `wucheng-erp-linux-amd64.tar`、`SHA256SUMS.txt` 和 `IMAGE.txt`，先核对 SHA-256，再尝试在飞牛 Docker 的“本地镜像”导入。将产物中的 `compose-acceptance.yml` 作为 `acceptance/docker-compose.yml` 创建 Compose 项目。该任务不映射端口、不挂载正式数据，结束后应显示成功退出码和 `"ok":true` 的三模块验收结果。
 
 NAS 的 `docker.fnnas.com` 镜像代理曾对 `node:24-bookworm-slim` 返回 401。当前改为在 GitHub Linux runner 上完成依赖安装、合成账本验收和镜像构建，NAS 不再安装 npm 依赖。镜像基底使用 Docker 官方 Node 镜像在 Amazon ECR Public 的地址。采购台的 SheetJS 固定版本来自独立 CDN，GitHub 构建仍依据锁文件检查完整性。NAS 上原有源码构建目录和缓存包仅供回溯，不作为新部署入口。
 
