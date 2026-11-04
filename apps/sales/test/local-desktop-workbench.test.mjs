@@ -18,6 +18,16 @@ for(const [module,install] of [['sales',sales],['overview',overview]])test(modul
  const app=object(),router=object();app.use=fn=>{middleware=fn;};
  const service=install(app,router,{module,root,dataDir:root,state:{}});
  app.get('/api/bootstrap',()=>{});app.post('/api/save',()=>{});app.post('/api/restore',()=>{});router.post('/workbench/migration/prepare',()=>{});
+ if(module==='overview'){
+  app.post('/api/cainiao/connection',()=>{});
+  app.post('/api/cainiao/authorization',()=>{});
+  app.post('/api/cainiao/download-jobs/:id/open-folder',()=>{});
+  assert.deepEqual(service.operations.filter(o=>o.method==='POST'&&o.path.startsWith('/api/cainiao/')).map(o=>[o.path,o.remote,o.uiOnly]),[
+   ['/api/cainiao/connection',true,true],
+   ['/api/cainiao/authorization',false,true],
+   ['/api/cainiao/download-jobs/:id/open-folder',false,true],
+  ]);
+ }
  function request(url='/api/bootstrap',claims={},headers={},method='GET'){
   const now=Date.now(),actor={v:1,id:'windows:test-user',login:'test-user',role:'editor',channel:'ui',modules:[module],module,canRunTasks:true,sessionId:'session',requestId:'request',issuedAt:now,expiresAt:now+30000,method,path:url,localDesktop:true,uiOrigin:'http://127.0.0.1:19999',...claims};
   const q={method,path:url,originalUrl:url,headers:{host:'127.0.0.1:19999',...signWorkbenchActor(actor,service.key),...headers},socket:{remoteAddress:'127.0.0.1',localPort:19999}};

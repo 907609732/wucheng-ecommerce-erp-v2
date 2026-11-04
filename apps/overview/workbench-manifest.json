@@ -132,7 +132,7 @@
       "method": "POST",
       "path": "/api/cainiao/connection",
       "kind": "write",
-      "remote": false,
+      "remote": true,
       "uiOnly": true,
       "operationId": "overview:POST:/api/cainiao/connection"
     },
