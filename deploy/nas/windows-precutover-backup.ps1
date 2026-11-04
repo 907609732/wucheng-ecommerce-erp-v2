@@ -5,11 +5,13 @@
 
 $ErrorActionPreference = 'Stop'
 $statusPath = 'E:\WuchengERP\backups\nas-precutover-run-status.txt'
+New-Item -ItemType Directory -Path (Split-Path -Parent $statusPath) -Force | Out-Null
 Set-Content -LiteralPath $statusPath -Value 'started' -Encoding UTF8
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Set-Content -LiteralPath $statusPath -Value 'requires-administrator' -Encoding UTF8
     throw '请以管理员身份运行；备份需要暂时停止并重新启动 WuchengERPWeb 服务。'
 }
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw 'ERP 配置文件不存在。' }
