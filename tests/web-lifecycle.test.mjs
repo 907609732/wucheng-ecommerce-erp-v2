@@ -89,3 +89,45 @@ test("a restarted host recovers only a verified child belonging to its persisted
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+test("进程归属记录只在内容变化时重写，避免每个资源请求都改同一个文件", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "web-ownership-")),
+    config = developmentConfig({ stateDir: dir, port: await availablePortBlock() }),
+    services = await createSourceServices(config);
+  try {
+    const cap = await services.ensure("sales");
+    const file = path.join(dir, "web-ownership.json");
+    const first = fs.statSync(file);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).modules.sales.pid, cap.pid);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    // A second request for the same desk must not touch the file at all.
+    await services.ensure("sales");
+    await services.ensure("sales");
+    const second = fs.statSync(file);
+    assert.equal(second.mtimeMs, first.mtimeMs);
+    assert.equal(second.size, first.size);
+  } finally {
+    await services.stopOwned();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+test("归属记录写入失败只记日志，不让业务台启动失败", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "web-ownership-fail-")),
+    config = developmentConfig({ stateDir: dir, port: await availablePortBlock() }),
+    services = await createSourceServices(config);
+  const file = path.join(dir, "web-ownership.json");
+  try {
+    // A directory at the target path makes every rename fail (EPERM/EISDIR).
+    fs.rmSync(file, { recursive: true, force: true });
+    fs.mkdirSync(file);
+    const cap = await services.ensure("sales");
+    assert.ok(cap?.url, "写入失败不应阻止业务台启动");
+    assert.ok(await services.capabilities("sales"), "业务台应保持可访问");
+    // Recovery: once the path is writable again the next request persists it.
+    fs.rmSync(file, { recursive: true, force: true });
+    await services.ensure("sales");
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).modules.sales.pid, cap.pid);
+  } finally {
+    await services.stopOwned();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

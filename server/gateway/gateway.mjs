@@ -11,6 +11,7 @@ import {WORKBENCH_MODULES,signWorkbenchActor} from './actor.mjs';
 import {loadOperationManifest,matchOperation,publicManifest,safeRequestPath} from './manifest.mjs';
 import {validatePolicy} from './policy.mjs';
 import {withCompanyAccess} from './company-access.mjs';
+import {silentLogger} from '../log.mjs';
 
 const COOKIE='__Host-workbench-session';
 const API='/api/workbench/v1';
@@ -49,8 +50,9 @@ async function spoolBody(request,dir,maxBytes){
 async function boundedResponse(response,limit){let size=0;const chunks=[];for await(const chunk of response.body||[]){size+=chunk.length;if(size>limit)throw fail(502,'MODULE_RESPONSE_TOO_LARGE','模块返回结果超过允许大小，请使用文件下载接口');chunks.push(Buffer.from(chunk));}return Buffer.concat(chunks);}
 
 export async function createWorkbenchGateway(options={}) {
-  const {services,storeDir,getManifest,registerRoutes,logger=false,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
+  const {services,storeDir,getManifest,registerRoutes,logger=null,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
   if(!services||!storeDir)throw Error('缺少工作台服务注册表或存储目录');
+  const log=(logger||silentLogger).child('gateway');
   const localDevelopment=options.localDevelopment===true;
   if(localDevelopment&&!/^http:\/\/127\.0\.0\.1:\d+$/.test(options.publicOrigin||''))throw Error('开发入口必须是本机 HTTP 地址');
   const publicOrigin=localDevelopment?new URL(options.publicOrigin).origin:validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
@@ -64,12 +66,38 @@ export async function createWorkbenchGateway(options={}) {
   const spoolDir=path.join(storeDir,'requests');fs.mkdirSync(spoolDir,{recursive:true,mode:0o700});
   // Request spools contain uploads; clean only our own private leftover request files.
   for(const name of fs.readdirSync(spoolDir))if(/^[a-f0-9-]{36}\.request$/.test(name))fs.rmSync(path.join(spoolDir,name),{force:true});
-  const app=Fastify({logger,bodyLimit:maxUploadBytes,requestTimeout:120000,trustProxy:false,logController:new LogController({disableRequestLogging:true})});
+  const app=Fastify({logger:false,bodyLimit:maxUploadBytes,requestTimeout:120000,trustProxy:false,logController:new LogController({disableRequestLogging:true})});
   await app.register(cookie);
   await app.register(replyFrom,{disableRequestLogging:true,retriesCount:0,undici:{connections:32,pipelining:1}});
   // JSON keeps Fastify's strict parser for business and migration hooks; binary/multipart uploads stream to a bounded private spool.
   app.addContentTypeParser('*',(req,payload,done)=>done(null,payload));
-  app.setErrorHandler((error,request,reply)=>{if(reply.sent)return;reply.code(error.statusCode||500).send({ok:false,code:error.code||'WORKBENCH_ERROR',error:error.workbenchPublic||error.statusCode&&error.statusCode<500?error.message:'工作台请求失败，请检查本机服务状态',requestId:request.id});});
+  // Request log: failures always, normal traffic only in debug, slow pages always.
+  const counters={requests:0,failures:0,slow:0,maxMs:0};
+  app.addHook('onRequest',async request=>{request.logStartedAt=process.hrtime.bigint();});
+  app.addHook('onResponse',async(request,reply)=>{
+    // The console's own health poll is not user traffic; keep it out of the log.
+    if(request.raw.url==='/api/workbench/v1/health')return;
+    const started=request.logStartedAt;
+    const ms=started?Number(process.hrtime.bigint()-started)/1e6:0;
+    counters.requests++;if(reply.statusCode>=500)counters.failures++;if(ms>=1500)counters.slow++;if(ms>counters.maxMs)counters.maxMs=ms;
+    const where=request.method+' '+(request.raw.url||'');
+    const detail={status:reply.statusCode,ms:Math.round(ms),requestId:request.id};
+    if(reply.statusCode>=500)log.error(where,detail);
+    else if(reply.statusCode>=400){if(request.raw.url!=='/favicon.ico')log.warn(where,detail);}
+    else if(ms>=1500)log.info('慢请求 '+where,detail);
+    else log.debug(where,detail);
+  });
+  const summary=setInterval(()=>{
+    if(!counters.requests)return;
+    log.info('最近一分钟请求',{requests:counters.requests,failures:counters.failures,slow:counters.slow,maxMs:Math.round(counters.maxMs)});
+    counters.requests=0;counters.failures=0;counters.slow=0;counters.maxMs=0;
+  },60000);
+  summary.unref();
+  app.setErrorHandler((error,request,reply)=>{
+    if(reply.sent)return;
+    if(!error.workbenchPublic&&(error.statusCode||500)>=500)log.error('请求处理失败：'+error.message,{requestId:request.id,method:request.method,url:request.raw.url,code:error.code,stack:log.enabled('debug')?error.stack:undefined});
+    reply.code(error.statusCode||500).send({ok:false,code:error.code||'WORKBENCH_ERROR',error:error.workbenchPublic||error.statusCode&&error.statusCode<500?error.message:'工作台请求失败，请检查本机服务状态',requestId:request.id});
+  });
   function loginOf(request){
     if(!loopback(request.ip))throw fail(403,'LOOPBACK_REQUIRED','只能由本机 Tailscale Serve 转发');
     if(request.headers.host!==publicHost)throw fail(421,'INVALID_HOST','入口地址与本机配置不一致');
@@ -95,17 +123,21 @@ export async function createWorkbenchGateway(options={}) {
   const writeAudit=entry=>store.audit(entry);
   const bindModule=(actor,id,cap)=>store.bindModule(actor.sessionId,id,cap?.dataSetId||cap?.workbench?.dataSetId||cap?.state?.workbench?.dataSetId||cap?.capabilities?.workbench?.dataSetId);
   async function metadata(actor){return Promise.all(actor.modules.map(async id=>{try{const cap=await services.capabilities(id),c=services.config(id),workbench=cap?.workbench||cap?.state?.workbench||cap?.capabilities?.workbench;return {id,version:cap?.version||c.version||null,status:cap?.url?(workbench?.protocolVersion===1?'running':'incompatible'):cap?.installed===false?'missing':'stopped',dataSetId:cap?.dataSetId||workbench?.dataSetId||null,revision:cap?.revision??workbench?.revision??null};}catch{return {id,status:'unavailable',version:null,dataSetId:null,revision:null};}}));}
-  async function backend(id,{start=true}={}){
+  async function backend(id,{start=true,requestId,target}={}){
     if(!moduleIds.includes(id))throw fail(404,'MODULE_UNKNOWN','未登记的模块');
     const config=services.config(id);let cap;
     if(start&&config.maintenance)throw fail(503,'MODULE_MAINTENANCE','模块处于维护或恢复窗口，请稍后重试');
+    const started=Date.now();
     try{cap=start?await services.ensure(id):await services.capabilities(id);}
     catch(error){
+      // Keep the underlying reason: the generic 503 hides EPERM, timeouts and ownership races.
+      log.error('模块 '+id+' 未就绪：'+error.message,{module:id,code:error.code,cause:error.cause?.code,ms:Date.now()-started,requestId,target,phase:'ensure'});
       if(error.code==='EADDRINUSE'||/端口/.test(error.message))throw fail(503,'MODULE_PORT_CONFLICT','模块端口已有其他服务占用，请在主机设置中核对');
       if(/版本|旧版/.test(error.message))throw fail(503,'MODULE_VERSION_MISMATCH','运行服务与已安装模块版本不同，请在主机更新并重新打开');
       if(/账本|目录/.test(error.message))throw fail(503,'MODULE_DATA_UNAVAILABLE','模块原数据位置不一致或账本不可用，已阻止创建空账本');
       throw fail(503,'MODULE_UNAVAILABLE','模块尚未就绪，请由主机管理员检查安装与服务状态');
     }
+    if(start&&Date.now()-started>=200)log.info('模块就绪较慢',{module:id,pid:cap?.pid,ms:Date.now()-started,requestId});
     if(!cap?.url&&start)cap=await services.capabilities(id);
     if(!cap?.url)throw fail(503,'MODULE_NOT_RUNNING','模块未安装或尚未就绪，请在服务器本机管理');
     const url=localUrl(cap.url),integrationKey=readKey(config,config.keyFile||'.integration-key'),actorKey=readKey(config,'.workbench-key');
@@ -129,7 +161,7 @@ export async function createWorkbenchGateway(options={}) {
     if(!safeRequestPath(request.raw.url))throw fail(400,'UNSAFE_PATH','接口路径无效');
     const urlQuery=new URL(request.raw.url,publicOrigin).searchParams;
     if([...urlQuery.keys()].some(k=>/^(?:path|filePath|directory|root|database|db|sql|query_sql)$/i.test(k)))throw fail(400,'UNSAFE_FILE_QUERY','远程文件访问必须使用已登记文件标识');
-    const upstream=await backend(id);bindModule(actor,id,upstream.cap);const raw=request.params['*']||'',query=request.raw.url.includes('?')?request.raw.url.slice(request.raw.url.indexOf('?')):'';
+    const upstream=await backend(id,{requestId:request.id,target:request.raw.url});bindModule(actor,id,upstream.cap);const raw=request.params['*']||'',query=request.raw.url.includes('?')?request.raw.url.slice(request.raw.url.indexOf('?')):'';
     let requestPath='/'+raw;
     if(ui&&!requestPath.startsWith('/api/'))requestPath=requestPath==='/'?upstream.manifest.ui.indexPath:(upstream.manifest.ui.prefix||'')+requestPath;
     const matched=matchOperation(upstream.manifest,request.method,requestPath+query);
@@ -173,7 +205,7 @@ export async function createWorkbenchGateway(options={}) {
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));
   app.get(API+'/modules/:id/connection',{preHandler:requireSession},async request=>{
     const actor=request.workbenchActor,id=request.params.id;
-    const {cap}=await backend(id),workbench=cap.workbench||cap.state?.workbench||cap.capabilities?.workbench;bindModule(actor,id,cap);
+    const {cap}=await backend(id,{requestId:request.id,target:request.raw.url}),workbench=cap.workbench||cap.state?.workbench||cap.capabilities?.workbench;bindModule(actor,id,cap);
     return {ok:true,id,status:'running',version:cap.version||null,dataSetId:cap.dataSetId||workbench?.dataSetId||null,revision:cap.revision??workbench?.revision??null,protocolVersion:1};
   });
   app.get(API+'/operations/:idempotencyKey',{preHandler:requireSession},async(request,reply)=>{
@@ -194,7 +226,7 @@ export async function createWorkbenchGateway(options={}) {
   app.route({method:methods,url:'/apps/:id/*',handler:(req,reply)=>proxy(req,reply,true)});
   const context={requireSession,requireAdmin,resolveActor,writeAudit,operationStore:store,storeDir,serverId:store.serverId,dataSetId:store.dataSetId,publicOrigin};
   if(registerRoutes)await registerRoutes(app,context);
-  app.addHook('onClose',async()=>store.close());
+  app.addHook('onClose',async()=>{clearInterval(summary);store.close();});
   return {app,...context,async start(){try{return await app.listen({host,port});}catch(error){await app.close();throw error;}},async stop(){await app.close();}};
 }
 

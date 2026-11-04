@@ -14,14 +14,19 @@ const root = path.resolve(import.meta.dirname, ".."),
 function args(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
-    if (
-      !argv[i].startsWith("--") ||
-      !argv[i + 1] ||
-      argv[i + 1].startsWith("--")
-    )
-      throw Error("参数必须为 --名称 值");
+    if (!argv[i].startsWith("--")) throw Error("参数必须为 --名称 值");
     const name = argv[i].slice(2);
-    if (!["config", "candidate", "output", "backup", "target"].includes(name))
+    if (name === "debug") {
+      options.debug = true;
+      continue;
+    }
+    if (!argv[i + 1] || argv[i + 1].startsWith("--"))
+      throw Error("参数必须为 --名称 值");
+    if (
+      !["config", "candidate", "output", "backup", "target", "log-level"].includes(
+        name,
+      )
+    )
       throw Error("未知参数：" + name);
     options[name] = argv[++i];
   }
@@ -267,13 +272,20 @@ export async function main(argv = process.argv.slice(2)) {
     }
   }
   checkSource(root);
-  const runtime = await createWebRuntime(config);
+  const logLevel = o["log-level"] || (o.debug ? "debug" : undefined);
+  const logFile = file
+    ? path.join(path.dirname(path.resolve(file)), "logs", "web.log")
+    : undefined;
+  const runtime = await createWebRuntime(config, { logLevel, logFile });
   try {
     await runtime.start();
   } catch (e) {
     await runtime.stop();
     throw e;
   }
+  const logger = runtime.logger;
+  logger?.info("访问地址 " + config.publicOrigin);
+  logger?.info("日志文件 " + logger.file + "（级别 " + logger.level + "）");
   console.log(
     JSON.stringify({
       ok: true,
