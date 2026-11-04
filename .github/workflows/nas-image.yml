@@ -53,6 +53,7 @@ jobs:
           registry_image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wucheng-erp-nas:nas-${GITHUB_SHA}"
           docker build --platform linux/amd64 --file deploy/nas/Dockerfile.prebuilt --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --tag "$image" --tag "$registry_image" "$RUNNER_TEMP/nas-release"
           docker run --rm --network none "$image" node --input-type=module -e "import {verifyRelease} from './server/release.mjs'; const m=verifyRelease('/srv/erp'); if(!m.acceptance?.ok)process.exit(1); console.log('image release verified');"
+          docker run --rm --network none "$image" sh -c 'command -v cm'
           mkdir -p dist
           docker save --output dist/wucheng-erp-linux-amd64.tar "$image"
           sha256sum dist/wucheng-erp-linux-amd64.tar > dist/SHA256SUMS.txt
