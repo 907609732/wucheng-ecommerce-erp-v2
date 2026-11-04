@@ -7,12 +7,16 @@ import { validateConfig, moduleIds } from "./config.mjs";
 import { createSourceServices } from "./services.mjs";
 import { controlEndpoint } from "./control.mjs";
 import { verifyServices } from "./readiness.mjs";
+import { createDataVersionWorker } from "./data-version/worker.mjs";
+import { registerDataVersionRoutes } from "./data-version/routes.mjs";
 const publicDir = path.join(import.meta.dirname, "public");
 const assetVersion = () =>
   createHash("sha256")
     .update(fs.readFileSync(path.join(publicDir, "shell.js")))
     .update(fs.readFileSync(path.join(publicDir, "shell.css")))
     .update(fs.readFileSync(path.join(publicDir, "tokens.css")))
+    .update(fs.readFileSync(path.join(publicDir, "data-versions.js")))
+    .update(fs.readFileSync(path.join(publicDir, "data-versions.css")))
     .digest("hex")
     .slice(0, 16);
 export async function createWebRuntime(
@@ -23,6 +27,8 @@ export async function createWebRuntime(
   let gateway,
     services,
     timer,
+    versionTimer,
+    dataVersions,
     stopped = false,
     supervising = false;
   const watchers = [],
@@ -38,6 +44,7 @@ export async function createWebRuntime(
     lock.listen(endpoint, resolve);
   });
   try {
+    dataVersions = createDataVersionWorker({config});
     services = await createSourceServices(config);
     gateway = await createWorkbenchGateway({
       services,
@@ -47,7 +54,8 @@ export async function createWebRuntime(
       moduleIds,
       cacheStaticAssets: config.mode === "production",
       localDevelopment: config.mode === "development",
-      registerRoutes: async (app) => {
+      registerRoutes: async (app, context) => {
+        registerDataVersionRoutes(app, context, dataVersions);
         app.addHook("onRequest", async (req, reply) => {
           if (!["GET", "HEAD"].includes(req.method)) {
             if (services.webStatus().draining)
@@ -98,6 +106,9 @@ export async function createWebRuntime(
           ["shell.js", "text/javascript"],
           ["shell.css", "text/css"],
           ["tokens.css", "text/css"],
+          ["data-versions.html", "text/html"],
+          ["data-versions.js", "text/javascript"],
+          ["data-versions.css", "text/css"],
         ])
           app.get("/web/" + name, async (q, r) => {
             const bytes = fs.readFileSync(path.join(publicDir, name)),
@@ -119,6 +130,7 @@ export async function createWebRuntime(
       },
     });
   } catch (e) {
+    await dataVersions?.close();
     await services?.stopOwned().catch(() => {});
     await new Promise((r) => lock.close(r));
     throw e;
@@ -128,6 +140,7 @@ export async function createWebRuntime(
     config,
     services,
     gateway,
+    dataVersions,
     async quiesce() {
       if (quiescing) return quiescing;
       quiescing = (async () => {
@@ -187,6 +200,12 @@ export async function createWebRuntime(
         }
       }, superviseMs);
       timer.unref();
+      if(config.dataVersion?.enabled && config.dataVersion.uploadMode!=='user-agent'){
+        const upload=()=>dataVersions.tick().catch(()=>console.error('数据版本上传暂不可用，将自动重试'));
+        versionTimer=setInterval(upload,5000);
+        versionTimer.unref();
+        void upload();
+      }
       if (watch)
         for (const id of moduleIds) {
           const root = config.modules[id].root;
@@ -209,9 +228,11 @@ export async function createWebRuntime(
     async stop() {
       if (stopped) return;
       clearInterval(timer);
+      clearInterval(versionTimer);
       for (const w of watchers) w.close();
       await runtime.quiesce();
       await gateway.stop();
+      await dataVersions.close();
       stopped = true;
       for (const name of ["web-runtime.json", "web-control.json"])
         fs.rmSync(path.join(config.stateDir, name), { force: true });

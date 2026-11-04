@@ -68,6 +68,7 @@ jobs:
           if ($forbidden) { throw 'Package contains local data or configuration' }
           Copy-Item docs/browser-service.md "$candidate/OPERATIONS.md"
           Copy-Item docs/browser-release.md "$candidate/README.md"
+          Copy-Item docs/data-version-operations.md "$candidate/DATA-VERSIONS.md"
           @{ commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; version=$env:ERP_VERSION; target='windows-x64'; node=(node --version) } | ConvertTo-Json | Set-Content -Encoding utf8 "$candidate/build-info.json"
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           $zip = "dist/WuchengERP-Browser-$env:ERP_VERSION-windows-x64.zip"

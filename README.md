@@ -17,6 +17,7 @@ npm.cmd test
 - [架构](docs/architecture.md)
 - [运行、备份、更新与回退](docs/browser-service.md)
 - [验收规则](docs/verification.md)
+- [正式数据版本托管](docs/data-version-operations.md)
 - [本次迁移状态](docs/browser-only-migration.md)
 
 模块源码位于 `apps/purchase`、`apps/sales`、`apps/overview`；宿主与网关位于 `server/`；共享协议和加载资源位于 `shared/`。正式账本、登录授权、附件和备份不提交源码管理。旧版本源码从 Git 历史追溯。

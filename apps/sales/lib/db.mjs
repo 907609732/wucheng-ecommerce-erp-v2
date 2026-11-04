@@ -1,3 +1,4 @@
+import {installDataVersioning,disableDataVersioning,dataVersionBaselineRequired} from '../../../shared/data-version-capture.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdirSync } from 'node:fs';
@@ -10,6 +11,9 @@ export function openStore(dir) {
   mkdirSync(dir,{recursive:true});
   for(const d of ['originals','backups','reports','inbox'])mkdirSync(path.join(dir,d),{recursive:true});
   const db=new DatabaseSync(path.join(dir,'sales.sqlite'));
+
+ if(!process.env.LINGTU_DATA_VERSION_DIR&&process.env.LINGTU_DATA_VERSION_MODE==='disabled')disableDataVersioning(db);
+ const dataVersioning=process.env.LINGTU_DATA_VERSION_DIR?installDataVersioning({db,module:'sales',dataDir:dir,versionDir:process.env.LINGTU_DATA_VERSION_DIR,initializing:true}):null;
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=10000;
   CREATE TABLE IF NOT EXISTS shops(id TEXT PRIMARY KEY,platform TEXT NOT NULL,name TEXT NOT NULL,receipts TEXT NOT NULL,manual INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -74,13 +78,14 @@ export function openStore(dir) {
     all:(sql,...args)=>db.prepare(sql).all(...args),
     get:(sql,...args)=>db.prepare(sql).get(...args),
     run:(sql,...args)=>db.prepare(sql).run(...args),
-    transaction(fn){const nested=transactionDepth>0,name='sales_tx_'+transactionDepth;db.exec(nested?'SAVEPOINT '+name:'BEGIN IMMEDIATE');transactionDepth++;try{const v=fn();db.exec(nested?'RELEASE '+name:'COMMIT');return v;}catch(e){db.exec(nested?'ROLLBACK TO '+name:'ROLLBACK');if(nested)db.exec('RELEASE '+name);throw e;}finally{transactionDepth--;}},
-    async agentTransaction(fn){assertOwner();store.agentTransactionGuard?.();if(transactionDepth)throw Object.assign(new Error('Agent transaction already active'),{code:'AGENT_COMMIT_BUSY',status:409});const owner={closed:false};return ownership.run(owner,async()=>{activeOwner=owner;let begun=false;try{db.exec('BEGIN IMMEDIATE');begun=true;transactionDepth++;const result=await fn();db.exec('COMMIT');return result;}catch(error){if(begun)db.exec('ROLLBACK');throw error;}finally{if(begun)transactionDepth--;activeOwner=null;owner.closed=true;}});},
+    transaction(fn){const nested=transactionDepth>0,name='sales_tx_'+transactionDepth;db.exec(nested?'SAVEPOINT '+name:'BEGIN IMMEDIATE');transactionDepth++;try{const v=fn();db.exec(nested?'RELEASE '+name:'COMMIT');return v;}catch(e){if(db.isTransaction){db.exec(nested?'ROLLBACK TO '+name:'ROLLBACK');if(nested)db.exec('RELEASE '+name);}throw e;}finally{transactionDepth--;}},
+    async agentTransaction(fn){assertOwner();store.agentTransactionGuard?.();if(transactionDepth)throw Object.assign(new Error('Agent transaction already active'),{code:'AGENT_COMMIT_BUSY',status:409});const owner={closed:false};return ownership.run(owner,async()=>{activeOwner=owner;let begun=false;try{db.exec('BEGIN IMMEDIATE');begun=true;transactionDepth++;const result=await fn();db.exec('COMMIT');return result;}catch(error){if(begun&&db.isTransaction)db.exec('ROLLBACK');throw error;}finally{if(begun)transactionDepth--;activeOwner=null;owner.closed=true;}});},
     audit(action,entity,details={}){db.prepare('INSERT INTO audit(action,entity_id,details,created_at) VALUES(?,?,?,?)').run(action,entity,serial(details),now());},
     setting(key,fallback=null){const r=db.prepare('SELECT value FROM settings WHERE key=?').get(key);return r?JSON.parse(r.value):fallback;},
     setSetting(key,value){db.prepare('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,serial(value));},
     notice(message){db.prepare('INSERT INTO notices(id,message,created_at) VALUES(?,?,?)').run(id(),message,now());},
     close(){db.close();}
   };
-  return store;
+  if(process.env.LINGTU_DATA_VERSION_DIR){store.dataVersioning=dataVersioning;dataVersioning.refresh();if(!db.prepare('SELECT 1 FROM data_version_events LIMIT 1').get()||dataVersionBaselineRequired(db))dataVersioning.baseline();}
+ return store;
 }

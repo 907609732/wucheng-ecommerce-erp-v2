@@ -49,6 +49,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
    }return sendFile(file,...args);};
    // express.static uses sendFile internally, so serve protected HTML explicitly.
    if(q.method==='GET'&&(q.path==='/'||q.path.endsWith('.html'))){const relative=q.path==='/'?'index.html':q.path.slice(1);if(!relative.includes('..')){const file=path.join(publicRoot,relative);if(fs.existsSync(file))return localDesktop?r.sendFile(relative,{root:publicRoot}):r.sendFile(file);}}
+   if(service.runWithActor)return service.runWithActor(actor,next,{action:!safe.has(q.method)?(/import|upload/.test(q.path)?'批量导入':q.method==='DELETE'?'删除业务':'业务保存'):'读取业务'});
    next();
   }catch(e){r.status(e.status||e.statusCode||401).json({error:e.message,code:e.code||'WORKBENCH_AUTH'});}
  });
@@ -56,12 +57,14 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
  return service;
 }
 export function installWorkbenchAudit(integration,store){
+ integration.workbench.runWithActor=(actor,next,context={})=>{const run=()=>store.withActor?store.withActor(actor,next):next();return store.dataVersioning?store.dataVersioning.run({actor,...context},run):run();};
  const {db}=store,module=integration.workbench.module;migrationInstance(store,module);const revisionKey='revision:'+module;db.prepare('INSERT OR IGNORE INTO workbench_identity(key,value) VALUES(?,?)').run(revisionKey,'0');
  Object.defineProperties(integration.state,{dataSetId:{enumerable:true,get:()=>db.prepare('SELECT value FROM workbench_identity WHERE key=?').get('ledger:'+module).value},revision:{enumerable:true,get:()=>db.prepare('SELECT value FROM workbench_identity WHERE key=?').get(revisionKey).value}});
  db.exec('CREATE TABLE IF NOT EXISTS workbench_request_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,method TEXT NOT NULL,path TEXT NOT NULL,status INTEGER NOT NULL,created_at TEXT NOT NULL)');integration.workbench.onAudit=entry=>db.prepare('INSERT INTO workbench_request_audit(actor,method,path,status,created_at) VALUES(?,?,?,?,?)').run(JSON.stringify(entry.actor),entry.method,entry.path,entry.status,new Date().toISOString());
  // Database triggers include standalone scripts and the original phone app. The
  // counter participates in the business transaction, so failed writes roll back.
- integration.workbench.finalize=()=>{for(const {name}of db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()){if(!/^[a-z_]+$/.test(name)||name.startsWith('sqlite_')||name.startsWith('workbench_')||name.startsWith('agent_')||['settings','mutex','mobile_sessions','mobile_attachment_owners','integration_edit_drafts'].includes(name))continue;for(const event of ['INSERT','UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS workbench_revision_${name}_${event.toLowerCase()} AFTER ${event} ON ${name} BEGIN UPDATE workbench_identity SET value=CAST(value AS INTEGER)+1 WHERE key='${revisionKey}';END;`);}};
+ integration.workbench.finalize=()=>{for(const {name}of db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()){if(!/^[a-z_]+$/.test(name)||name.startsWith('sqlite_')||name.startsWith('workbench_')||name.startsWith('agent_')||name.startsWith('data_version_')||['settings','mutex','mobile_sessions','mobile_attachment_owners','integration_edit_drafts'].includes(name))continue;for(const event of ['INSERT','UPDATE','DELETE'])db.exec(`CREATE TRIGGER IF NOT EXISTS workbench_revision_${name}_${event.toLowerCase()} AFTER ${event} ON ${name} BEGIN UPDATE workbench_identity SET value=CAST(value AS INTEGER)+1 WHERE key='${revisionKey}';END;`);}};
+ const finalize=integration.workbench.finalize;integration.workbench.finalize=()=>{finalize();store.dataVersioning?.refresh();};
  integration.workbench.finalize();
 }
 function remoteValue(value,{module,ui,api,localDesktop=false}){

@@ -39,9 +39,12 @@ button {
   color: var(--lt-brand);
 }
 #status {
-  margin-left: auto;
   font-size: 13px;
 }
+#hosting-status {margin-left:auto;padding:5px 8px;font-size:12px;white-space:nowrap;color:var(--lt-brand);background:var(--lt-brand-soft)}
+#hosting-status[hidden] + #status {margin-left:auto}
+#hosting-status.hosting-error {color:var(--lt-danger-text);background:var(--lt-danger-bg)}
+header strong {white-space:nowrap}
 main {
   height: calc(100dvh - 58px);
 }
@@ -66,6 +69,12 @@ iframe {
     padding: 8px;
   }
   #status {
-    max-width: 120px;
+    max-width: 100px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
+  nav {gap:0;flex-shrink:0}
+  #hosting-status {font-size:11px;padding:4px;max-width:125px;white-space:normal;line-height:1.3}
 }
+@media(max-width:480px) {header {gap:4px}header strong {display:none}nav a {font-size:12px;padding:8px 5px}#status {font-size:11px;max-width:38px}#hosting-status {max-width:65px;font-size:10px}#retry {padding:4px;font-size:11px}}

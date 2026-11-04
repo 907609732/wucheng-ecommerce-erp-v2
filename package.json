@@ -1,6 +1,6 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "五成 ERP 浏览器服务：采购、销售、经营总览",
   "author": "五成电子商务集团",
   "private": true,
@@ -16,7 +16,7 @@
     "web:update": "node server/cli.mjs update",
     "web:collector": "node server/collector.mjs",
     "start": "node server/cli.mjs start",
-    "test": "node --test tests/web-*.test.mjs",
+    "test": "node --test --test-concurrency=2 tests/web-*.test.mjs",
     "test:purchase": "npm --prefix apps/purchase test",
     "test:sales": "npm --prefix apps/sales test",
     "test:overview": "npm --prefix apps/overview test",
