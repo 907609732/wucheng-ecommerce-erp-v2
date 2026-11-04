@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$statusPath = 'E:\WuchengERP\backups\nas-precutover-run-status.txt'
+Set-Content -LiteralPath $statusPath -Value 'started' -Encoding UTF8
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -21,7 +23,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '备份完整性校验失败。' }
     $service = Get-Service -Name WuchengERPWeb -ErrorAction Stop
     if ($service.Status -ne 'Running') { throw '备份后 ERP Windows 服务未恢复运行。' }
+    Set-Content -LiteralPath $statusPath -Value 'verified' -Encoding UTF8
     Write-Output "备份及校验成功：$BackupPath"
+} catch {
+    Set-Content -LiteralPath $statusPath -Value ("failed: " + $_.Exception.Message) -Encoding UTF8
+    throw
 } finally {
     Pop-Location
 }
