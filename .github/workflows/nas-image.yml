@@ -34,7 +34,7 @@ jobs:
           node-version: 24
           cache: npm
       - name: Verify Linux data-version recovery
-        run: node --test tests/web-data-version-worker.test.mjs
+        run: node --test tests/web-data-version-worker.test.mjs tests/web-collector-connection.test.mjs tests/web-collector.test.mjs
       - name: Prepare and accept Linux release
         shell: bash
         run: |
@@ -68,8 +68,10 @@ jobs:
           printf '%s\n' "commit=${GITHUB_SHA}" "run_id=${GITHUB_RUN_ID}" "platform=linux/amd64" > dist/BUILD-INFO.txt
           sed "s|__ERP_IMAGE__|$registry_image|g" deploy/nas/compose-acceptance.yml > dist/compose-acceptance.yml
           sed "s|__ERP_IMAGE__|$registry_image|g" deploy/nas/compose-service.yml > dist/compose-service.yml
+          cp deploy/nas/compose-collector-browsers.yml dist/compose-collector-browsers.yml
           docker compose -f dist/compose-acceptance.yml config --quiet
           docker compose -f dist/compose-service.yml config --quiet
+          docker compose -f dist/compose-collector-browsers.yml config --quiet
       - uses: actions/upload-artifact@v4
         with:
           name: nas-image-${{ github.sha }}-${{ github.run_id }}
