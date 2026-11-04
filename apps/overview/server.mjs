@@ -12,6 +12,7 @@ import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {openStore} from './lib/store.mjs';
 import {savePayrollSheet} from './lib/payroll-sheet.mjs';
+import {savePaymentWithEvidence,readPaymentEvidence} from './lib/payment-evidence.mjs';
 import {loadSources,defaultPaths,sourceRecords,sourceOriginal} from './lib/sources.mjs';
 import {report,selectRows} from './lib/report.mjs';
 import {dashboard} from './lib/dashboard.mjs';
@@ -29,7 +30,7 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  integration.router.get('/bills',(_q,r)=>r.json({bills:s.bills(),payments:s.payments()}));
  integration.router.get('/overview',(q,r)=>r.json(getReport(q.query.month)));
  integration.router.get('/dashboard',(q,r)=>r.json(getDashboard(q.query)));installWorkbenchMigration(integration,s,createWorkbenchMigration,{sources:()=>healthy()});installWorkbenchAudit(integration,s);integration.finish();
- app.disable('x-powered-by');app.use((req,res,next)=>{if(!['127.0.0.1','localhost','[::1]'].includes(req.hostname))return res.status(403).json({error:'仅允许本机访问'});const origin=req.headers.origin;if(origin&&origin!==`http://${req.headers.host}`)return res.status(403).json({error:'不允许跨站访问'});res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'");if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','no-store');if(!req.workbenchActor&&!['GET','HEAD','OPTIONS'].includes(req.method)&&req.headers['x-overview-token']!==token)return res.status(403).json({error:'操作会话过期，请刷新'});next();});app.use(express.json({limit:'3mb'}));
+ app.disable('x-powered-by');app.use((req,res,next)=>{if(!['127.0.0.1','localhost','[::1]'].includes(req.hostname))return res.status(403).json({error:'仅允许本机访问'});const origin=req.headers.origin;if(origin&&origin!==`http://${req.headers.host}`)return res.status(403).json({error:'不允许跨站访问'});res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'");if(req.path.startsWith('/api/'))res.setHeader('Cache-Control','no-store');if(!req.workbenchActor&&!['GET','HEAD','OPTIONS'].includes(req.method)&&req.headers['x-overview-token']!==token)return res.status(403).json({error:'操作会话过期，请刷新'});next();});app.use(express.json({limit:'3mb'}));
  const src=()=>loadSources(sources);const healthy=()=>{const x=src();if(x.errors.length)throw fail(x.errors.map(x=>x.message).join('；'),503);return x;};const getReport=m=>report(s,src(),month(m||lastMonth()));
  const getDashboard=q=>dashboard(s,src(),{grain:q.grain||'month',period:q.period||q.month||lastMonth()});
  const cainiao=registerCainiao(app,s,cainiaoOptions);
@@ -51,7 +52,9 @@ export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root
  app.post('/api/bills',(req,res)=>res.json(s.tx(()=>s.createBill(req.body,healthy()))));
  app.put('/api/bills/:id',(req,res)=>res.json(s.updateBill(req.params.id,req.body,healthy())));
  app.post('/api/bills/:id/void',(req,res)=>res.json(s.voidBill(req.params.id,req.body)));
- app.post('/api/bills/:id/payments',(req,res)=>res.json(s.addPayment(req.params.id,req.body)));
+ const paymentUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:6,fields:1,fieldSize:64*1024}}).array('images',6);
+ app.post('/api/bills/:id/payments',(req,res,next)=>{if(!req.is('multipart/form-data'))return next();paymentUpload(req,res,error=>{if(error){error.status=400;error.message=error.code==='LIMIT_FILE_SIZE'?'每张凭证图片须在10MB以内':['LIMIT_FILE_COUNT','LIMIT_UNEXPECTED_FILE'].includes(error.code)?'每次最多上传6张凭证图片':'付款凭证上传失败，请检查文件后重试';}next(error);});},(req,res)=>{const input=req.is('multipart/form-data')?JSON.parse(req.body.data||'{}'):req.body;res.json(savePaymentWithEvidence(s,req.params.id,input,req.files||[]));});
+ app.get('/api/payments/:id/evidence/:evidenceId',(req,res)=>{const image=readPaymentEvidence(s,req.params.id,req.params.evidenceId);res.type(image.mime).set('Cache-Control','private, no-store').send(image.buffer);});
  app.post('/api/payments/:id/void',(req,res)=>res.json(s.voidPayment(req.params.id,req.body)));
  app.post('/api/imports/preview',upload.single('file'),async(req,res)=>{if(!req.file)throw fail('请选择文件');for(const [k,p]of previews)if(Date.now()-p.created>3600000)previews.delete(k);if(previews.size>=10)throw fail('预览较多，请先关闭已有导入窗口');const options=JSON.parse(req.body.options||'{}');const table=await readTable(req.file.buffer,req.file.originalname,options),preview=previewTable(table,options,s,healthy()),pid=id();previews.set(pid,{buffer:req.file.buffer,filename:req.file.originalname,table,options,preview,created:Date.now()});res.json({id:pid,...preview,fields,sample:table.records.slice(0,3)});});
  app.post('/api/imports/:id/remap',async(req,res)=>{const p=previews.get(req.params.id);if(!p)throw fail('预览已过期',404);p.options={...p.options,...req.body};p.table=await readTable(p.buffer,p.filename,p.options);p.preview=previewTable(p.table,p.options,s,healthy());res.json({id:req.params.id,...p.preview,fields,sample:p.table.records.slice(0,3)});});
