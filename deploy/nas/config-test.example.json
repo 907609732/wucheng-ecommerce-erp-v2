@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "mode": "production",
+  "host": "127.0.0.1",
+  "port": 28430,
+  "publicOrigin": "https://REPLACE-WITH-ERP-NODE.tailnet.ts.net",
+  "stateDir": "/var/lib/wucheng-erp/state",
+  "releaseRoot": "/srv/erp",
+  "modules": {
+    "purchase": {
+      "root": "/srv/erp/apps/purchase",
+      "dataDir": "/var/lib/wucheng-erp/data/purchase",
+      "port": 28431,
+      "mobilePort": 28434
+    },
+    "sales": {
+      "root": "/srv/erp/apps/sales",
+      "dataDir": "/var/lib/wucheng-erp/data/sales",
+      "port": 28432
+    },
+    "overview": {
+      "root": "/srv/erp/apps/overview",
+      "dataDir": "/var/lib/wucheng-erp/data/overview",
+      "port": 28433
+    }
+  },
+  "dataVersion": {
+    "enabled": false
+  }
+}

@@ -1,0 +1,5 @@
+services:
+  acceptance:
+    image: __ERP_IMAGE__
+    command: ["node", "server/acceptance.mjs"]
+    restart: "no"

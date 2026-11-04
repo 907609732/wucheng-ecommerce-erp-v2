@@ -1,0 +1,37 @@
+services:
+  tailscale:
+    image: ghcr.io/tailscale/tailscale:latest
+    hostname: wucheng-erp-nas
+    environment:
+      TS_HOSTNAME: wucheng-erp-nas
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_AUTH_ONCE: "true"
+      TS_USERSPACE: "true"
+    volumes:
+      - ./tailscale-state:/var/lib/tailscale
+      - ./tailscale-config:/config:ro
+    restart: unless-stopped
+
+  erp:
+    image: __ERP_IMAGE__
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    volumes:
+      - ./config.json:/var/lib/wucheng-erp/config.json:ro
+      - ./state:/var/lib/wucheng-erp/state
+      - ./data:/var/lib/wucheng-erp/data
+      - ./data-version:/var/lib/wucheng-erp/data-version
+    restart: unless-stopped
+    stop_grace_period: 90s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:28430/api/workbench/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
