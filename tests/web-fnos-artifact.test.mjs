@@ -12,6 +12,7 @@ function fixture(t){
  const stage=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-artifact-'));
  t.after(()=>fs.rmSync(stage,{recursive:true,force:true}));
  fs.cpSync(path.join(root,'deploy/fnos/wuchengerp'),stage,{recursive:true});
+ for(const name of fs.readdirSync(path.join(stage,'cmd')))fs.chmodSync(path.join(stage,'cmd',name),0o755);
  fs.writeFileSync(path.join(stage,'manifest'),'appname=wuchengerp\nversion=0.15.0\nplatform=x86\n');
  const elf=Buffer.alloc(64);elf.set([0x7f,69,76,70,2,1]);elf.writeUInt16LE(62,18);
  for(const p of ['runtime/node/bin/node','runtime/chromium/chrome',...['Xvfb','x11vnc','xauth','xkbcomp'].map(n=>'runtime/sysroot/usr/bin/'+n)]){
