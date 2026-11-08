@@ -54,6 +54,29 @@ async function tool(name,arguments_={}){
 }
 const ref=(snapshot,pattern)=>{const line=snapshot.split('\n').find(l=>pattern.test(l)),r=line?.match(/\[ref=([^\]]+)\]/)?.[1];assert(r,'Missing MCP reference: '+pattern+'\n'+snapshot);return r;};
 async function stopClients(){await client?.close();await transport?.close();client=null;transport=null;await browser?.close();browser=null;await viewerBrowser?.close();viewerBrowser=null;}
+function auditLoadedLibraries(){
+ const procs=new Map(),observed=[],unreadable=[],unexpected=[];
+ for(const name of fs.readdirSync('/proc').filter(n=>/^\d+$/.test(n)))try{
+  const stat=fs.statSync('/proc/'+name),text=fs.readFileSync('/proc/'+name+'/stat','utf8'),fields=text.slice(text.lastIndexOf(')')+2).split(' ');
+  procs.set(Number(name),{parent:Number(fields[1]),uid:stat.uid});
+ }catch{}
+ for(const [pid,p] of procs){
+  if(p.uid!==process.getuid())continue;let ancestor=pid;const seen=new Set();
+  while(ancestor!==process.pid&&procs.has(ancestor)&&!seen.has(ancestor)){seen.add(ancestor);ancestor=procs.get(ancestor).parent;}
+  if(ancestor!==process.pid)continue;
+  let maps;try{maps=fs.readFileSync('/proc/'+pid+'/maps','utf8');}catch(e){if(e.code==='EACCES'||e.code==='EPERM'){unreadable.push({pid,reason:'sandbox process denies package-user maps access'});continue;}if(e.code==='ENOENT')continue;throw e;}
+  const libs=[...new Set(maps.split('\n').map(l=>l.trim().split(/\s+/).slice(5).join(' ').replace(/ \(deleted\)$/,'')).filter(f=>f.startsWith('/')&&(/\.so(?:\.|$)/.test(f)||path.basename(f).startsWith('ld-linux'))))];
+  for(const file of libs){
+   const privateFile=file.startsWith(runtime+path.sep)||file.startsWith(release+path.sep);
+   const hostLibc=/^(?:ld-linux-x86-64\.so\.2|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(path.basename(file))||/^\/(?:usr\/)?lib\/x86_64-linux-gnu\/gconv\//.test(file);
+   if(!privateFile&&!hostLibc)unexpected.push({pid,file});
+  }
+  observed.push({pid,exe:fs.readlinkSync('/proc/'+pid+'/exe'),libraries:libs});
+ }
+ assert(observed.length>0,'No controlled process library maps inspected');
+ const result={observed,unreadable,unexpected,hostException:'glibc 2.36 loader/family and glibc gconv only'};
+ fs.writeFileSync(path.join(evidence,'loaded-libraries.json'),JSON.stringify(result,null,2)+'\n');assert.equal(unexpected.length,0,'Non-payload controlled-process libraries: '+JSON.stringify(unexpected));return {readableProcesses:observed.length,sandboxMapsDenied:unreadable.length};
+}
 try{
  const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE check_native(v TEXT)');db.prepare('INSERT INTO check_native VALUES (?)').run('ok');assert.equal(db.prepare('SELECT v FROM check_native').get().v,'ok');db.close();report.sqlite=true;
  const browserConfig={enabled:true,runtimeRoot:runtime,chromiumPath:path.join(runtime,'chromium/chrome'),novncRoot:path.join(runtime,'novnc'),instances:{sales:{cdpPort:19222+offset,vncPort:19322+offset,display:122+offset/100},overview:{cdpPort:19223+offset,vncPort:19323+offset,display:123+offset/100}}};
@@ -100,6 +123,7 @@ try{
  await canvas.click({position:{x:bounds.x,y:bounds.y+bounds.top}});await viewer.keyboard.type(' RFB');
  await page.waitForFunction(()=>document.querySelector('input').value.includes('RFB'));await viewer.screenshot({path:path.join(evidence,'novnc-live.png')});
  report.checks.push('upstream noVNC real RFB framebuffer / pointer / keyboard via x11vnc');
+ report.loadedLibraries=auditLoadedLibraries();report.checks.push('readable controlled-process maps limited to payload and host glibc');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  const second=await nativeLifecycle('start',configFile);assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
  ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'});assert.match(retained,/native_acceptance=retained/);assert.match(retained,/retained/);

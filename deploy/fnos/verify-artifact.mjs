@@ -33,7 +33,7 @@ export function verifyArtifact(folder){
   else if(e.isFile()){
    if(/\.sqlite(?:[-.]|$)|(?:^|\/)\.env(?:\.|$)|(?:^|\/)(?:identity\.json|client\.conf|crypt\.key|Cookies|Login Data)$/.test(relative))throw Error('Private data '+relative);
    if(relative.startsWith('app/erp/')&&!relative.includes('/node_modules/')&&/^app\/erp\/(?:data|state|config|backups|logs)\//.test(relative))throw Error('Private ERP state '+relative);
-   if(relative.startsWith('app/runtime/sysroot/')&&/^(?:ld-linux.*|lib(?:c|m|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(e.name))throw Error('Private glibc is forbidden '+relative);
+   if(relative.startsWith('app/runtime/sysroot/')&&/^(?:ld-linux.*|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(e.name))throw Error('Private glibc is forbidden '+relative);
   }else throw Error('Special payload file '+relative);
  }}walk(root);
  const release=verifyRelease(path.join(app,'erp'));

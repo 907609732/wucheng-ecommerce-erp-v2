@@ -1,10 +1,12 @@
 # 五成 ERP 完整原生 FPK 0.15.0
 
-构建目标是 Debian 12 / glibc 2.36 / x86_64 的飞牛 Native 应用。包内包含 Node 24.18.0、Linux 生产依赖、采购/销售/经营总览、Debian Chromium、Xvfb、x11vnc、XKB、中文字体及 noVNC 1.6.0；部署不使用 Docker。官方 fnpack 1.2.3 生成 FPK。实机安装、正式迁移与公网入口需要单独验收，CI 成功不代表这些已经完成。
+构建目标是 Debian 12 / glibc 2.36 / x86_64 的飞牛 Native 应用。包内包含 Node 24.22.2、Linux 生产依赖、采购/销售/经营总览、Debian Chromium、Xvfb、x11vnc、XKB、中文字体及 noVNC 1.6.0；部署不使用 Docker。官方 fnpack 1.2.3 生成 FPK。实机安装、正式迁移与公网入口需要单独验收，CI 成功不代表这些已经完成。
 
 ## 构建与交付
 
 Windows 的 `build.ps1` 明确拒绝生成旧薄包。推送分支后手动运行 GitHub Actions **fnOS native FPK**。工作流使用临时 Debian 12 构建容器；仅为测试 Chromium namespace sandbox 允许 CI 容器特权，FPK 不授予 package 用户能力，也不依赖 Docker。
+
+构建后还在全新的 Debian 12 slim 运行容器重复主包 smoke 和诊断安装钩子，只准备系统 Python、CA 和 util-linux，断言没有宿主 X11/GTK/NSS/字体/XKB。可读取的受控进程 `/proc/maps` 只允许已验包内运行时/原生 npm 依赖和明确的宿主 glibc/loader；sandbox 拒绝读取的进程单独记录。该验证避免构建机图形依赖掩盖私有闭包遗漏，仍不替代 NAS 实机验收。
 
 产物包括 `wuchengerp.fpk`、独立测试包 `wuchengerpdiag.fpk`、`SHA256SUMS.txt`、逐文件 payload 校验清单、`THIRD-PARTY.json`、对应源码 companion、编译参数及合成验收 JSON/截图。下载后先用 SHA256 验证；源码伴随包必须和对应 FPK 一并保存，未来再分发时一并提供。GitHub workflow artifacts 默认保留 14 天，不是长期公开源码下载服务。
 

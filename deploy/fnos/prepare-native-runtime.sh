@@ -29,7 +29,7 @@ apt-get install -y --no-install-recommends \
   "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION" \
   x11vnc xauth x11-xkb-utils xkb-data xfonts-base xfonts-encodings fonts-noto-cjk fontconfig \
   "xvfb=$XORG_VERSION" \
-  libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 \
+  libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 \
   ca-certificates zstd strace util-linux
 apt-get build-dep -y --no-install-recommends "xorg-server=$XORG_VERSION"
 (cd "$work/debs"; apt-get download "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION")
@@ -68,20 +68,20 @@ lddtree --copy-to-tree "$sysroot" /usr/lib/chromium/chromium "$runtime/node/bin/
 rm -rf -- "$sysroot/usr/lib/chromium" "${sysroot}${runtime}" "${sysroot}${work}"
 # Mozilla NSS/GTK/Mesa are loaded with dlopen and must be included explicitly.
 extras=()
-for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2; do
+for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0; do
  while IFS= read -r file; do
   if [[ -f "$file" && "$file" =~ \.so(\.|$) ]]; then extras+=("$file"); fi
  done < <(dpkg-query -L "$package")
 done
 lddtree --copy-to-tree "$sysroot" "${extras[@]}"
-for p in /usr/share/X11/xkb /usr/share/X11/locale /usr/share/fonts/X11/misc /usr/share/fonts/X11/encodings /usr/share/fonts/opentype/noto /etc/fonts; do
+for p in /usr/share/X11/xkb /usr/share/X11/locale /usr/share/fonts/X11/misc /usr/share/fonts/X11/encodings /usr/share/fonts/opentype/noto /usr/share/glvnd/egl_vendor.d /etc/fonts; do
  mkdir -p "$sysroot$(dirname "$p")"; cp -aL "$p" "$sysroot$p"
 done
 # Debian's postinstall encodings index contains host absolute paths. Regenerate
 # the font metadata with standard mkfontdir and relative paths for both packages.
 (cd "$sysroot/usr/share/fonts/X11/misc"; mkfontdir -e ../encodings -e ../encodings/large .)
 # Keep the NAS loader/glibc 2.36 family. Never mix a private glibc and host loader.
-find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*' -o -name 'libm.so*' -o -name 'libpthread.so*' -o -name 'libdl.so*' -o -name 'librt.so*' -o -name 'libresolv.so*' -o -name 'libutil.so*' -o -name 'libanl.so*' -o -name 'libBrokenLocale.so*' -o -name 'libnss_*.so*' \) -delete
+find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*' -o -name 'libm.so*' -o -name 'libmvec.so*' -o -name 'libpthread.so*' -o -name 'libdl.so*' -o -name 'librt.so*' -o -name 'libresolv.so*' -o -name 'libutil.so*' -o -name 'libanl.so*' -o -name 'libBrokenLocale.so*' -o -name 'libnss_*.so*' \) -delete
 # Source ownership is derived from every copied Debian path, including resource
 # data and dlopen libraries. Xvfb is custom-built from the patched xorg source.
 printf '%s\n' xvfb > "$work/owners.txt"

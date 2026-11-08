@@ -117,7 +117,7 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
      privateDir(path.join(config.native.dataRoot,'browser-profiles'));privateDir(path.join(config.stateDir,'native-browser'));
      runDir=path.join(config.stateDir,'native-browser',randomUUID());privateDir(runDir);
      const fontConfig=path.join(runDir,'fonts.conf');fs.writeFileSync(fontConfig,'<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>'+xml(path.join(sysroot,'usr/share/fonts'))+'</dir><cachedir>'+xml(path.join(runDir,'font-cache'))+'</cachedir><include ignore_missing="yes">'+xml(path.join(sysroot,'etc/fonts/conf.d'))+'</include></fontconfig>',{mode:0o600});
-     const baseEnv={...process.env,LD_LIBRARY_PATH:['usr/lib/x86_64-linux-gnu','lib/x86_64-linux-gnu','usr/lib','lib'].map(p=>path.join(sysroot,p)).join(':'),XKB_CONFIG_ROOT:path.join(sysroot,'usr/share/X11/xkb'),FONTCONFIG_FILE:fontConfig,FONTCONFIG_PATH:path.join(sysroot,'etc/fonts'),XDG_RUNTIME_DIR:runDir};
+     const baseEnv={...process.env,LD_LIBRARY_PATH:['usr/lib/x86_64-linux-gnu','lib/x86_64-linux-gnu','usr/lib','lib'].map(p=>path.join(sysroot,p)).join(':'),XKB_CONFIG_ROOT:path.join(sysroot,'usr/share/X11/xkb'),FONTCONFIG_FILE:fontConfig,FONTCONFIG_PATH:path.join(sysroot,'etc/fonts'),LIBGL_DRIVERS_PATH:path.join(sysroot,'usr/lib/x86_64-linux-gnu/dri'),__EGL_VENDOR_LIBRARY_DIRS:path.join(sysroot,'usr/share/glvnd/egl_vendor.d'),XDG_RUNTIME_DIR:runDir};
      const version=versionParts(await run(browser.chromiumPath,['--version'],baseEnv));if(!version)throw Error('无法确认 Chromium 版本');
      for(const s of Object.values(specs)){
       let retainedProfile=null,login='unknown';

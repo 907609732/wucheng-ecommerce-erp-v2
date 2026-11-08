@@ -33,6 +33,14 @@ jobs:
             -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/ci-native.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/ci-build.log"
+      - name: Verify payload in clean Debian runtime without system graphics libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --init --privileged --security-opt apparmor=unconfined \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/fnos-output:/output" \
+            -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
+            bash deploy/fnos/verify-clean-runtime.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/clean-runtime.log"
       - name: Upload native FPK, diagnostic FPK and verifiable evidence
         if: always()
         uses: actions/upload-artifact@v4

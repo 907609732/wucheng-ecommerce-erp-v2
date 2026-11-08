@@ -51,5 +51,5 @@ profiles and secrets must never be included in these artifacts.
 
 Build tooling follows the [official fnpack CLI](https://developer.fnnas.com/docs/cli/fnpack/),
 [Debian source distribution](https://www.debian.org/doc/manuals/debian-reference/ch02.en.html),
-[Node releases](https://nodejs.org/dist/v24.18.0/), and
+[Node releases](https://nodejs.org/dist/v24.22.2/), and
 [noVNC v1.6.0](https://github.com/novnc/noVNC/tree/v1.6.0).

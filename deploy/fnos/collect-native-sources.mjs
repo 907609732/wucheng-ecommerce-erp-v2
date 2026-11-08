@@ -14,7 +14,8 @@ for(const owner of fs.readFileSync(path.join(work,'owners.txt'),'utf8').trim().s
  const id=source+'='+sourceVersion;if(done.has(id))continue;done.add(id);
  run('apt-get',['source','--download-only',id],{cwd:sources,stdio:['ignore','inherit','inherit']});
 }
-fs.cpSync('/usr/share/common-licenses',path.join(runtime,'licenses','common-licenses'),{recursive:true,dereference:true});
+const common=path.join(runtime,'licenses','common-licenses');fs.mkdirSync(common,{recursive:true});
+run('cp',['--recursive','--dereference','/usr/share/common-licenses/.',common]);
 for(const required of ['chromium','chromium-common','xvfb','x11vnc','xauth','x11-xkb-utils','xkb-data','fonts-noto-cjk','libnss3','libx11-6','libstdc++6','libfontconfig1'])if(!packages.some(p=>p.binary.replace(/:amd64$/,'')===required))throw Error('Source closure lacks required Debian owner '+required);
 fs.writeFileSync(path.join(work,'debian-packages.json'),JSON.stringify(packages,null,2)+'\n');
 fs.copyFileSync(path.join(work,'debian-packages.json'),path.join(sources,'debian-packages.json'));
