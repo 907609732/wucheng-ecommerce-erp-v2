@@ -33,7 +33,9 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
    q.workbenchActor=actor;
    if(!safe.has(q.method))r.once('finish',()=>{try{service.onAudit?.({actor,method:q.method,path:q.path,status:r.statusCode});}catch{}});
    r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','same-origin');r.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'self'");
-   const ui=localDesktop?'/':'/apps/'+module+'/',api=localDesktop?'':'/apps/'+module;
+   const publicPrefix=actor.publicPrefix??'';
+   if(!['','/app/wuchengerp'].includes(publicPrefix)||localDesktop&&publicPrefix)throw Object.assign(Error('工作台公开路径无效'),{status:403});
+   const ui=localDesktop?'/':publicPrefix+'/apps/'+module+'/',api=localDesktop?'':publicPrefix+'/apps/'+module;
    // Never trust unbound forwarded prefix/header values.
    q.workbench={module,uiPrefix:ui,apiBase:api,localDesktop};
    if(q.path.startsWith('/api/')){
@@ -68,16 +70,20 @@ export function installWorkbenchAudit(integration,store){
  integration.workbench.finalize();
 }
 function remoteValue(value,{module,ui,api,localDesktop=false}){
+ const prefix=ui.match(/^(\/app\/wuchengerp)\/apps\//)?.[1]||'';
  if(Array.isArray(value))return value.map(v=>remoteValue(v,{module,ui,api,localDesktop}));
- if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\'))?'':remoteValue(v,{module,ui,api,localDesktop})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url){if(localDesktop){delete result.sources[id].url;result.sources[id].target={module:id};}else result.sources[id].url='/apps/'+id+'/';}return result;}
+ if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\'))?'':remoteValue(v,{module,ui,api,localDesktop})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url){if(localDesktop){delete result.sources[id].url;result.sources[id].target={module:id};}else result.sources[id].url=prefix+'/apps/'+id+'/';}return result;}
  if(typeof value==='string'){
+  const legacyModule=/^http:\/\/127\.0\.0\.1:(17868|17870|17890)\/?$/.exec(value);
+  if(legacyModule){const id={17868:'purchase',17870:'sales',17890:'overview'}[legacyModule[1]];return localDesktop?{module:id}:prefix+'/apps/'+id+'/';}
+
   if(localDesktop){const legacy=/^http:\/\/(?:127\.0\.0\.1|localhost):(17868|17870|17890)(?:[/?#]|$)/.exec(value);if(legacy)return {module:{17868:'purchase',17870:'sales',17890:'overview'}[legacy[1]]};}
   if(/^[A-Z]:[\\/]/i.test(value)||value.startsWith('\\\\'))return '[仅主机本地可用]';
   if(/[A-Z]:[\\/]/i.test(value))return value.replace(/[A-Z]:[\\/][^\r\n"'<>|]*/gi,'[主机路径]');
+  if(prefix&&(value===prefix||value.startsWith(prefix+'/')))return value;
+  if(value.startsWith('/apps/')||value.startsWith('/api/workbench/')||value.startsWith('/web/'))return prefix+value;
   if(value.startsWith('/api/'))return api+value;
   if(value.startsWith('/')&&!value.startsWith('//'))return ui+value.slice(1);
-  if(/^http:\/\/127\.0\.0\.1:17868\/?$/.test(value))return localDesktop?{module:'purchase'}:'/apps/purchase/';
-  if(/^http:\/\/127\.0\.0\.1:178(?:70|90)\/?$/.test(value))return localDesktop?{module:value.includes('17890')?'overview':'sales'}:value.includes('17890')?'/apps/overview/':'/apps/sales/';
  }
  return value;
 }

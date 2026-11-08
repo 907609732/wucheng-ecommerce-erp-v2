@@ -1,0 +1,6 @@
+/wuchengerp/**/*.log
+/wuchengerp/**/.env*
+/wuchengerp/**/config.json
+/wuchengerp/**/*.sqlite*
+*.fpk
+SHA256SUMS.txt

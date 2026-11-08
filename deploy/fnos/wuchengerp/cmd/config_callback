@@ -1,0 +1,3 @@
+#!/bin/sh
+# Entry lifecycle only; ERP owns its runtime, socket and data.
+exit 0

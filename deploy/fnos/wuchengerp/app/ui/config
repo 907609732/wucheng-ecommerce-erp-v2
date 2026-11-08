@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "wuchengerp.main": {
+      "title": "五成ERP",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/wuchengerp",
+      "gatewaySocket": "app.sock",
+      "url": "/app/wuchengerp/",
+      "allUsers": true
+    }
+  }
+}

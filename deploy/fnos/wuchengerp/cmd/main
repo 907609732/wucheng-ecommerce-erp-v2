@@ -1,0 +1,25 @@
+#!/bin/sh
+# fnOS manages application entry visibility; the existing ERP owns its socket.
+# No account, identity header, business path or container operation is used here.
+set -eu
+if [ -z "${TRIM_APPDEST:-}" ]; then
+ printf '%s\n' 'Missing fnOS application target; ERP entry cannot be checked.' >&2
+ exit 1
+fi
+SOCKET="${TRIM_APPDEST}/app.sock"
+entry_ready() {
+ [ -S "$SOCKET" ] && [ ! -L "$SOCKET" ] || return 1
+ [ -r /proc/net/unix ] || return 1
+ # Flags=accepting, Type=stream, State=unconnected/listening; exact path only.
+ # Docker must bind the SAME absolute socket path in the host network namespace.
+ awk -v expected="$SOCKET" 'NF == 8 && $4 == "00010000" && $5 == "0001" && $6 == "01" && $8 == expected {found=1} END {exit !found}' /proc/net/unix
+}
+case "${1:-}" in
+ start)
+  if entry_ready; then exit 0; fi
+  printf '%s\n' 'ERP Unix socket is not listening. Install the entry first, configure the existing ERP exact socket-directory mount and fnOS listener, then enable this application. No ERP service was started.' >&2
+  exit 1;;
+ status) if entry_ready; then exit 0; fi; exit 3;;
+ stop) exit 0;;
+ *) printf '%s\n' 'Supported actions: start, stop, status.' >&2; exit 1;;
+esac
