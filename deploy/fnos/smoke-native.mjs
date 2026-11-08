@@ -132,7 +132,7 @@ try{
  for(const [id,m] of Object.entries(c.modules)){const d=new DatabaseSync(path.join(m.dataDir,databases[id]),{readOnly:true});assert.equal(Object.values(d.prepare('PRAGMA integrity_check').get())[0],'ok');d.close();}
  report.checks.push('stop cleanup and three real SQLite integrity checks');report.ok=true;
 }catch(error){report.error=error.stack;process.exitCode=1;console.error(error.stack);
- if(configFile){const log=path.join(data,'state/native-supervisor.log');if(fs.existsSync(log))fs.copyFileSync(log,path.join(evidence,'native-supervisor.log'));}
+ if(configFile){const log=path.join(data,'state/native-supervisor.log');if(fs.existsSync(log)){fs.copyFileSync(log,path.join(evidence,'native-supervisor.log'));console.error(fs.readFileSync(log,'utf8').slice(-12000));}}
 }finally{
  await stopClients().catch(()=>{});if(configFile)await nativeLifecycle('stop',configFile).catch(e=>{report.cleanupError=e.message;process.exitCode=1;});
  await new Promise(r=>fixture.close(r));fs.writeFileSync(path.join(evidence,'acceptance.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));

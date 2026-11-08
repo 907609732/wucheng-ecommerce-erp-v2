@@ -13,6 +13,14 @@ status=0
 limit=${1:-240}
 case "$limit" in ''|*[!0-9]*) fail '诊断时间限制必须为 1–240 秒。';; esac
 [ "$limit" -ge 1 ] && [ "$limit" -le 240 ] || fail '诊断时间限制必须为 1–240 秒。'
+mkdir -m700 "$RUN/evidence"
+if [ "$(id -u)" = 0 ]; then chown "$uid:$gid" "$RUN/evidence"; fi
+# The real root recovery helper requires these trusted system stdlib modules.
+# Inspect before starting any native process; python-minimal alone may lack them.
+if ! /usr/bin/python3 -I -B -c 'import sqlite3,ctypes,fcntl,json,sys; print(json.dumps({"ok":True,"version":sys.version,"sqlite":sqlite3.sqlite_version}))' > "$RUN/evidence/system-python.log" 2>&1; then
+ printf '%s\n' '{"ok":false,"stage":"system-python-preflight","error":"Trusted /usr/bin/python3 needs sqlite3,ctypes,fcntl,json; ask administrator to prepare official system Python; no native service started"}' > "$RUN/evidence/acceptance.json"
+ fail "系统 Python 标准库预检失败，未启动原生进程；请管理员核对官方 python3 完整环境。证据：$RUN/evidence"
+fi
 # timeout is itself unprivileged. TERM allows nativeLifecycle/finally cleanup;
 # after any timeout a second identity-checked native stop is always attempted.
 as_package timeout --signal=TERM --kill-after=45s "${limit}s" "$NODE" "$PAYLOAD/smoke-native.mjs" --app-root "$PAYLOAD" --data-root "$RUN/data" --evidence-dir "$RUN/evidence" --port-offset 10000 --diagnostic 1 || status=$?

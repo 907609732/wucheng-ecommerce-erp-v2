@@ -41,6 +41,10 @@ jobs:
             -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/verify-clean-runtime.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/clean-runtime.log"
+      - name: Make exported synthetic evidence readable by artifact uploader
+        if: always()
+        shell: bash
+        run: sudo chmod -R a+rX "$RUNNER_TEMP/fnos-output"
       - name: Upload native FPK, diagnostic FPK and verifiable evidence
         if: always()
         uses: actions/upload-artifact@v4
