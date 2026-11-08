@@ -14,8 +14,7 @@ for(const owner of fs.readFileSync(path.join(work,'owners.txt'),'utf8').trim().s
  const id=source+'='+sourceVersion;if(done.has(id))continue;done.add(id);
  run('apt-get',['source','--download-only',id],{cwd:sources,stdio:['ignore','inherit','inherit']});
 }
-fs.copyFileSync('/usr/share/common-licenses/GPL-2',path.join(runtime,'licenses','GPL-2'));
-fs.copyFileSync('/usr/share/common-licenses/LGPL-2.1',path.join(runtime,'licenses','LGPL-2.1'));
+fs.cpSync('/usr/share/common-licenses',path.join(runtime,'licenses','common-licenses'),{recursive:true,dereference:true});
 fs.writeFileSync(path.join(work,'debian-packages.json'),JSON.stringify(packages,null,2)+'\n');
 fs.copyFileSync(path.join(work,'debian-packages.json'),path.join(sources,'debian-packages.json'));
 // apt-get source --download-only validates the signed Sources index checksums.

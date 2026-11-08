@@ -26,6 +26,14 @@ change, recorded for the main and diagnostic binaries. Standard `lddtree
 --copy-to-tree` collects ELF closure; explicit NSS/GTK/Mesa packages account for
 dlopen. Host glibc 2.36 and its loader are excluded from the private sysroot.
 
+The npm sharp binary separately bundles LGPL libvips and aggregate libraries.
+Its exact sharp-libvips v1.3.4 build recipe, source archives/patches and librsvg
+Cargo.lock crate sources accompany this distribution, recorded individually in
+`sharp-source-inputs.json`. Rust crate checksums are verified against upstream's
+lockfile. Other upstream source archives are obtained over HTTPS with calculated
+SHA256s, without detached signature verification. This is distinct from Debian's
+signed index verification.
+
 Pinned input provenance in `native-inputs.env`: Node SHA256 is checked against
 the official `SHASUMS256.txt` over HTTPS (detached signature not checked here).
 fnpack 1.2.3 and noVNC tag archive hashes were calculated from their official HTTPS

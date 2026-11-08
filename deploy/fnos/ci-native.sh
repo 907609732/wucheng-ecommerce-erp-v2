@@ -1,11 +1,16 @@
 #!/bin/bash
 set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+export DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 PYTHONDONTWRITEBYTECODE=1
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates curl git python3 procps util-linux xz-utils sudo
 test -x /usr/bin/python3
 git config --system --add safe.directory /src
 source deploy/fnos/native-inputs.env
+apt-get install -y --no-install-recommends "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION"
+# Legacy isolated browser tests select Playwright's 'chrome' channel. Point that
+# test-only expected location at Debian Chromium, never Google Chrome for Testing.
+mkdir -p /opt/google/chrome
+ln -s /usr/bin/chromium /opt/google/chrome/chrome
 mkdir -p /opt/node
 curl --fail --location --proto '=https' --retry 3 --output /tmp/node.tar.xz "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz"
 printf '%s  %s\n' "$NODE_SHA256" /tmp/node.tar.xz | sha256sum --check --strict
@@ -23,6 +28,7 @@ runuser -u erpchecks -- env PATH="$PATH" npm test || tests_status=1
 for app in purchase sales overview; do runuser -u erpchecks -- env PATH="$PATH" npm --prefix "apps/$app" test || tests_status=1; done
 /usr/bin/python3 -I -B tests/fnos-native-retained-recovery.py
 for script in deploy/fnos/*.sh deploy/fnos/wuchengerp/cmd/*; do
+ test -f "$script" || continue
  case "$script" in *.py) /usr/bin/python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$script";; *) bash -n "$script";; esac
 done
 bash deploy/fnos/build-native.sh /output/release

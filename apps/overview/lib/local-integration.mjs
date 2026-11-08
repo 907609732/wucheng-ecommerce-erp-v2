@@ -9,7 +9,7 @@ export const integrationHash=value=>createHash('sha256').update(JSON.stringify(c
 function canonical(v){return Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;}
 export const integrationError=(message,status=400,code='INTEGRATION_ERROR')=>Object.assign(Error(message),{status,code});
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>false,capabilities=[],activate=async()=>{},open=async()=>{}}){
+export function installLocalIntegration(app,{id,version,root,dataDir,privatePaths=[],busy=()=>false,capabilities=[],activate=async()=>{},open=async()=>{}}){
   const router=express.Router(),sessions=new Map();
   fs.mkdirSync(dataDir,{recursive:true});
   const keyFile=path.join(dataDir,'.integration-key');
@@ -18,7 +18,7 @@ export function installLocalIntegration(app,{id,version,root,dataDir,busy=()=>fa
   const profile=integrationHash(path.resolve(dataDir).toLowerCase());
   const state={id,apiVersion:1,version,root:path.resolve(root),dataDir:path.resolve(dataDir),profile,pid:process.pid,capabilities};
   const module={'purchase-desk':'purchase','lingtu-purchase-desk':'purchase','wucheng-sales-desk':'sales','lingtu-business-overview':'overview'}[id]||'purchase';
-  const workbench=installWorkbenchModule(app,router,{module,dataDir,root,state});
+  const workbench=installWorkbenchModule(app,router,{module,dataDir,root,state,privatePaths});
   const maintenanceFile=path.join(dataDir,'.workbench-maintenance.json');
   let maintenanceOwner=null,nativeMaintenance=process.env.LINGTU_MAINTENANCE==='1';
   let writes=0,server,stopping=false,maintenance=nativeMaintenance;

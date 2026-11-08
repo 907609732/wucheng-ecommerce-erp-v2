@@ -34,10 +34,11 @@ rm -rf "$runtime/novnc/.github" "$runtime/novnc/tests"
 # Explicit metadata allowlist, never a deployed app/data folder.
 for relative in manifest config/privilege config/resource app/ui/config; do install -D -m644 "$helper/wuchengerp/$relative" "$stage/$relative"; done
 for folder in cmd wizard; do
- for file in "$helper/wuchengerp/$folder/"*; do
+ while IFS= read -r relative; do
+  file="$repo/$relative"
   [[ -f $file && ! -L $file ]] || { echo 'Linked/nonfile package metadata refused.' >&2; exit 1; }
   install -D -m755 "$file" "$stage/$folder/$(basename "$file")"
- done
+ done < <(git -C "$repo" ls-files "deploy/fnos/wuchengerp/$folder/")
 done
 for p in ICON.PNG ICON_256.PNG app/ui/images/icon_64.png app/ui/images/icon_256.png; do install -D -m644 "$repo/shared/ui/loading-logo.png" "$stage/$p"; done
 bash "$helper/prepare-native-runtime.sh" "$runtime" "$work"
@@ -45,10 +46,12 @@ bash "$helper/prepare-native-runtime.sh" "$runtime" "$work"
 cd "$repo"
 export npm_execpath="$runtime/node/lib/node_modules/npm/bin/npm-cli.js"
 node server/release.mjs "$stage/app/erp"
+node "$helper/collect-sharp-sources.mjs" "$stage" "$work"
 node "$helper/write-native-manifest.mjs" "$stage" "$work"
 node "$helper/verify-artifact.mjs" "$stage" | tee "$out/artifact-verification.json"
 cp "$stage/app/THIRD-PARTY.json" "$out/THIRD-PARTY.json"
 cp "$work/debian-packages.json" "$out/debian-packages.json"
+cp "$work/sharp-source-inputs.json" "$out/sharp-source-inputs.json"
 cp "$work/xvfb-meson-log.txt" "$out/xvfb-meson-log.txt"
 cp "$helper/native-inputs.env" "$out/INPUTS.env"
 cp -a "$work/diagnostic" "$out/diagnostic-xvfb"
@@ -74,6 +77,8 @@ bash "$helper/build-diagnostic.sh" "$stage" "$work" "$out"
 # Sources are separate companions and must stay together with any redistribution.
 cp "$stage/app/THIRD-PARTY.json" "$work/sources/"
 cp "$helper/THIRD-PARTY.md" "$work/sources/README.md"
+mkdir -p "$work/sources/native-build"; cp "$helper/"*.sh "$helper/"*.mjs "$helper/native-inputs.env" "$work/sources/native-build/"
+cp "$work/diagnostic/meson-buildoptions.json" "$work/sources/native-build/diag-meson-buildoptions.json"
 (cd "$work/sources"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/SOURCE-SHA256SUMS.txt")
 tar --zstd -cf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" -C "$work/sources" .
 sha256sum wuchengerp-0.15.0-corresponding-source.tar.zst >> SHA256SUMS.txt
