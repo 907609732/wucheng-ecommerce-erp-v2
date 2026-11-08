@@ -16,7 +16,7 @@ test("release exports only web source and never marks an untested directory acce
     assert(fs.existsSync(path.join(dir, "ui", "period-picker.mjs")));
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json")));
     assert(!pkg.dependencies.electron);
-    assert.deepEqual(Object.keys(pkg.dependencies).sort(),['@fastify/cookie','@fastify/http-proxy','@fastify/reply-from','fastify']);
+    assert.deepEqual(Object.keys(pkg.dependencies).sort(),['@fastify/cookie','@fastify/http-proxy','@fastify/reply-from','fastify','ws']);
     assert.equal(pkg.dependencies['@fastify/http-proxy'],'11.6.4');
     assert.throws(() => verifyRelease(dir), /验收/);
     const f = path.join(dir, "web-release.json"),

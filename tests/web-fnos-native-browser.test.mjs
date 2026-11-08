@@ -4,6 +4,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
+import {WebSocketServer} from 'ws';
+
+test('native VNC readiness sends the Origin required by LibVNCServer',async t=>{
+ const {probeNativeBrowserReady}=await import('../server/fnos-native/browsers.mjs');
+ assert.equal(typeof probeNativeBrowserReady,'function');let expected,seen;
+ const server=new WebSocketServer({host:'127.0.0.1',port:0,verifyClient:info=>{seen=info.origin;return info.origin===expected;}});
+ await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+ expected='http://127.0.0.1:'+server.address().port;
+ assert.equal(await probeNativeBrowserReady('vnc',{vncEndpoint:expected}),true);
+ assert.equal(seen,expected);
+});
 
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-browser-'));

@@ -3,6 +3,7 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
 import {randomBytes,randomUUID} from 'node:crypto';
+import WebSocket from 'ws';
 
 const ids=['sales','overview'];
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -27,14 +28,16 @@ function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});if(fs.lst
 async function available(port){
  const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen({host:'127.0.0.1',port,exclusive:true},resolve);});await new Promise(resolve=>server.close(resolve));
 }
-async function probeReady(kind,spec){
+export async function probeNativeBrowserReady(kind,spec){
  try{
   if(kind==='display')return fs.existsSync('/tmp/.X11-unix/X'+spec.display);
   if(kind==='cdp'){const response=await fetch(spec.cdpEndpoint+'/json/version',{signal:AbortSignal.timeout(1000)});const body=await response.json();return response.ok&&typeof body.webSocketDebuggerUrl==='string';}
-  return await new Promise(resolve=>{const ws=new WebSocket(spec.vncEndpoint.replace('http:','ws:')+'/websockify',['binary']);const timer=setTimeout(()=>{ws.close();resolve(false);},1000);ws.onopen=()=>{clearTimeout(timer);ws.close();resolve(true);};ws.onerror=()=>{clearTimeout(timer);resolve(false);};});
+  // LibVNCServer requires Origin even for trusted loopback health checks. Node's
+  // built-in browser-shaped WebSocket omits it; use the existing mature client.
+  return await new Promise(resolve=>{const ws=new WebSocket(spec.vncEndpoint.replace('http:','ws:')+'/websockify',['binary'],{origin:spec.vncEndpoint});const timer=setTimeout(()=>{ws.close();resolve(false);},1000);ws.onopen=()=>{clearTimeout(timer);ws.close();resolve(true);};ws.onerror=()=>{clearTimeout(timer);resolve(false);};});
  }catch{return false;}
 }
-export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=probeReady,readinessTimeoutMs=20000,signal}={}){
+export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=probeNativeBrowserReady,readinessTimeoutMs=20000,signal}={}){
  const browser=config.native?.browser,specs=nativeBrowserSpecs(config),children=[],states={},owned={};
  let state='stopped',failure=null,starting,stopping,runDir,controller,startSignal;
  const checkCancellation=()=>startSignal?.throwIfAborted();
@@ -80,7 +83,7 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
    if(!live(child))throw Error(spec.id+' 浏览器 '+kind+' 未就绪：进程退出 '+child.nativeOutput);
    await sleep(25);
   }while(Date.now()<until);
-  throw Error(spec.id+' 浏览器 '+kind+' readiness 就绪超时');
+  throw Error(spec.id+' 浏览器 '+kind+' readiness 就绪超时：'+(child.nativeError?.message||child.nativeOutput||'无子进程输出'));
  }
  async function stopChildren(){
   for(const child of [...children].reverse()){
