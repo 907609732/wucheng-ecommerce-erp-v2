@@ -35,6 +35,7 @@ useradd --create-home --uid 23003 erpdiag
 mkdir -p /var/apps/wuchengerpdiag "$work/diag-volume"
 ln -s "$diag/app" /var/apps/wuchengerpdiag/target
 export TRIM_APPDEST=/var/apps/wuchengerpdiag/target TRIM_APPDEST_VOL="$work/diag-volume" TRIM_USERNAME=erpdiag TRIM_APPNAME=wuchengerpdiag
+ERP_DIAG_STOP_CI=1 /usr/bin/python3 -I -B "$helper/check-diagnostic-stop.py" "$diag/cmd" "$work" "$out"
 # Exercise the real root-owned install hook, not an equivalent direct smoke call.
 /bin/sh "$diag/cmd/install_callback"
 mkdir -p "$out/diagnostic-evidence"

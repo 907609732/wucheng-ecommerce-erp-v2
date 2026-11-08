@@ -25,7 +25,7 @@ const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelc
 // The pinned core entry is CommonJS with computed exports; use its public CJS
 // API rather than assuming Node synthesizes named ESM exports for it.
 const {chromium}=require('playwright-core');
-const report={ok:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,checks:[],ports:{sales:19222+offset,overview:19223+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
+const report={ok:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,successfulStarts:0,checks:[],ports:{sales:19222+offset,overview:19223+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/download'){res.writeHead(200,{'content-type':'text/plain','content-disposition':'attachment; filename="native-acceptance.txt"'});res.end('native FPK download acceptance\n');return;}
  if(req.url?.startsWith('/novnc/')){
@@ -36,6 +36,7 @@ const fixture=http.createServer((req,res)=>{
  res.setHeader('content-type','text/html; charset=utf-8');res.end('<!doctype html><html><head><title>Native acceptance</title></head><body><h1>五成 ERP 原生验收</h1><label>Acceptance input <input aria-label="Acceptance input"></label><a href="/download" download>Download fixture</a><p id="status">Synthetic local fixture</p></body></html>');
 });
 await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+fixture.address().port;
+report.fixturePort=fixture.address().port;
 let configFile,client,transport,browser,viewerBrowser,initializingServices;
 let interrupting=false;
 async function interrupt(){
@@ -48,6 +49,12 @@ async function interrupt(){
  fs.writeFileSync(path.join(evidence,'acceptance.json'),JSON.stringify(report,null,2)+'\n');clearTimeout(hard);process.exit(124);
 }
 process.on('SIGTERM',interrupt);process.on('SIGINT',interrupt);
+// Bounded CI-only phase barrier makes external-stop races reproducible while
+// retaining the real Node/lifecycle/collector/Chromium/MCP/fixture processes.
+async function checkpoint(phase){
+ fs.writeFileSync(path.join(evidence,'phase.json'),JSON.stringify({phase,fixturePort:report.fixturePort,successfulStarts:report.successfulStarts})+'\n');
+ if(diagnostic&&process.env.ERP_DIAGNOSTIC_TEST_PAUSE===phase){const until=Date.now()+30000;while(!interrupting&&Date.now()<until)await new Promise(r=>setTimeout(r,50));}
+}
 async function connect(port){
  const c=new Client({name:'native-fpk-acceptance',version:'1.0.0'},{capabilities:{}});
  const tr=new StdioClientTransport({command:process.execPath,args:[path.join(release,'apps/sales/node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint','http://127.0.0.1:'+port,'--output-dir',evidence,'--timeout-navigation','30000'],env:collectorChildEnvironment(),cwd:evidence,stderr:'pipe'});
@@ -95,16 +102,17 @@ try{
   const services=initializingServices=await createSourceServices(c);try{for(const id of Object.keys(c.modules)){assert(!interrupting,'acceptance cancelled');await services.ensure(id);}}finally{await services.stopOwned();initializingServices=null;}
   c.mode='production';c.releaseRoot=release;c.tcpEnabled=true;c.fnos={enabled:false};c.publicOrigin='https://native-acceptance.example.com';c.dataVersion={enabled:false};
   c.native={dataRoot:data,home:path.join(data,'uvcs-home'),nodePath:process.execPath,requireBrowsers:true,browser:browserConfig};fs.mkdirSync(c.native.home,{mode:0o700});
-  fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
+  await checkpoint('before-config');fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
  }else configFile=await configureNative({releaseRoot:release,dataRoot:data,mode:'fresh',publicOrigin:'https://native-acceptance.example.com',allowedUids:['23001'],allowedOrigins:['https://native-acceptance.example.com'],socketPath:path.join(app,'app.sock'),requireBrowsers:true,browser:browserConfig});
  const c=loadConfig(configFile);c.port=diagnostic?29430:28430+offset;
  for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(configFile,JSON.stringify(c));
- const first=await nativeLifecycle('start',configFile);assert(first.ok&&first.browser.ready);report.checks.push('fresh lifecycle with two browsers and real collector');
+ const first=await nativeLifecycle('start',configFile);assert(first.ok&&first.browser.ready);report.successfulStarts++;report.checks.push('fresh lifecycle with two browsers and real collector');
  const identity={serverId:first.serverId,dataSetId:first.dataSetId};
  if(diagnostic){assert.equal((await fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health')).status,200);report.checks.push('synthetic loopback-only TCP / fnOS disabled / UVCS disabled');}
  else{assert.equal((fs.statSync(path.join(app,'app.sock')).mode&0o777),0o600);await assert.rejects(fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health',{signal:AbortSignal.timeout(1000)}));report.checks.push('Unix-only gateway / no TCP gateway');}
  ({client,transport}=await connect(19222+offset));
+ await checkpoint('after-first-start');
  await tool('browser_navigate',{url:'chrome://sandbox/'});
  const sandbox=await tool('browser_evaluate',{function:'() => document.body.innerText'});
  fs.writeFileSync(path.join(evidence,'chromium-sandbox.txt'),sandbox);
@@ -138,7 +146,7 @@ try{
  report.persistenceBefore={cookieExpires:cookie.expires,cookieValue:cookie.value,storage:await page.evaluate(()=>localStorage.getItem('native_acceptance')),profileRealpath:fs.realpathSync(profileRoot),lastVersion:fs.existsSync(path.join(profileRoot,'Last Version'))?fs.readFileSync(path.join(profileRoot,'Last Version'),'utf8'):null};assert.equal(report.persistenceBefore.storage,'retained');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  assert(fs.existsSync(profileRoot));assert.equal(fs.readdirSync(path.dirname(profileRoot)).filter(n=>n.startsWith('sales.retained-')).length,0,'Unexpected profile archive');
- const second=await nativeLifecycle('start',configFile);assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
+ const second=await nativeLifecycle('start',configFile);report.successfulStarts++;assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
  assert.equal(second.browser.browsers.sales.retainedProfile,null);assert.equal(fs.realpathSync(profileRoot),report.persistenceBefore.profileRealpath);
  ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=mcpEvaluationResult(await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'}));report.persistenceAfter=retained;assert.match(retained.cookie,/native_acceptance=retained/);assert.equal(retained.storage,'retained');
  report.checks.push('restart generation / ledger identity / persistent synthetic browser session');
