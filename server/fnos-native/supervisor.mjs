@@ -50,11 +50,18 @@ function terminateDescendants(){
  }catch{}
 }
 export async function runSupervisor(configFile,{createRuntime=createWebRuntime}={}){
- configFile=physicalPath(configFile);const config=loadConfig(configFile);
- if(config.mode!=='production'||!config.native)throw Error('原生 supervisor 需要正式配置');
+ configFile=physicalPath(configFile);
+ // This first snapshot only locates the stable lock; it is never runtime input.
+ const ownershipStateDir=physicalPath(loadConfig(configFile).stateDir);
  if(process.platform==='linux'&&process.getuid()===0)throw Error('长期服务必须使用专用 package 用户，不能以 root 运行');
- fs.mkdirSync(config.stateDir,{recursive:true,mode:0o700});
- const lock=new DatabaseSync(path.join(config.stateDir,'native-ownership.sqlite'));try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch(error){lock.close();throw Error('原生实例已有 supervisor，拒绝重复启动');}
+ fs.mkdirSync(ownershipStateDir,{recursive:true,mode:0o700});
+ const lock=new DatabaseSync(path.join(ownershipStateDir,'native-ownership.sqlite'));try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch(error){lock.close();throw Error('原生实例已有 supervisor，拒绝重复启动');}
+ let config;
+ try{
+  config=loadConfig(configFile);
+  if(physicalPath(config.stateDir)!==ownershipStateDir)throw Error('原生配置状态/所有权锁绑定已改变，拒绝启动');
+  if(config.mode!=='production'||!config.native)throw Error('原生 supervisor 需要正式配置');
+ }catch(error){lock.close();throw error;}
  const record={schemaVersion:1,pid:process.pid,generation:randomUUID(),token:randomUUID()+randomUUID(),configFile,startedAt:new Date().toISOString()};
  const recordFile=path.join(config.stateDir,'native-supervisor.json'),endpoint=nativeEndpoint(config.stateDir);
  let runtime,collector,browsers,server,monitor,startupTask,stopping=null,ready=false,closed=false,monitoring=false;

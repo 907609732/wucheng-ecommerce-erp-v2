@@ -146,6 +146,7 @@ function checkUvcs(c){
 }
 export async function configureNative(o={}){
  if(!['fresh','migrate','existing'].includes(o.mode))throw Error('必须显式指定 mode fresh、migrate 或 existing 模式');
+ if(o.requireBrowsers!==undefined&&typeof o.requireBrowsers!=='boolean')throw Error('原生浏览器要求必须为布尔值');
  const releaseRoot=physicalPath(o.releaseRoot),dataRoot=physicalPath(o.dataRoot);
  if(within(dataRoot,releaseRoot)||within(releaseRoot,dataRoot))throw Error('持久数据必须位于可替换 releaseRoot 之外');
  for(const id of moduleIds)if(!fs.existsSync(path.join(releaseRoot,'apps',id,'server.mjs')))throw Error('ERP 程序不完整');
@@ -172,6 +173,7 @@ export async function configureNative(o={}){
     if(o.publicOrigin&&c.tcpEnabled===false)c.publicOrigin=o.publicOrigin;
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
     if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
+    if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
     if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
     c=validateConfig(c);checkUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
    }finally{ownership.close();}
@@ -197,6 +199,7 @@ export async function configureNative(o={}){
    remapReferences(stage,rebased.maps);
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));
   }
+  if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
   fs.mkdirSync(path.join(stage,'socket'),{recursive:true,mode:0o700});integrity(stage);
   validateConfig(remap(c,[[dataRoot,stage]]));if(c.dataVersion?.enabled)checkUvcs(remap(c,[[dataRoot,stage]]));
   atomicJson(path.join(stage,'config','web.json'),c);fs.renameSync(stage,dataRoot);return targetFile;

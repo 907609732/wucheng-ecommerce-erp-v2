@@ -95,6 +95,47 @@ test('existing configure refuses the ownership window before the supervisor publ
  try{await assert.rejects(configureNative({...options(data),mode:'existing',allowedUids:['9999']}),/运行|启动|ownership/);}finally{lock.close();}
  assert.deepEqual(loadConfig(file).fnos.allowedUids,['1000']);
 });
+test('direct supervisor reloads the access configuration after claiming its initially located ownership lock',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-read-race-')),data=path.join(dir,'data'),file=await configureNative(options(data));
+ const read=path.join(dir,'initial-read'),resume=path.join(dir,'resume');
+ const source=`import fs from 'node:fs';import {runSupervisor} from ${JSON.stringify(pathToFileURL(path.join(releaseRoot,'server/fnos-native/supervisor.mjs')).href)};const original=fs.readFileSync;let held=false;fs.readFileSync=function(p,...args){const value=original.call(this,p,...args);if(p===${JSON.stringify(file)}&&!held){held=true;fs.writeFileSync(${JSON.stringify(read)},'read');while(!fs.existsSync(${JSON.stringify(resume)}))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}return value;};runSupervisor(${JSON.stringify(file)},{createRuntime:async c=>{process.send({uids:c.fnos.allowedUids});throw Error('snapshot captured before runtime launch');}}).catch(()=>{if(process.connected)process.disconnect();});`;
+ const child=spawn(process.execPath,['--input-type=module','-e',source],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+ const closed=new Promise(resolve=>child.once('close',resolve));const snapshot=new Promise(resolve=>child.on('message',message=>{if(message.uids)resolve(message.uids);}));
+ let reboundChild,reboundClosed;
+ t.after(async()=>{fs.writeFileSync(resume,'resume');if(child.exitCode===null){child.kill();await closed;}if(reboundChild?.exitCode===null){reboundChild.kill();await reboundClosed;}fs.rmSync(dir,{recursive:true,force:true});});
+ const until=Date.now()+10000;while(!fs.existsSync(read)&&Date.now()<until)await new Promise(r=>setTimeout(r,20));assert.ok(fs.existsSync(read));
+ await configureNative({...options(data),mode:'existing',allowedUids:['2002']});fs.writeFileSync(resume,'resume');
+ const observed=await deadline(snapshot,10000,'supervisor did not expose its runtime snapshot');await deadline(closed,10000,'supervisor did not finish');
+ assert.deepEqual(observed,['2002'],'runtime must consume the committed ACL rather than the pre-ownership snapshot');
+ fs.unlinkSync(read);fs.unlinkSync(resume);
+ reboundChild=spawn(process.execPath,['--input-type=module','-e',source],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
+ reboundClosed=new Promise(resolve=>reboundChild.once('close',resolve));let constructed=false;reboundChild.on('message',message=>{if(message.uids)constructed=true;});
+ const reboundUntil=Date.now()+10000;while(!fs.existsSync(read)&&Date.now()<reboundUntil)await new Promise(r=>setTimeout(r,20));assert.ok(fs.existsSync(read));
+ const rebound=path.join(dir,'rebound');fs.cpSync(data,rebound,{recursive:true});const changed=loadConfig(file);
+ changed.stateDir=path.join(rebound,'state');changed.native.dataRoot=rebound;changed.native.home=path.join(rebound,'uvcs-home');
+ for(const [id,m] of Object.entries(changed.modules))m.dataDir=path.join(rebound,'data',id);
+ fs.writeFileSync(file,JSON.stringify(changed));fs.writeFileSync(resume,'resume');
+ await deadline(reboundClosed,10000,'changed ownership binding did not terminate startup');
+ assert.equal(constructed,false,'changing state/lock binding after the initial read must refuse runtime construction');
+});
+test('real package configure CLI preserves independent updates with one serialized browser-required commit',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-package-race-')),data=path.join(dir,'data'),file=await configureNative(options(data));
+ const committed=path.join(dir,'committed'),resume=path.join(dir,'resume'),hook=path.join(dir,'hook.mjs');
+ const source=`import fs from 'node:fs';import path from 'node:path';const target=${JSON.stringify(file)},commit=${JSON.stringify(committed)},resume=${JSON.stringify(resume)},read=fs.readFileSync,rename=fs.renameSync;let writes=0,held=false;fs.renameSync=function(from,to){const result=rename.call(this,from,to);if(path.resolve(to)===target){writes++;fs.writeFileSync(commit,String(writes));}return result;};fs.readFileSync=function(p,...args){const value=read.call(this,p,...args);if(writes&&path.resolve(String(p))===target&&!held){held=true;while(!fs.existsSync(resume))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}return value;};`;
+ fs.writeFileSync(hook,source);
+ const env={...process.env,ERP_NATIVE_PACKAGE:'1',ERP_NATIVE_RELEASE:releaseRoot,ERP_NATIVE_DATA:data,erp_mode:'existing',erp_uids:'',erp_origins:'',erp_origin:''};
+ const cli=path.join(releaseRoot,'server/fnos-native/lifecycle.mjs'),children=[];
+ const launch=(args,preload=false)=>{const child=spawn(process.execPath,[...(preload?['--import',pathToFileURL(hook).href]:[]),cli,'configure','--config',file,...args],{env,windowsHide:true,stdio:['ignore','ignore','pipe']});let error='';child.stderr.on('data',chunk=>{error+=chunk;});children.push(child);return {child,error:()=>error,closed:new Promise(resolve=>child.once('close',code=>resolve(code)))};};
+ t.after(async()=>{fs.writeFileSync(resume,'resume');for(const child of children)if(child.exitCode===null){child.kill();await new Promise(r=>child.once('close',r));}fs.rmSync(dir,{recursive:true,force:true});});
+ const first=launch(['--uids','3003'],true),until=Date.now()+10000;
+ while(!fs.existsSync(committed)&&Date.now()<until)await new Promise(r=>setTimeout(r,20));assert.ok(fs.existsSync(committed),first.error());
+ const second=launch(['--origins','https://second-nas.example.com']);
+ const secondCode=await deadline(second.closed,10000,'second package configure failed to finish');fs.writeFileSync(resume,'resume');
+ const firstCode=await deadline(first.closed,10000,'first package configure failed to finish');
+ assert.equal(firstCode,0);assert.equal(secondCode,0);
+ const result=loadConfig(file);assert.deepEqual(result.fnos.allowedUids,['3003']);assert.deepEqual(result.fnos.allowedOrigins,['https://second-nas.example.com']);
+ assert.equal(result.native.requireBrowsers,true);assert.equal(Number(fs.readFileSync(committed,'utf8')),1,'package requirement belongs to the serialized commit');
+});
 test('interrupting a blocked startup drains its already-owned module before supervisor exit',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-interrupt-')),file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
  c.fnos={enabled:false};c.tcpEnabled=true;c.port=45000+Math.floor(Math.random()*1000);
