@@ -14,7 +14,7 @@
 
 - 可替换程序位于 TRIM_APPDEST；持久账本/附件/网关身份/统一月锁密码/审计/UVCS 队列/浏览器 profile 位于独立持久数据根，安装向导提供新建和迁移两种明确模式。
 - 迁移输入必须是已停止写入并校验完整的副本。复制进私有持久根，保留 serverId/dataSetId、原件、锁和密钥；原 Docker 数据保留为停机回退材料。迁移不能把缺失数据库当新建初始化。正式旧容器与原生服务不得同时写入。
-- 新建安装显式初始化三个空账本，之后切为 production；不放入开发身份或开放 TCP。向导收集 NAS 访问地址、授权 UID；实例身份首次生成且持久保存。迁移沿用原授权、instanceId 与 Tailscale publicOrigin。
+- 新建安装显式初始化三个空账本，之后切为 production；不放入开发身份或开放 TCP。向导收集 NAS 访问地址、授权 UID；实例身份首次生成且持久保存。新建默认 fnOS-only，TCP 身份入口禁用，publicOrigin 使用用户配置的真实 NAS HTTPS 地址；可另配 Tailscale。迁移沿用原授权、instanceId 与 Tailscale publicOrigin，并启用原 TCP 备用入口。
 - Unix 网关保持受控物理目录、当前运行用户拥有、0600 socket 和既有唯一 generation 契约。应用生命周期可用最小 root 准备目录/属主，所有长期服务降权为专用 package 用户；不赋予 Docker socket 或主机根目录访问权限。
 - 保留 127.0.0.1:28430 和现有 Tailscale Serve；不启动第二套 Tailscale、不修改网络/DNS、不带走他人的凭据。
 - 分发包不含真实账本、NAS 地址/UID白名单、管理员密码、会话、UVCS 认证或浏览器 profile。
