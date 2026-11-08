@@ -5,7 +5,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {fail} from './util.mjs';
 import {CainiaoAuthorization} from './cainiao-auth.mjs';
-import {collectorConnection} from '../../../server/collector-browser-connection.mjs';
+import {collectorConnection,collectorChildEnvironment} from '../../../server/collector-browser-connection.mjs';
 const require=createRequire(import.meta.url);
 
 // Reload this fixed local adapter after source updates without discarding browser consent.
@@ -21,7 +21,7 @@ export class CainiaoBrowser{
    const connection=collectorConnection('overview');
    const cli=path.join(path.dirname(require.resolve('@playwright/mcp/package.json')),'cli.js');
    const token=connection.usesExtension?await this.authorization.load():'';if(generation!==this.generation)return this.status();
-   const transport=new StdioClientTransport({command:process.execPath,args:[cli,...connection.args,'--output-dir',this.dir,'--output-max-size','1073741824','--snapshot-mode','none','--no-webmcp','--timeout-action','15000'],...(token?{env:{PLAYWRIGHT_MCP_EXTENSION_TOKEN:token}}:{}),cwd:path.resolve(import.meta.dirname,'..'),stderr:'pipe'});
+   const transport=new StdioClientTransport({command:process.execPath,args:[cli,...connection.args,'--output-dir',this.dir,'--output-max-size','1073741824','--snapshot-mode','none','--no-webmcp','--timeout-action','15000'],env:{...collectorChildEnvironment(),...(token?{PLAYWRIGHT_MCP_EXTENSION_TOKEN:token}:{})},cwd:path.resolve(import.meta.dirname,'..'),stderr:'pipe'});
    transport.stderr?.on('data',()=>{});client=new Client({name:'灵兔云仓账单',version:'1.3.0'},{capabilities:{}});this.client=client;await client.connect(transport);
    // Automatic approval may attach the extension's connection page. Create a
    // normal blank tab through the official API; never inspect that internal page.

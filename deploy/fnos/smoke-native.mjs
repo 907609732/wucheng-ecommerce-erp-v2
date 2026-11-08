@@ -17,6 +17,7 @@ assert(Number.isInteger(offset)&&offset>=0&&offset<=10000&&offset%100===0);
 fs.mkdirSync(evidence,{recursive:true});
 const {configureNative}=await import(pathToFileURL(path.join(release,'server/fnos-native/configure.mjs')));
 const {nativeLifecycle}=await import(pathToFileURL(path.join(release,'server/fnos-native/lifecycle.mjs')));
+const {collectorChildEnvironment}=await import(pathToFileURL(path.join(release,'server/collector-browser-connection.mjs')));
 const {databases,loadConfig,developmentConfig,validateConfig}=await import(pathToFileURL(path.join(release,'server/config.mjs')));
 const require=createRequire(path.join(release,'apps/sales/package.json'));
 const {Client}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/index.js')));
@@ -49,7 +50,7 @@ async function interrupt(){
 process.on('SIGTERM',interrupt);process.on('SIGINT',interrupt);
 async function connect(port){
  const c=new Client({name:'native-fpk-acceptance',version:'1.0.0'},{capabilities:{}});
- const tr=new StdioClientTransport({command:process.execPath,args:[path.join(release,'apps/sales/node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint','http://127.0.0.1:'+port,'--output-dir',evidence,'--timeout-navigation','30000'],cwd:evidence,stderr:'pipe'});
+ const tr=new StdioClientTransport({command:process.execPath,args:[path.join(release,'apps/sales/node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint','http://127.0.0.1:'+port,'--output-dir',evidence,'--timeout-navigation','30000'],env:collectorChildEnvironment(),cwd:evidence,stderr:'pipe'});
  tr.stderr?.on('data',b=>fs.appendFileSync(path.join(evidence,'mcp.stderr.log'),b));await c.connect(tr);
  const tools=await c.listTools();fs.writeFileSync(path.join(evidence,'mcp-tool-schemas.json'),JSON.stringify(tools.tools.filter(t=>['browser_navigate','browser_type','browser_click','browser_evaluate','browser_snapshot'].includes(t.name)),null,2)+'\n');return {client:c,transport:tr};
 }

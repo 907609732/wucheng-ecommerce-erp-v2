@@ -45,6 +45,10 @@ commit; vendored notices use the component commits recorded by the upstream
 Linux SBOM. Missing crate notices are recovered at the crate's `.cargo_vcs_info`
 revision. `canvas-source-inputs.json` records URLs, coverage and every delivered
 file hash. These HTTPS materials are not separately signature verified.
+The fixed Canvas Dockerfile also selects LLVM19 static C++/ABI/unwind runtimes,
+which its SBOM omits. Official LLVM19.1.7 root/component license texts are included
+as additional notices; the upstream builder image tag does not attest its exact
+LLVM patch. These permissive runtime notices do not require an LLVM source tree.
 
 Pinned input provenance in `native-inputs.env`: Node SHA256 is checked against
 the official `SHASUMS256.txt` over HTTPS (detached signature not checked here).

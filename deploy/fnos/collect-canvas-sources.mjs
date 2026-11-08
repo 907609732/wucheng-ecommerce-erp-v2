@@ -42,7 +42,11 @@ let next=0;await Promise.all(Array.from({length:6},async()=>{while(next<policy.c
 }}));
 const skia='95ee33d7ec7791ab9c071675710a14fe6408ae4f';
 for(const file of ['LICENSE','DEPS']){const url='https://raw.githubusercontent.com/google/skia/'+skia+'/'+file;save('notices/skia/'+file,await get(url),url);}
-for(const file of ['LICENSE','Cargo.lock','scripts/skia-gn-args.cjs','scripts/generate-sbom.mjs']){const url='https://raw.githubusercontent.com/Brooooooklyn/canvas/v1.0.11/'+file;save('notices/canvas/'+file,await get(url),url);}
+for(const file of ['LICENSE','Cargo.lock','Dockerfile','scripts/skia-gn-args.cjs','scripts/generate-sbom.mjs']){const url='https://raw.githubusercontent.com/Brooooooklyn/canvas/v1.0.11/'+file;save('notices/canvas/'+file,await get(url),url);}
+// Upstream's pinned Dockerfile also statically selects LLVM19 libc++/ABI/unwind.
+// The SBOM omits these. Preserve official LLVM19 license texts in addition to
+// SBOM components; the builder tag does not establish the exact patch version.
+for(const part of ['','libcxx/','libcxxabi/','libunwind/','compiler-rt/']){const file=part+'LICENSE.TXT',url='https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-19.1.7/'+file;save('notices/llvm19/'+file,await get(url),url,{scope:'LLVM19 static C++/ABI/unwind/compiler runtime notices; exact upstream build patch not attested'});}
 assert.equal(policy.vendored.length,12,'Review changed enabled Skia native components');
 for(const c of policy.vendored){
  const repo=c.properties.find(p=>p.name==='cdx:skia:repositoryUrl').value.replace(/\/$/,'');assert(repo.startsWith('https://')&&/^[0-9a-f]{40}$/.test(c.version));
@@ -53,7 +57,7 @@ for(const c of policy.vendored){
  assert(files.length,'Canvas Skia component license text missing: '+c.name);
  for(const f of files){const url=root+f+'?format=TEXT';save('notices/skia-vendored/'+c.name+'/'+f,Buffer.from((await get(url)).toString(),'base64'),url,{commit:c.version,licenses:c.licenses});}
 }
-const result={npmPackage:pkg.name,npmVersion:pkg.version,sbomSHA256:sha(sbomBytes),skiaCommit:skia,rustComponents:policy.crates.length,mplSourceComponents:policy.correspondingSource.map(c=>({name:c.name,version:c.version})),skiaVendoredComponents:policy.vendored.length,records,verification:'Native binary and Rust sources checked against shipped upstream SBOM; fixed-commit upstream HTTPS notices with calculated SHA256; no detached signature'};
+const result={npmPackage:pkg.name,npmVersion:pkg.version,sbomSHA256:sha(sbomBytes),skiaCommit:skia,rustComponents:policy.crates.length,mplSourceComponents:policy.correspondingSource.map(c=>({name:c.name,version:c.version})),skiaVendoredComponents:policy.vendored.length,staticRuntimeNotices:{family:'LLVM19 libc++/libc++abi/libunwind/compiler-rt',licenseTextTag:'llvmorg-19.1.7',evidence:'Pinned Canvas Dockerfile and skia-gn-args.cjs; builder image tag does not attest exact LLVM patch'},records,verification:'Native binary and Rust sources checked against shipped upstream SBOM; fixed-commit upstream HTTPS notices with calculated SHA256; no detached signature'};
 fs.writeFileSync(path.join(dest,'SOURCE-INPUTS.json'),JSON.stringify(result,null,2)+'\n');
 const target=path.join(stage,'app/runtime/licenses/canvas');fs.cpSync(notices,target,{recursive:true});fs.copyFileSync(path.join(dest,'sbom.cdx.json'),path.join(target,'sbom.cdx.json'));fs.copyFileSync(path.join(dest,'SOURCE-INPUTS.json'),path.join(target,'SOURCE-INPUTS.json'));
 fs.writeFileSync(path.join(work,'canvas-source-inputs.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({canvasRustNotices:policy.crates.length,canvasMPLSources:policy.correspondingSource.length,canvasSkiaVendoredNotices:policy.vendored.length}));

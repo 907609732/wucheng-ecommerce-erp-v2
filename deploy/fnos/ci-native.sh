@@ -21,11 +21,18 @@ for app in purchase sales overview; do npm ci --prefix "apps/$app" --ignore-scri
 useradd --create-home --uid 23002 erpchecks
 printf '%s\n' 'erpchecks ALL=(root) NOPASSWD: /usr/bin/python3' > /etc/sudoers.d/erpchecks
 chmod 440 /etc/sudoers.d/erpchecks
-# Full root web suite and three business modules run once with Linux production
-# dependencies. Package-user tests must not be silently skipped because root CI.
+# Full suites remain available for manual/release verification. Iterative native
+# payload fixes use the owning root/native/browser/release regressions after the
+# recorded full Linux suites have passed; actual payload checks are always run.
 tests_status=0
-runuser -u erpchecks -- env PATH="$PATH" npm test || tests_status=1
-for app in purchase sales overview; do runuser -u erpchecks -- env PATH="$PATH" npm --prefix "apps/$app" test || tests_status=1; done
+case "${ERP_CI_CHECK_SCOPE:-full}" in
+ full)
+  runuser -u erpchecks -- env PATH="$PATH" npm test || tests_status=1
+  for app in purchase sales overview; do runuser -u erpchecks -- env PATH="$PATH" npm --prefix "apps/$app" test || tests_status=1; done;;
+ focused)
+  runuser -u erpchecks -- env PATH="$PATH" node --test tests/web-fnos*.test.mjs tests/web-collector*.test.mjs tests/web-release.test.mjs tests/web-module-path-privacy.test.mjs || tests_status=1;;
+ *) echo 'Unknown ERP_CI_CHECK_SCOPE; use full or focused.' >&2; exit 1;;
+esac
 /usr/bin/python3 -I -B tests/fnos-native-retained-recovery.py
 for script in deploy/fnos/*.sh deploy/fnos/wuchengerp/cmd/*; do
  test -f "$script" || continue

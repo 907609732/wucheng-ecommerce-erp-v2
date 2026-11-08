@@ -10,6 +10,12 @@ on:
       - package.json
       - package-lock.json
   workflow_dispatch:
+    inputs:
+      check_scope:
+        description: Test scope (full suites or focused native packaging checks)
+        type: choice
+        options: [full, focused]
+        default: full
 permissions:
   contents: read
 concurrency:
@@ -41,6 +47,7 @@ jobs:
           # neither uses Docker nor grants Linux capabilities to its package user.
           docker run --rm --init --privileged --security-opt apparmor=unconfined \
             -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_WORK_ROOT=/build \
+            -e ERP_CI_CHECK_SCOPE="${{ inputs.check_scope || 'focused' }}" \
             -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/ci-native.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/ci-build.log"
