@@ -21,6 +21,9 @@ export function verifyArtifact(folder){
  const requireFile=p=>{if(!fs.statSync(path.join(root,p)).isFile())throw Error('Missing payload '+p);};
  const manifest=read('manifest'),fields=manifestFields(manifest);
  for(const [key,value] of Object.entries({appname:'wuchengerp',version:'0.15.0',platform:'x86'}))if(fields[key]!==value)throw Error('Invalid manifest '+key);
+ const staticConfig=path.join(app,'config');
+ if(JSON.stringify(fs.readdirSync(staticConfig).sort())!==JSON.stringify(['privilege','resource']))throw Error('Only official static metadata may exist in app/config');
+ for(const name of ['privilege','resource'])if(!fs.readFileSync(path.join(root,'config',name)).equals(fs.readFileSync(path.join(staticConfig,name))))throw Error('Official static metadata differs: '+name);
  const elf=['runtime/node/bin/node','runtime/chromium/chrome',...['Xvfb','x11vnc','xauth','xkbcomp'].map(n=>'runtime/sysroot/usr/bin/'+n)];
  for(const relative of elf){
   const f=path.join(app,relative),b=fs.readFileSync(f);

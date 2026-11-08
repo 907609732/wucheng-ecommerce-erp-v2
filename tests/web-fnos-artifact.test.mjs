@@ -12,6 +12,7 @@ function fixture(t){
  const stage=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-artifact-'));
  t.after(()=>fs.rmSync(stage,{recursive:true,force:true}));
  fs.cpSync(path.join(root,'deploy/fnos/wuchengerp'),stage,{recursive:true});
+ fs.mkdirSync(path.join(stage,'app/config'),{recursive:true});for(const name of ['privilege','resource'])fs.copyFileSync(path.join(stage,'config',name),path.join(stage,'app/config',name));
  for(const name of fs.readdirSync(path.join(stage,'cmd')))fs.chmodSync(path.join(stage,'cmd',name),0o755);
  fs.writeFileSync(path.join(stage,'manifest'),'appname=wuchengerp\nversion=0.15.0\nplatform=x86\n');
  const elf=Buffer.alloc(64);elf.set([0x7f,69,76,70,2,1]);elf.writeUInt16LE(62,18);
@@ -49,6 +50,13 @@ test('packed manifest preserves every source field and verifies official app arc
  assert.equal(verify().status,0);
  for(const invalid of [manifest.replace('原生完整运行时','changed'),manifest+'unexpected=field\n',manifest+'appname=other\n']){fs.writeFileSync(packed,invalid);assert.notEqual(verify().status,0);}
  fs.writeFileSync(packed,manifest);fs.appendFileSync(archive,'corrupt');assert.notEqual(verify().status,0);
+});
+
+test('official static metadata duplicates are complete, byte-identical and exclude business config',t=>{
+ const stage=fixture(t),config=path.join(stage,'app/config'),file=path.join(config,'privilege'),original=fs.readFileSync(file);
+ fs.writeFileSync(file,'{"defaults":{"run-as":"package"}}');assert.notEqual(run(stage).status,0);
+ fs.writeFileSync(file,original);fs.writeFileSync(path.join(config,'web.json'),'{}');assert.notEqual(run(stage).status,0);fs.unlinkSync(path.join(config,'web.json'));
+ fs.unlinkSync(path.join(config,'resource'));assert.notEqual(run(stage).status,0);
 });
 test('artifact rejects ledger/config/profile and modified release contents',t=>{
  const stage=fixture(t);

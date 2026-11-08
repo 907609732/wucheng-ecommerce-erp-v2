@@ -29,6 +29,7 @@ disable_authorization_path=true
 EOF
 printf '%s\n' '{"defaults":{"run-as":"root"}}' > "$diag/config/privilege"
 printf '%s\n' '{}' > "$diag/config/resource"
+for relative in config/privilege config/resource; do install -D -m644 "$diag/$relative" "$diag/app/$relative"; done
 for file in "$helper/diagnostic-cmd/"*; do install -m755 "$file" "$diag/cmd/$(basename "$file")"; done
 useradd --create-home --uid 23003 erpdiag
 mkdir -p /var/apps/wuchengerpdiag "$work/diag-volume"
