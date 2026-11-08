@@ -33,7 +33,7 @@ for(const [i,url] of urls.entries()){
  const name=String(i+1).padStart(2,'0')+'-'+new URL(url).pathname.split('/').at(-1);
  // freedesktop's GitLab rejects automated downloads (HTTP 406). This is the
  // project's official GitHub mirror, same exact tag, not an unrelated tarball.
- const mirror=url.includes('gitlab.freedesktop.org/fontconfig/fontconfig/')?'https://codeload.github.com/fontconfig/fontconfig/tar.gz/refs/tags/2.18.3':url;
+ const mirror=url.includes('gitlab.freedesktop.org/fontconfig/fontconfig/')?'https://codeload.github.com/fontconfig/fontconfig/tar.gz/refs/tags/2.18.3':url.includes('gitlab.com/libtiff/libtiff/')?'https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz':url;
  const file=await download(mirror,name);if(mirror!==url)records.at(-1).upstreamRecipeURL=url;
  if(/\.tar\.(?:gz|xz)$/.test(name))execFileSync('tar',['-tf',file],{stdio:'ignore'});
  if(url.includes('/librsvg-'))rsvg=file;
