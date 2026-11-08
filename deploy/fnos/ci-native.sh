@@ -2,7 +2,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl git python3 procps util-linux
+apt-get install -y --no-install-recommends ca-certificates curl git python3 procps util-linux xz-utils
 test -x /usr/bin/python3
 git config --system --add safe.directory /src
 source deploy/fnos/native-inputs.env
