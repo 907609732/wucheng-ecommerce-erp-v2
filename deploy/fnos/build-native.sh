@@ -103,5 +103,8 @@ mkdir -p "$work/sources/native-build"; cp "$helper/"*.sh "$helper/"*.mjs "$helpe
 cp "$work/diagnostic/meson-buildoptions.json" "$work/sources/native-build/diag-meson-buildoptions.json"
 (cd "$work/sources"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/SOURCE-SHA256SUMS.txt")
 tar --zstd -cf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" -C "$work/sources" .
+zstd --test "$out/wuchengerp-0.15.0-corresponding-source.tar.zst"
+tar --zstd -tf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" | grep -v '/$' | LC_ALL=C sort > "$out/SOURCE-FILES.txt"
+diff -u <(awk '{ print substr($0,67) }' "$out/SOURCE-SHA256SUMS.txt") "$out/SOURCE-FILES.txt"
 sha256sum wuchengerp-0.15.0-corresponding-source.tar.zst >> SHA256SUMS.txt
 printf '%s\n' "commit=$(git -C "$repo" rev-parse HEAD)" "run_id=${GITHUB_RUN_ID:-local}" 'platform=linux/amd64' 'libc=host glibc 2.36' > BUILD-INFO.txt

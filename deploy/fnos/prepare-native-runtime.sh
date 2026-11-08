@@ -27,7 +27,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   build-essential meson ninja-build pkg-config pax-utils=1.3.7-1 python3-pyelftools \
   "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION" \
-  x11vnc xauth x11-xkb-utils xkb-data xfonts-base fonts-noto-cjk fontconfig \
+  x11vnc xauth x11-xkb-utils xkb-data xfonts-base xfonts-encodings fonts-noto-cjk fontconfig \
   "xvfb=$XORG_VERSION" \
   libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 \
   ca-certificates zstd strace util-linux
@@ -74,9 +74,12 @@ for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mes
  done < <(dpkg-query -L "$package")
 done
 lddtree --copy-to-tree "$sysroot" "${extras[@]}"
-for p in /usr/share/X11/xkb /usr/share/X11/locale /usr/share/fonts/X11/misc /usr/share/fonts/opentype/noto /etc/fonts; do
+for p in /usr/share/X11/xkb /usr/share/X11/locale /usr/share/fonts/X11/misc /usr/share/fonts/X11/encodings /usr/share/fonts/opentype/noto /etc/fonts; do
  mkdir -p "$sysroot$(dirname "$p")"; cp -aL "$p" "$sysroot$p"
 done
+# Debian's postinstall encodings index contains host absolute paths. Regenerate
+# the font metadata with standard mkfontdir and relative paths for both packages.
+(cd "$sysroot/usr/share/fonts/X11/misc"; mkfontdir -e ../encodings -e ../encodings/large .)
 # Keep the NAS loader/glibc 2.36 family. Never mix a private glibc and host loader.
 find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*' -o -name 'libm.so*' -o -name 'libpthread.so*' -o -name 'libdl.so*' -o -name 'librt.so*' -o -name 'libresolv.so*' -o -name 'libutil.so*' -o -name 'libanl.so*' -o -name 'libBrokenLocale.so*' -o -name 'libnss_*.so*' \) -delete
 # Source ownership is derived from every copied Debian path, including resource
@@ -85,6 +88,9 @@ printf '%s\n' xvfb > "$work/owners.txt"
 while IFS= read -r -d '' file; do
  original=${file#"$sysroot"}
  candidates=("$original")
+ # fontconfig enables packaged configuration through post-install symlinks;
+ # dpkg owns the link target even when it does not inventory the enabled link.
+ if [[ -e $original ]]; then candidates+=("$(readlink -f "$original")"); fi
  # Debian merged-/usr may resolve an ELF through /lib while its dpkg inventory
  # owns /usr/lib (and vice versa). Query both standard paths, never drop owners.
  case "$original" in /usr/lib/*) candidates+=("${original#/usr}");; /lib/*) candidates+=("/usr$original");; esac
@@ -96,8 +102,8 @@ while IFS= read -r -d '' file; do
   printf '%s\n' "$found" | sed 's/: \/.*//' >> "$work/owners.txt"
  else
   case "$original" in
-   /usr/share/fonts/X11/misc/fonts.dir|/usr/share/fonts/X11/misc/fonts.scale)
-    printf '%s\n' xfonts-base xfonts-utils >> "$work/owners.txt";;
+   /usr/share/fonts/X11/misc/fonts.dir|/usr/share/fonts/X11/misc/fonts.scale|/usr/share/fonts/X11/misc/encodings.dir|/usr/share/fonts/X11/encodings/encodings.dir|/usr/share/fonts/X11/encodings/large/encodings.dir)
+    printf '%s\n' xfonts-base xfonts-encodings xfonts-utils >> "$work/owners.txt";;
    *) printf 'Unowned runtime file: %s\n' "$original" | tee -a "$work/unowned-paths.txt" >&2; exit 1;;
   esac
  fi
