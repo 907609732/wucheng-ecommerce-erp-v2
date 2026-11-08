@@ -102,12 +102,13 @@ while IFS= read -r -d '' file; do
   printf '%s\n' "$found" | sed 's/: \/.*//' >> "$work/owners.txt"
  else
   case "$original" in
-   /usr/share/fonts/X11/misc/fonts.dir|/usr/share/fonts/X11/misc/fonts.scale|/usr/share/fonts/X11/misc/encodings.dir|/usr/share/fonts/X11/encodings/encodings.dir|/usr/share/fonts/X11/encodings/large/encodings.dir)
+   /usr/share/fonts/X11/misc/fonts.alias|/usr/share/fonts/X11/misc/fonts.dir|/usr/share/fonts/X11/misc/fonts.scale|/usr/share/fonts/X11/misc/encodings.dir|/usr/share/fonts/X11/encodings/encodings.dir|/usr/share/fonts/X11/encodings/large/encodings.dir)
     printf '%s\n' xfonts-base xfonts-encodings xfonts-utils >> "$work/owners.txt";;
-   *) printf 'Unowned runtime file: %s\n' "$original" | tee -a "$work/unowned-paths.txt" >&2; exit 1;;
+   *) printf 'Unowned runtime file: %s\n' "$original" | tee -a "$work/unowned-paths.txt" >&2;;
   esac
  fi
 done < <(find "$sysroot" \( -type f -o -type l \) -print0)
+[[ ! -s "$work/unowned-paths.txt" ]] || { echo 'Review every unowned runtime path before packaging.' >&2; exit 1; }
 printf '%s\n' chromium chromium-common >> "$work/owners.txt"
 sort -u -o "$work/owners.txt" "$work/owners.txt"
 # Record every shipped path that has no dpkg ownership (only compiled Xvfb is
