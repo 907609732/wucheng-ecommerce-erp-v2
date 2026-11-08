@@ -12,6 +12,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: fnos-native-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   native:
     runs-on: ubuntu-24.04

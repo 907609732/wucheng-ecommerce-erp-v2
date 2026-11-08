@@ -39,7 +39,7 @@ for(const [i,url] of urls.entries()){
  if(url.includes('/librsvg-'))rsvg=file;
 }
 if(!rsvg)throw Error('librsvg source missing');
-const lockPath=execFileSync('tar',['-tf',rsvg],{encoding:'utf8'}).split('\n').find(n=>/^[^/]+\/Cargo.lock$/.test(n));
+const lockPath=execFileSync('tar',['-tf',rsvg],{encoding:'utf8'}).split(/\r?\n/).find(n=>/^[^/]+\/Cargo.lock$/.test(n));
 if(!lockPath)throw Error('librsvg Cargo.lock missing');
 const lock=execFileSync('tar',['-xOf',rsvg,lockPath],{encoding:'utf8'});fs.writeFileSync(path.join(dest,'librsvg-Cargo.lock'),lock);
 const crates=lock.split('[[package]]').slice(1).map(block=>Object.fromEntries([...block.matchAll(/^(name|version|source|checksum) = "([^"]+)"/gm)].map(m=>[m[1],m[2]]))).filter(p=>p.source);

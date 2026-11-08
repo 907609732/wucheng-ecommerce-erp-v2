@@ -14,6 +14,21 @@ out=$(realpath -m -- "${1:-/tmp/wuchengerp-native-output}")
 case "$out/" in "$repo/"*) echo 'Output must be outside source tree.' >&2; exit 1;; esac
 [[ ! -e $out ]] || { echo 'Output must be a new directory.' >&2; exit 1; }
 mkdir -p "$out"; work=$(mktemp -d "${ERP_BUILD_WORK_ROOT:-/tmp}/wuchengerp-build.XXXXXXXX")
+finish() {
+ local result=$?
+ if [[ $result != 0 ]]; then
+  set +e
+  [[ ! -d "$work/smoke-evidence" ]] || cp -a "$work/smoke-evidence" "$out/smoke-failure-evidence"
+  if [[ -d "$work/diag-volume/@wuchengerpdiag-data" ]]; then
+   mkdir -p "$out/diagnostic-failure-evidence"
+   for evidence in "$work/diag-volume/@wuchengerpdiag-data"/run-*/evidence; do
+    [[ ! -d $evidence ]] || cp -a "$evidence" "$out/diagnostic-failure-evidence/$(basename "$(dirname "$evidence")")"
+   done
+  fi
+ fi
+ exit "$result"
+}
+trap finish EXIT
 printf '%s\n' "$work" > "$out/BUILD-WORKDIR.txt"
 mkdir -p "$work/downloads" "$work/sources" "$work/stage/wuchengerp/app/runtime"
 stage="$work/stage/wuchengerp"; runtime="$stage/app/runtime"
@@ -73,6 +88,12 @@ cd "$out"
 "$work/downloads/fnpack" build --directory "$stage"
 mapfile -t packages < <(find "$out" -maxdepth 1 -name '*.fpk' -type f)
 [[ ${#packages[@]} = 1 ]] || { echo 'Official fnpack did not produce exactly one FPK.' >&2; exit 1; }
+mkdir -p "$work/unpacked/app"
+tar -xf "${packages[0]}" -C "$work/unpacked"
+tar -xzf "$work/unpacked/app.tgz" -C "$work/unpacked/app"
+rm "$work/unpacked/app.tgz"
+node "$helper/verify-artifact.mjs" "$work/unpacked" > "$out/packed-artifact-verification.json"
+(cd "$work/unpacked"; sha256sum --check --strict "$out/PAYLOAD-SHA256SUMS.txt" > "$out/packed-payload-checks.log")
 sha256sum "$(basename "${packages[0]}")" > SHA256SUMS.txt
 bash "$helper/build-diagnostic.sh" "$stage" "$work" "$out"
 # Sources are separate companions and must stay together with any redistribution.

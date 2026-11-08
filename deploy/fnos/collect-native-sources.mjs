@@ -15,6 +15,7 @@ for(const owner of fs.readFileSync(path.join(work,'owners.txt'),'utf8').trim().s
  run('apt-get',['source','--download-only',id],{cwd:sources,stdio:['ignore','inherit','inherit']});
 }
 fs.cpSync('/usr/share/common-licenses',path.join(runtime,'licenses','common-licenses'),{recursive:true,dereference:true});
+for(const required of ['chromium','chromium-common','xvfb','x11vnc','xauth','x11-xkb-utils','xkb-data','fonts-noto-cjk','libnss3','libx11-6','libstdc++6','libfontconfig1'])if(!packages.some(p=>p.binary.replace(/:amd64$/,'')===required))throw Error('Source closure lacks required Debian owner '+required);
 fs.writeFileSync(path.join(work,'debian-packages.json'),JSON.stringify(packages,null,2)+'\n');
 fs.copyFileSync(path.join(work,'debian-packages.json'),path.join(sources,'debian-packages.json'));
 // apt-get source --download-only validates the signed Sources index checksums.

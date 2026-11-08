@@ -84,7 +84,23 @@ find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*
 printf '%s\n' xvfb > "$work/owners.txt"
 while IFS= read -r -d '' file; do
  original=${file#"$sysroot"}
- dpkg-query -S "$original" 2>/dev/null | sed 's/: \/.*//' >> "$work/owners.txt" || true
+ candidates=("$original")
+ # Debian merged-/usr may resolve an ELF through /lib while its dpkg inventory
+ # owns /usr/lib (and vice versa). Query both standard paths, never drop owners.
+ case "$original" in /usr/lib/*) candidates+=("${original#/usr}");; /lib/*) candidates+=("/usr$original");; esac
+ found=''
+ for candidate in "${candidates[@]}"; do
+  if found=$(dpkg-query -S "$candidate" 2>/dev/null); then break; fi
+ done
+ if [[ -n $found ]]; then
+  printf '%s\n' "$found" | sed 's/: \/.*//' >> "$work/owners.txt"
+ else
+  case "$original" in
+   /usr/share/fonts/X11/misc/fonts.dir|/usr/share/fonts/X11/misc/fonts.scale)
+    printf '%s\n' xfonts-base xfonts-utils >> "$work/owners.txt";;
+   *) printf 'Unowned runtime file: %s\n' "$original" | tee -a "$work/unowned-paths.txt" >&2; exit 1;;
+  esac
+ fi
 done < <(find "$sysroot" \( -type f -o -type l \) -print0)
 printf '%s\n' chromium chromium-common >> "$work/owners.txt"
 sort -u -o "$work/owners.txt" "$work/owners.txt"
