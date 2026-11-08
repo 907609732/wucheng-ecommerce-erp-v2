@@ -5,6 +5,7 @@ Uses system Python/POSIX dirfd operations, not the package-writable runtime.
 All trees are checked before the first chown. Unknown data is never deleted.
 """
 import contextlib
+import ctypes
 import fcntl
 import json
 import os
@@ -17,6 +18,10 @@ DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 RECORDS = {'web-runtime.json', 'native-supervisor.json', '.integration-runtime.json',
            '.integration-start.lock', '.web-collector.json', 'command-lease.json'}
 LOCKS = {'native-lifecycle.sqlite', 'native-ownership.sqlite'}
+_libc = ctypes.CDLL(None, use_errno=True)
+_fchownat = _libc.fchownat
+_fchownat.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
+_fchownat.restype = ctypes.c_int
 
 
 def physical_directory(value):
@@ -43,8 +48,10 @@ def stopped_record(content):
 
     def walk(value):
         if isinstance(value, dict):
+            if 'ownerPid' in value and value.get('childPid') is None:
+                raise ValueError('Unpublished child PID is not proof of a stopped launch')
             for key, item in value.items():
-                if key in ('pid', 'childPid', 'ownerPid') and item is not None:
+                if key in ('pid', 'childPid', 'ownerPid'):
                     if type(item) is not int or item < 1:
                         raise ValueError('Invalid retained runtime PID')
                     pids.append(item)
@@ -63,6 +70,40 @@ def stopped_record(content):
         except ProcessLookupError:
             continue
         raise ValueError('Retained service may still be running; stop it before recovery')
+
+
+def quiescent_owners(owners):
+    """Read-only census: root is trusted; no non-root owner may retain a writer.
+
+    Scan thread credentials too (real/effective/saved/fs UID), since a thread
+    with a saved owner UID can regain write/link authority without root.
+    """
+    for process in os.listdir('/proc'):
+        if not process.isdecimal():
+            continue
+        try:
+            tasks = os.listdir('/proc/' + process + '/task')
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        for task in tasks:
+            try:
+                with open('/proc/' + process + '/task/' + task + '/status', 'rb') as status:
+                    rows = [line.split()[1:] for line in status if line.startswith(b'Uid:')]
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if len(rows) != 1 or len(rows[0]) != 4:
+                raise ValueError('Cannot establish owner UID process quiescence')
+            matched = owners.intersection(int(value) for value in rows[0])
+            if matched:
+                raise ValueError('Retained owner/package UID ' + ','.join(str(value) for value in sorted(matched)) + ' still has task ' + process + '/' + task + '; stopped-only recovery refused')
+
+
+def chown_inode(fd, uid, gid):
+    # Python fchown rejects O_PATH descriptors. Linux fchownat AT_EMPTY_PATH
+    # handles pinned regular files, directories and sockets without a pathname.
+    if _fchownat(fd, b'', uid, gid, 0x1000 | 0x100) != 0:  # AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
 
 
 def recover(volume, uid, gid):
@@ -146,6 +187,20 @@ def recover(volume, uid, gid):
         for _, info in entries:
             if stat.S_ISREG(info.st_mode) and links[(info.st_dev, info.st_ino)] != info.st_nlink:
                 raise ValueError('Retained file has hard links outside validated trees')
+        # An FD prevents pathname substitution, but an active owning process
+        # could still add an external hardlink to the same inode. Require the
+        # package and all non-root owners to have no tasks before any chown.
+        # With a private BASE, non-writable public modes and protected_hardlinks,
+        # other unprivileged UIDs cannot acquire that link authority either.
+        owners = {uid, os.fstat(basefd).st_uid, *(info.st_uid for _, info in entries)} - {0}
+        if os.fstat(basefd).st_mode & 0o077:
+            raise ValueError('Retained BASE must already be private before ownership recovery')
+        if any(info.st_mode & 0o022 for _, info in entries):
+            raise ValueError('Retained paths writable by group/other cannot be recovered safely')
+        with open('/proc/sys/fs/protected_hardlinks', encoding='ascii') as setting:
+            if setting.read().strip() != '1':
+                raise ValueError('Kernel protected_hardlinks must be enabled before recovery')
+        quiescent_owners(owners)
         @contextlib.contextmanager
         def parent_for(relative):
             fd = os.dup(basefd)
@@ -163,8 +218,7 @@ def recover(volume, uid, gid):
             finally:
                 os.close(fd)
 
-        def unchanged(parent, name, before):
-            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        def unchanged(current, before):
             if (current.st_dev, current.st_ino, current.st_mode, current.st_nlink, current.st_size, current.st_mtime_ns) != (before.st_dev, before.st_ino, before.st_mode, before.st_nlink, before.st_size, before.st_mtime_ns):
                 raise ValueError('Retained path changed during recovery')
 
@@ -174,7 +228,7 @@ def recover(volume, uid, gid):
             raise ValueError('Retained BASE changed during inspection')
         for relative, before in entries:
             with parent_for(relative) as (parent, name):
-                unchanged(parent, name, before)
+                unchanged(os.stat(name, dir_fd=parent, follow_symlinks=False), before)
                 if relative in directories:
                     fd = os.open(name, DIRECTORY, dir_fd=parent)
                     try:
@@ -182,10 +236,23 @@ def recover(volume, uid, gid):
                             raise ValueError('Retained directory inventory changed')
                     finally:
                         os.close(fd)
+        # A second complete census directly precedes repair. With no task
+        # holding any owner UID, no unprivileged fork/UID-revert can introduce
+        # an owner writer. Root/CAP_SETUID lifecycle actors are trusted and must
+        # serialize installation; repeatedly scanning per file would not make
+        # a privileged concurrent launch atomic, and would cost O(files*tasks).
+        quiescent_owners(owners)
         for relative, before in reversed(entries):
             with parent_for(relative) as (parent, name):
-                unchanged(parent, name, before)
-                os.chown(name, uid, gid, dir_fd=parent, follow_symlinks=False)
+                fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+                try:
+                    unchanged(os.fstat(fd), before)
+                    chown_inode(fd, uid, gid)
+                    unchanged(os.fstat(fd), before)
+                    unchanged(os.stat(name, dir_fd=parent, follow_symlinks=False), before)
+                finally:
+                    os.close(fd)
+        quiescent_owners(owners)
         os.fchown(basefd, uid, gid)
         os.fchmod(basefd, 0o700)
 
