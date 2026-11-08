@@ -12,7 +12,7 @@ assert os.geteuid() == 0 and os.environ.get("ERP_DIAG_STOP_CI") == "1"
 cmd, work, output = map(Path, sys.argv[1:4])
 results = []
 for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
-    volume = work / ("external-stop-" + phase)
+    volume = work / ("stop-b" if starts == 0 else "stop-a")
     volume.mkdir()
     env = {**os.environ, "TRIM_APPDEST_VOL": str(volume), "ERP_DIAGNOSTIC_TEST_PAUSE": phase}
     base = volume / "@wuchengerpdiag-data"
@@ -35,6 +35,8 @@ for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
             else:
                 raise AssertionError("Real diagnostic checkpoint not reached")
             snapshot = json.loads((run / "evidence/phase.json").read_text())
+            record["unixSocketPathBytes"] = {name: len(str(run / "data/state" / name).encode()) for name in ["web.sock", "native.sock"]}
+            assert max(record["unixSocketPathBytes"].values()) < 108, "CI Unix socket fixture path exceeds sun_path"
             assert (run / "data/config/web.json").exists() == (starts == 1)
             stopped = subprocess.run(["/bin/sh", str(cmd / "main"), "stop"], env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=55)
             assert stopped.returncode == 0, "External stop failed"
@@ -66,6 +68,8 @@ for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
             subprocess.run(["/bin/sh", str(cmd / "main"), "stop"], env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=85)
             if run and (run / "evidence").exists():
                 shutil.copytree(run / "evidence", output / ("external-stop-" + phase + "-evidence"))
+            if not record["ok"]:
+                print(log.read_text(errors="replace")[-12000:], flush=True)
     results.append(record)
     (output / "diagnostic-external-stop.json").write_text(json.dumps(results, indent=2) + "\n")
     print(json.dumps(record), flush=True)

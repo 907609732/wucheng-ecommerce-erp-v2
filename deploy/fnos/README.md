@@ -37,4 +37,6 @@ sudo bash deploy/fnos/build-native.sh /tmp/new-native-output
 
 官方安装 callback 降权后同步执行一次 smoke，240 秒后 TERM、再留 45 秒清理，返回后再用真实 nativeLifecycle stop 核对。成功后应用保持 stopped，证据位于 `@wuchengerpdiag-data/run-*/evidence/`。fnOS 对安装 hook 的实际时限尚未实机验证；若平台更早结束安装，应当作为诊断失败检查保留证据，不能据此宣称主包失败或擅自后台重试。命令行可用该包 `cmd/acceptance` 明确重试。
 
+活跃诊断由系统 flock 租约串行化。外部 `cmd/main stop` 以诊断 UID 写入本次作业的取消请求，并等待作业及其客户端/fixture/原生进程清理结束；每次 native start 前同步检查取消。45 秒内无法确认作业清理时明确失败，不返回停止成功；原有 timeout 和真实 nativeLifecycle stop 继续保底。CI 分别在配置生成前和首次启动/MCP 连接后执行真实外部 stop 回归。
+
 验收包含真实 SQLite、nativeLifecycle/collector、MCP 导航/快照/输入/下载、HTTPS/NSS、namespace/seccomp sandbox、上游 noVNC 到 x11vnc 的真实 RFB 画面和键鼠、中文显示截图、持久合成浏览器 session 和重启停止。中文输入法、真实平台登录和正式 fnOS 授权 GUI 仍需实机人工验收；诊断成功不替代正式主包固定路径与身份验收。

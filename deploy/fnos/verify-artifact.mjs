@@ -6,7 +6,7 @@ import {pathToFileURL} from 'node:url';
 import {verifyRelease} from '../../server/release.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 export function manifestFields(text){
- const fields={};
+ const fields=Object.create(null);
  for(const line of text.split(/\r?\n/)){
   if(!line.trim()||/^\s*[#;]/.test(line))continue;
   const m=/^\s*([a-zA-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);

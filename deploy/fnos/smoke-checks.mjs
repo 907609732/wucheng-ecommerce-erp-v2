@@ -1,4 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+export function diagnosticCancellation(file,onRequest){
+ let requested=false,watcher;
+ const inspect=()=>{if(file&&!requested&&fs.existsSync(file)){requested=true;onRequest();}};
+ if(file){watcher=fs.watch(path.dirname(file),inspect);inspect();}
+ return {check(){inspect();assert(!requested,'Diagnostic acceptance cancelled');},close(){watcher?.close();}};
+}
 export function isAllowedRuntimeLibrary(file,runtime,release){
  if(file.startsWith(runtime+'/')||file.startsWith(release+'/'))return true;
  if(/^\/(?:usr\/)?lib64\/ld-linux-x86-64\.so\.2$/.test(file))return true;

@@ -13,7 +13,7 @@ source /etc/os-release
 out=$(realpath -m -- "${1:-/tmp/wuchengerp-native-output}")
 case "$out/" in "$repo/"*) echo 'Output must be outside source tree.' >&2; exit 1;; esac
 [[ ! -e $out ]] || { echo 'Output must be a new directory.' >&2; exit 1; }
-mkdir -p "$out"; work=$(mktemp -d "${ERP_BUILD_WORK_ROOT:-/tmp}/wuchengerp-build.XXXXXXXX")
+mkdir -p "$out"; work=$(mktemp -d "${ERP_BUILD_WORK_ROOT:-/tmp}/erp.XXXXXXXX")
 finish() {
  local result=$?
  if [[ $result != 0 ]]; then
@@ -115,7 +115,7 @@ bash "$helper/build-diagnostic.sh" "$stage" "$work" "$out"
 # Sources are separate companions and must stay together with any redistribution.
 cp "$stage/app/THIRD-PARTY.json" "$work/sources/"
 cp "$helper/THIRD-PARTY.md" "$work/sources/README.md"
-mkdir -p "$work/sources/native-build"; cp "$helper/"*.sh "$helper/"*.mjs "$helper/native-inputs.env" "$work/sources/native-build/"
+mkdir -p "$work/sources/native-build"; cp "$helper/"*.sh "$helper/"*.mjs "$helper/"*.py "$helper/native-inputs.env" "$work/sources/native-build/"
 cp "$work/diagnostic/meson-buildoptions.json" "$work/sources/native-build/diag-meson-buildoptions.json"
 (cd "$work/sources"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/SOURCE-SHA256SUMS.txt")
 tar --zstd -cf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" -C "$work/sources" .

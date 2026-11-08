@@ -48,7 +48,7 @@ test('packed manifest preserves every source field and verifies official app arc
  const manifest='appname = wuchengerp\nversion = 0.15.0\ndesc = 原生完整运行时\nchecksum = '+createHash('md5').update(fs.readFileSync(archive)).digest('hex')+'\n';fs.writeFileSync(packed,manifest);
  const verify=()=>spawnSync(process.execPath,[path.join(root,'deploy/fnos/verify-packed-manifest.mjs'),source,packed,archive],{encoding:'utf8'});
  assert.equal(verify().status,0);
- for(const invalid of [manifest.replace('原生完整运行时','changed'),manifest+'unexpected=field\n',manifest+'appname=other\n']){fs.writeFileSync(packed,invalid);assert.notEqual(verify().status,0);}
+ for(const invalid of [manifest.replace('原生完整运行时','changed'),manifest+'unexpected=field\n',manifest+'__proto__=ignored-extra\n',manifest+'__proto__=first\n__proto__=duplicate\n',manifest+'appname=other\n']){fs.writeFileSync(packed,invalid);assert.notEqual(verify().status,0);}
  fs.writeFileSync(packed,manifest);fs.appendFileSync(archive,'corrupt');assert.notEqual(verify().status,0);
 });
 
