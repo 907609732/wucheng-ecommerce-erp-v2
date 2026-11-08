@@ -3,7 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+const curl=promisify(execFile);
 const [stage,work]=process.argv.slice(2),dest=path.join(work,'sources/sharp-libvips');fs.mkdirSync(dest,{recursive:true});
 const pkg=JSON.parse(fs.readFileSync(path.join(stage,'app/erp/apps/purchase/node_modules/@img/sharp-libvips-linux-x64/package.json'),'utf8'));
 if(pkg.version!=='1.3.4')throw Error('Review libvips corresponding-source inputs for changed npm binary');
@@ -12,7 +14,14 @@ const sha=b=>createHash('sha256').update(b).digest('hex');
 async function download(url,name,expected){
  const file=path.join(dest,name);let bytes;
  if(fs.existsSync(file))bytes=fs.readFileSync(file);
- else{const response=await fetch(url,{signal:AbortSignal.timeout(120000)});if(!response.ok)throw Error('Source download '+response.status+' '+url);bytes=Buffer.from(await response.arrayBuffer());}
+ else{
+  // Actual CI hit TLS ECONNRESET mid-source transfer. Standard curl supplies
+  // bounded retries, including connection resets, without weakening TLS/SHA.
+  const partial=file+'.partial';
+  try{await curl('curl',['--silent','--show-error','--fail','--location','--proto','=https','--tlsv1.2','--retry','3','--retry-all-errors','--retry-delay','1','--connect-timeout','15','--max-time','120','--output',partial,url],{maxBuffer:1024*1024});bytes=fs.readFileSync(partial);}
+  catch(error){throw Error('Source download failed '+url,{cause:error});}
+  finally{fs.rmSync(partial,{force:true});}
+ }
  const digest=sha(bytes);if(expected&&digest!==expected)throw Error('Source checksum mismatch '+name);
  fs.writeFileSync(file,bytes);records.push({file:name,url,sha256:digest,bytes:bytes.length,verification:expected?'pinned SHA256':'HTTPS upstream source; calculated SHA256 (not detached signature)'});return file;
 }
