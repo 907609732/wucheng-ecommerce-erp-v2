@@ -10,8 +10,11 @@ done
 work=$(cat /output/release/BUILD-WORKDIR.txt)
 [[ $work =~ ^/build/erp\.[A-Za-z0-9]+$ && -d $work ]]
 app="$work/unpacked/app"
-useradd --create-home --uid 23001 erpbuild
-useradd --create-home --uid 23003 erpdiag
+# fnOS package accounts can have a passwd HOME without an existing directory.
+# Both packed payload checks must work without root creating that directory.
+useradd --no-create-home --uid 23001 erpbuild
+useradd --no-create-home --uid 23003 erpdiag
+for user in erpbuild erpdiag; do [[ ! -e $(getent passwd "$user" | cut -d: -f6) ]]; done
 runuser -u erpbuild -- unshare --user --map-root-user true
 mkdir -p /var/apps/wuchengerp /var/apps/wuchengerpdiag "$work/clean-fixture" /output/release/clean-runtime-evidence
 ln -s "$app" /var/apps/wuchengerp/target

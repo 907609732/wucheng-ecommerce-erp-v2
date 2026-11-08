@@ -138,6 +138,12 @@ try{
   await checkpoint('before-config');fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
  }else configFile=await configureNative({releaseRoot:release,dataRoot:data,mode:'fresh',publicOrigin:'https://native-acceptance.example.com',allowedUids:['23001'],allowedOrigins:['https://native-acceptance.example.com'],socketPath:path.join(app,'app.sock'),requireBrowsers:true,browser:browserConfig});
  const c=loadConfig(configFile);c.port=diagnostic?29430:28430+offset;
+ // lifecycle sets HOME only in its supervisor child. This smoke process also
+ // launches MCP, whose SDK inherits HOME and whose Playwright cache needs it.
+ // Match the managed home already created in this isolated synthetic data root;
+ // fnOS package accounts need not have a writable /home directory.
+ report.home={launcher:process.env.HOME,launcherExists:!!process.env.HOME&&fs.existsSync(process.env.HOME),managed:c.native.home};
+ process.env.HOME=c.native.home;
  for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(configFile,JSON.stringify(c));
  checkCancellation();const first=await nativeLifecycle('start',configFile);checkCancellation();assert(first.ok&&first.browser.ready);report.successfulStarts++;report.checks.push('fresh lifecycle with two browsers and real collector');

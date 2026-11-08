@@ -33,7 +33,8 @@ printf '%s\n' '{"defaults":{"run-as":"root"}}' > "$diag/config/privilege"
 printf '%s\n' '{}' > "$diag/config/resource"
 for relative in config/privilege config/resource; do install -D -m644 "$diag/$relative" "$diag/app/$relative"; done
 for file in "$helper/diagnostic-cmd/"*; do install -m755 "$file" "$diag/cmd/$(basename "$file")"; done
-useradd --create-home --uid 23003 erpdiag
+useradd --no-create-home --uid 23003 erpdiag
+[[ ! -e $(getent passwd erpdiag | cut -d: -f6) ]]
 mkdir -p /var/apps/wuchengerpdiag "$work/diag-volume"
 ln -s "$diag/app" /var/apps/wuchengerpdiag/target
 export TRIM_APPDEST=/var/apps/wuchengerpdiag/target TRIM_APPDEST_VOL="$work/diag-volume" TRIM_USERNAME=erpdiag TRIM_APPNAME=wuchengerpdiag

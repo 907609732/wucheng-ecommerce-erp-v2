@@ -69,7 +69,8 @@ cp "$work/xvfb-meson-log.txt" "$out/xvfb-meson-log.txt"
 cp "$helper/native-inputs.env" "$out/INPUTS.env"
 cp -a "$work/diagnostic" "$out/diagnostic-xvfb"
 # Real package-user checks. This canonical path exists only in disposable CI.
-useradd --create-home --uid 23001 erpbuild
+useradd --no-create-home --uid 23001 erpbuild
+[[ ! -e $(getent passwd erpbuild | cut -d: -f6) ]]
 runuser -u erpbuild -- unshare --user --map-root-user true
 mkdir -p /var/apps/wuchengerp
 ln -s "$stage/app" /var/apps/wuchengerp/target
