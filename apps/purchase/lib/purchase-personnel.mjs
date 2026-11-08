@@ -62,7 +62,7 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
   const identity=current(req);if(!identity.canManagePersonnel)throw fail('只有老板可以管理采购人员','PERSONNEL_BOSS_REQUIRED');
   const name=typeof input.name==='string'?input.name.trim():'',role=input.role,active=input.active??true,actorId=typeof input.workbenchActorId==='string'?input.workbenchActorId.trim():'';
   if(!name||name.length>100||!['boss','employee'].includes(role)||typeof active!=='boolean')throw fail('请填写有效姓名、身份和启用状态','PERSONNEL_INVALID',400);
-  if(actorId&&(actorId.length>300||!/^tailscale:[^\s,]+$/.test(actorId)))throw fail('工作台身份应填写有效的 tailscale:登录账号','PERSONNEL_ACTOR_INVALID',400);
+  if(actorId&&(actorId.length>300||!/^(?:tailscale:[^\s,]+|fnos:[A-Za-z0-9_-]{1,80}:(?:0|[1-9][0-9]{0,9})(?![\s\S]))$/.test(actorId)))throw fail('工作台身份应填写有效的 tailscale:登录账号或 fnos:实例:UID','PERSONNEL_ACTOR_INVALID',400);
   return store.transaction(()=>{
    const before=input.id?get(input.id):null;
    if(input.id&&!before)throw fail('人员记录不存在','PERSONNEL_NOT_FOUND',404);
@@ -86,7 +86,7 @@ export function openPurchasePersonnel(store,{sessionTtlMs=12*60*60*1000}={}){
   const a=req.workbenchActor;if(!a?.id||!a.modules?.includes('purchase'))throw fail('历史人员归属须真实登录后复核','PERSONNEL_ACTOR_REQUIRED');
   const before=get(input.staffId);if(!before)throw fail('请选择存在的历史采购人员','PERSONNEL_STAFF_INVALID',400);
   if(full(before).revision!==input.revision)throw fail('人员映射已变化，请重新查询','PERSONNEL_REVISION_CHANGED',409);
-  if(typeof input.actorId!=='string'||!(/^(?:tailscale:[^\s,]+|windows:S-1-5-(?:\d+-)*\d+)$/.test(input.actorId)))throw fail('须选择主页目录返回的真实人员ID，不可填写姓名','PERSONNEL_ACTOR_INVALID',400);
+  if(typeof input.actorId!=='string'||!(/^(?:tailscale:[^\s,]+|windows:S-1-5-(?:\d+-)*\d+|fnos:[A-Za-z0-9_-]{1,80}:(?:0|[1-9][0-9]{0,9})(?![\s\S]))$/.test(input.actorId)))throw fail('须选择主页目录返回的真实人员ID，不可填写姓名','PERSONNEL_ACTOR_INVALID',400);
   const conflict=db.prepare('SELECT id FROM purchase_staff WHERE workbench_actor_id=? AND id<>?').get(input.actorId,before.id);
   if(conflict)throw fail('该账号已绑定其他历史采购人员，不能合并或猜测归属','PERSONNEL_ACTOR_CONFLICT',409);
   return {before:full(before),after:{...full(before),workbenchActorId:input.actorId},reason:input.reason};

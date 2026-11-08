@@ -17,7 +17,7 @@
 - 固定允许源包括实测FN Connect HTTPS源；局域网入口可显式配置当前NAS HTTP源，HTTPS外网不得降级。Host仅接受已配置源的精确host或经实测NAS转发移除端口后的hostname；Origin仍严格匹配配置，每次写入要求正确Origin及CSRF。
 - 在Unix入口剥离准确basePrefix后交给同一路由器，公开资源/API/跳转/cookie带回该前缀。模块公共前缀通过已签名actor声明传递，不信任未签名转发头。对编码斜线/点路径/错前缀明确拒绝。
 - FPK只注册飞牛入口和状态检测，不管理Docker daemon、不接触账本、不停止ERP。启停或卸载飞牛入口不破坏Tailscale。安装/配置/恢复脚本不得创建新空账本或使用通配删除。
-- 私有固定绑定名.app.sock.listener保留，app.sock通过同inode硬链接发布；FPK解析TRIM_APPDEST物理路径并校验二者同inode及私有监听记录。fnOS监听运行故障降级并记录状态，不能停止已启动的Tailscale备用入口。飞牛shell只允许同源桌面iframe；Tailscale shell继续禁止被嵌入。
+- 每次运行绑定唯一私有名.erp-{UUID}并保留，app.sock通过同inode硬链接发布；非敏感只读app.listener记录本代私有basename。FPK解析TRIM_APPDEST物理路径、严格验证basename，校验二者同inode及私有监听记录。唯一代际绑定名避免旧listener关闭时删除新一代同名私有socket。fnOS监听运行故障降级并记录状态，不能停止已启动的Tailscale备用入口。飞牛shell只允许同源桌面iframe；Tailscale shell继续禁止被嵌入。
 
 ## 页面体验
 

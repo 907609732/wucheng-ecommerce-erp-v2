@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import net from 'node:net';
 const contexts=new WeakMap();
 export const fnosContext=raw=>contexts.get(raw);
@@ -16,11 +16,18 @@ export function validateFnos(value){
   if(!Array.isArray(c.allowedUids)||!c.allowedUids.length||c.allowedUids.some(u=>typeof u!=='string'||!/^(?:0|[1-9]\d{0,9})$/.test(u)))throw Error('飞牛入口需要显式UID名单');
   if(!Array.isArray(c.allowedOrigins)||!c.allowedOrigins.length)throw Error('飞牛入口需要显式允许源');
   c.allowedOrigins=c.allowedOrigins.map(value=>{const u=new URL(value);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||!(u.protocol==='https:'||u.protocol==='http:'&&lan(u.hostname)))throw Error('飞牛外网入口必须HTTPS，HTTP仅限明确局域网地址');return u.origin;});
+  if(c.hostAliases===undefined)c.hostAliases={};
+  if(!c.hostAliases||typeof c.hostAliases!=='object'||Array.isArray(c.hostAliases))throw Error('飞牛Host别名必须为显式映射');
+  for(const [host,origin] of Object.entries(c.hostAliases)){
+    let u;try{u=new URL('https://'+host);}catch{throw Error('飞牛Host别名无效');}
+    if(!host||/[\x00-\x20\x7f\\/@?#*]/.test(host)||u.host!==host||u.pathname!=='/'||u.username||u.password||!c.allowedOrigins.includes(origin))throw Error('飞牛Host别名必须是精确Host并映射到允许源');
+    if(!u.hostname.startsWith('[')&&!u.hostname.split('.').every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)))throw Error('飞牛Host别名无效');
+  }
   return c;
 }
 export function fnosIdentity(request,c){
   const host=request.headers.host;
-  const matches=c.allowedOrigins.filter(origin=>{const u=new URL(origin);return host===u.host||host===u.hostname;});
+  const matches=Object.hasOwn(c.hostAliases||{},host)?[c.hostAliases[host]]:c.allowedOrigins.filter(origin=>{const u=new URL(origin);return host===u.host||host===u.hostname;});
   if(!matches.length)throw deny(421,'INVALID_HOST','入口地址与飞牛配置不一致');
   const origin=request.headers.origin;
   if(origin&&!matches.includes(origin))throw deny(403,'ORIGIN_DENIED','请求来源不受信任');
@@ -49,13 +56,14 @@ async function cleanStaleSocket(file){
   fs.unlinkSync(file);
 }
 export function createFnosListener(app,c){
-  let server,owned;
-  const boundPath=c.enabled?path.join(path.dirname(c.socketPath),'.app.sock.listener'):null;
+  let server,owned,ownedMarker,boundPath=null;
+  const markerPath=c.enabled?path.join(path.dirname(c.socketPath),'app.listener'):null;
   let state=c.enabled?'stopped':'disabled',errorMessage=null;
-  const status=()=>({enabled:c.enabled,state,socketPath:c.enabled?c.socketPath:null,boundPath,error:errorMessage});
+  const status=()=>({enabled:c.enabled,state,socketPath:c.enabled?c.socketPath:null,boundPath,markerPath,error:errorMessage});
   async function stop(){
     if(server?.listening)await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
-    if(owned){for(const file of [c.socketPath,boundPath]){const now=socketStat(file);if(now&&sameInode(now,owned)&&now.isSocket())fs.unlinkSync(file);}owned=null;}
+    if(owned){const now=socketStat(c.socketPath);if(now&&sameInode(now,owned)&&now.isSocket())fs.unlinkSync(c.socketPath);owned=null;}
+    if(ownedMarker){const now=socketStat(markerPath);if(now?.isFile()&&sameInode(now,ownedMarker)&&fs.readFileSync(markerPath,'utf8')===path.basename(boundPath)+'\n')fs.unlinkSync(markerPath);ownedMarker=null;}
     if(state==='ready')state='stopped';
   }
   return {
@@ -68,21 +76,33 @@ export function createFnosListener(app,c){
         const parent=path.dirname(c.socketPath);let current=path.parse(parent).root;
         for(const segment of parent.slice(current.length).split(path.sep).filter(Boolean)){current=path.join(current,segment);if(fs.lstatSync(current).isSymbolicLink())throw Error('飞牛socket父目录不能是符号链接');}
         const st=fs.statSync(parent);if(!st.isDirectory()||st.uid!==process.getuid()||(st.mode&0o022))throw Error('飞牛socket父目录必须由当前用户所有且不可被其他用户写入');
-        await cleanStaleSocket(c.socketPath);
-        await cleanStaleSocket(boundPath);
+        const previousMarker=socketStat(markerPath);
+        if(previousMarker){
+          if(!previousMarker.isFile()||previousMarker.uid!==process.getuid()||(previousMarker.mode&0o022)||previousMarker.size>80)throw Error('飞牛listener标记不是受控普通文件');
+          const name=fs.readFileSync(markerPath,'utf8');
+          if(!/^\.erp-[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\n$/.test(name))throw Error('飞牛listener标记内容无效');
+          await cleanStaleSocket(path.join(parent,name.trim()));
+          await cleanStaleSocket(c.socketPath);
+          const currentMarker=socketStat(markerPath);
+          if(!currentMarker?.isFile()||!sameInode(previousMarker,currentMarker)||fs.readFileSync(markerPath,'utf8')!==name)throw Error('飞牛listener标记清理前发生变化');
+          fs.unlinkSync(markerPath);
+        }else await cleanStaleSocket(c.socketPath);
+        boundPath=path.join(parent,'.erp-'+randomUUID());
         server=http.createServer((req,res)=>{
           const url=req.url||'',pathname=url.split('?')[0];
           if(!(pathname===c.basePrefix||pathname.startsWith(c.basePrefix+'/'))||/[\\]/.test(pathname)||/%(?:2f|5c|2e|00)/i.test(pathname)||pathname.split('/').some(p=>p==='.'||p==='..')){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,code:'FNOS_PATH_INVALID'}));return;}
           contexts.set(req,{publicPrefix:c.basePrefix});req.url=(pathname===c.basePrefix?'/':'')+url.slice(c.basePrefix.length);app.routing(req,res);
         });
-        // The fixed private name remains visible to FPK /proc/net/unix readiness.
-        // Public hard-link cleanup uses its inode so a replacement stays intact.
+        // Each generation has a unique bound name: libuv close can never unlink
+        // a later generation. A non-secret marker lets FPK verify its exact name.
         const previous=process.umask(0o177);let listening;
         try{listening=new Promise((resolve,reject)=>{server.once('error',reject);server.listen(boundPath,resolve);});}finally{process.umask(previous);}
         await listening;
         owned=fs.lstatSync(boundPath);
         fs.chmodSync(boundPath,0o600);
         fs.linkSync(boundPath,c.socketPath);
+        const marker=fs.openSync(markerPath,'wx',0o644);
+        try{ownedMarker=fs.fstatSync(marker);fs.writeFileSync(marker,path.basename(boundPath)+'\n');fs.fchmodSync(marker,0o644);}finally{fs.closeSync(marker);}
         state='ready';errorMessage=null;
       }catch(error){state='degraded';errorMessage=error.message;await stop();throw error;}
     }

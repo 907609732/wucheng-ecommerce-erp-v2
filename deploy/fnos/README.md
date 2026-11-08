@@ -7,7 +7,7 @@
 ## 生命周期与安全边界
 
 - `run-as=package`，无附加组、共享目录或文件授权。
-- `start`/`status`先用POSIX `cd -P`解析官方target符号链接的物理目录，再检查`app.sock`与`.app.sock.listener`都是非符号链接Socket且`test -ef`证明同一inode；最后匹配`/proc/net/unix`中私有`.app.sock.listener`的精确路径、监听标志及类型，判断入口存在，不连接Socket，不发送任何身份字段。`start`失败返回1并输出配置提示；`status`未就绪返回3。
+- `start`/`status`先用POSIX `cd -P`解析官方target符号链接的物理目录，再读取ERP写入的0644普通文件`app.listener`（不含凭据），拒绝符号链接、多行和非严格小写UUID的`.erp-<UUID>`basename；检查`app.sock`与该私有Socket都是非符号链接Socket且`test -ef`证明同一inode；最后匹配`/proc/net/unix`中本代私有Socket的精确路径、监听标志及类型，判断入口存在，不连接Socket，不发送任何身份字段。`start`失败返回1并输出配置提示；`status`未就绪返回3。
 - 此检测仅证明存在监听入口，不证明ERP健康、业务身份或数据集正确；上线验收必须另做真实网关登录和只读业务检查。
 - `stop`及安装/升级/配置/卸载钩子均不操作ERP或Socket。停用/卸载本包不停止ERP，Tailscale备用入口仍由原服务提供。fnOS管理其自身安装目录；升级或卸载入口前应协调现有ERP的Socket挂载，不能将本包目录作为任何业务数据目录。
 - Shell不需要Python；只使用fnOS/Linux的`sh`、`awk`、`test`和`printf`。目标Socket保持ERP root所有、0600；不会扩大权限让应用包用户连接。
@@ -39,4 +39,4 @@ fnpack在Windows上生成的生命周期脚本模式需在首次构建时检查�
 node --test tests/web-fnos-package.test.mjs
 ```
 
-测试包含结构、禁止越权命令、缺失Socket、普通文件伪装Socket、stop不改文件和官方CLI构建边界。Linux集成测试直接调用后端`createFnosListener`创建真实入口，检查私有绑定Socket与公开hardlink同inode、0600、包的start/status成功、target目录符号链接可解析、stop不停止ERP，以及拒绝替代Socket符号链接/其他inode文件；Windows跳过Linux真实Socket项。首次真实安装后仍需验证包用户可读取`/proc/net/unix`及路径映射，不能凭结构测试宣称NAS已验收。
+测试包含结构、禁止越权命令、缺失Socket、普通文件伪装Socket、stop不改文件和官方CLI构建边界。Linux集成测试直接调用后端`createFnosListener`创建真实入口，检查本代`app.listener`、私有绑定Socket与公开hardlink同inode、0600、包的start/status成功、target目录符号链接可解析、stop不停止ERP，以及拒绝伪造marker路径/多行/符号链接、私有Socket替换和公开Socket符号链接/其他inode文件；Windows跳过Linux真实Socket项。首次真实安装后仍需验证包用户可读取`/proc/net/unix`及路径映射，不能凭结构测试宣称NAS已验收。

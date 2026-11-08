@@ -32,7 +32,7 @@ export const purchaseSchemas={
  'audit.detail':obj({auditId:integer('审计明细记录ID',1)},['auditId']),
  'suppliers.summary':obj({...paging,q:text('供应商关键词'),platform}),
  'image.file':obj({id,assetId:{type:'string',pattern:'^[a-f0-9]{64}$',description:'image.prepare/cache返回的缓存图片assetId'}},['id','assetId']),
- 'people.bind':obj({staffId:id,actorId:{...id,pattern:'^(?:tailscale:[^\\s,]+|windows:S-1-5-(?:[0-9]+-)*[0-9]+)$',description:'主页people.assignable返回并经用户明确选择的真实人员ID；不按姓名猜测'},revision,reason:text('明确选择对应人员的依据；重名由用户选择',2000)},['staffId','actorId','revision','reason']),
+ 'people.bind':obj({staffId:id,actorId:{...id,pattern:'^(?:tailscale:[^\\s,]+|windows:S-1-5-(?:[0-9]+-)*[0-9]+|fnos:[A-Za-z0-9_-]{1,80}:(?:0|[1-9][0-9]{0,9})(?![\\s\\S]))$',description:'主页people.assignable返回并经用户明确选择的真实人员ID；不按姓名猜测'},revision,reason:text('明确选择对应人员的依据；重名由用户选择',2000)},['staffId','actorId','revision','reason']),
  orders:obj({...filter,...paging,id}),dashboard:obj({year:integer('公历年份',1900,9999),basis:filter.basis,platform,category,month:integer('月份，1至12',1,12)},['year']),
  sources:obj({...paging}),audit:obj({id,page:integer('页码',1,1000000),pageSize:integer('每页条数',1,100),q:text('审计搜索',4000)}),
  suppliers:obj({...paging,id,q:text('供应商关键词'),platform}),addresses:obj({...paging,q:text('联系人/地址搜索'),tag:text('标签',20)}),tasks:obj({month},['month']),months:obj({month,platform},['month']),attachments:obj({id},['id']),
