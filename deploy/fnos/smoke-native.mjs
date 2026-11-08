@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
-import {verifySandboxResult} from './smoke-checks.mjs';
+import {createHash} from 'node:crypto';
+import {verifySandboxResult,mcpEvaluationResult} from './smoke-checks.mjs';
 const args={};for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const app=fs.realpathSync(args['app-root']),release=path.join(app,'erp'),runtime=path.join(app,'runtime');
 const data=path.resolve(args['data-root']),evidence=path.resolve(args['evidence-dir']),offset=Number(args['port-offset']||0),diagnostic=args.diagnostic==='1';
@@ -47,7 +48,8 @@ process.on('SIGTERM',interrupt);process.on('SIGINT',interrupt);
 async function connect(port){
  const c=new Client({name:'native-fpk-acceptance',version:'1.0.0'},{capabilities:{}});
  const tr=new StdioClientTransport({command:process.execPath,args:[path.join(release,'apps/sales/node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint','http://127.0.0.1:'+port,'--output-dir',evidence,'--timeout-navigation','30000'],cwd:evidence,stderr:'pipe'});
- tr.stderr?.on('data',b=>fs.appendFileSync(path.join(evidence,'mcp.stderr.log'),b));await c.connect(tr);return {client:c,transport:tr};
+ tr.stderr?.on('data',b=>fs.appendFileSync(path.join(evidence,'mcp.stderr.log'),b));await c.connect(tr);
+ const tools=await c.listTools();fs.writeFileSync(path.join(evidence,'mcp-tool-schemas.json'),JSON.stringify(tools.tools.filter(t=>['browser_navigate','browser_type','browser_click','browser_evaluate','browser_snapshot'].includes(t.name)),null,2)+'\n');return {client:c,transport:tr};
 }
 async function tool(name,arguments_={}){
  const r=await client.callTool({name,arguments:arguments_});const text=r.content?.filter(x=>x.type==='text').map(x=>x.text).join('\n')||'';
@@ -72,7 +74,8 @@ function auditLoadedLibraries(){
    const hostLibc=/^(?:ld-linux-x86-64\.so\.2|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(path.basename(file))||/^\/(?:usr\/)?lib\/x86_64-linux-gnu\/gconv\//.test(file);
    if(!privateFile&&!hostLibc)unexpected.push({pid,file});
   }
-  observed.push({pid,exe:fs.readlinkSync('/proc/'+pid+'/exe'),libraries:libs});
+  let exe;try{exe=fs.readlinkSync('/proc/'+pid+'/exe');}catch(e){if(!['ENOENT','EACCES','EPERM'].includes(e.code))throw e;exe='unavailable: '+e.code;}
+  observed.push({pid,exe,libraries:libs});
  }
  assert(observed.length>0,'No controlled process library maps inspected');
  const result={observed,unreadable,unexpected,hostException:'glibc 2.36 loader/family and glibc gconv only'};
@@ -107,13 +110,13 @@ try{
  report.sandboxStatus=verifySandboxResult(sandbox);report.sandbox=true;
  await tool('browser_navigate',{url:'https://example.com/'});assert.match(await tool('browser_snapshot'),/Example Domain/);report.checks.push('HTTPS CA/NSS navigation');
  await tool('browser_navigate',{url});let snapshot=await tool('browser_snapshot');assert.match(snapshot,/五成 ERP 原生验收/);
- await tool('browser_type',{ref:ref(snapshot,/textbox "Acceptance input"/),text:'MCP input verified'});
+ await tool('browser_type',{target:ref(snapshot,/textbox "Acceptance input"/),text:'MCP input verified'});
  snapshot=await tool('browser_snapshot');assert.match(snapshot,/MCP input verified/);report.checks.push('pinned Playwright MCP navigation / snapshot / input');
  await tool('browser_evaluate',{function:'() => { document.cookie="native_acceptance=retained; max-age=3600; path=/"; localStorage.setItem("native_acceptance","retained"); return document.cookie; }'});
- snapshot=await tool('browser_snapshot');await tool('browser_click',{ref:ref(snapshot,/link "Download fixture"/)});
+ snapshot=await tool('browser_snapshot');await tool('browser_click',{target:ref(snapshot,/link "Download fixture"/)});
  function findDownload(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory()){const found=findDownload(p);if(found)return found;}else if(e.name==='native-acceptance.txt')return p;}}
  const until=Date.now()+10000;let downloaded;while(!(downloaded=findDownload(evidence))&&Date.now()<until)await new Promise(r=>setTimeout(r,100));
- assert(downloaded,'MCP download file missing');assert.equal(fs.readFileSync(downloaded,'utf8'),'native FPK download acceptance\n');report.checks.push('MCP download contents');
+ assert(downloaded,'MCP download file missing');assert.equal(fs.readFileSync(downloaded,'utf8'),'native FPK download acceptance\n');report.download={filename:path.basename(downloaded),bytes:fs.statSync(downloaded).size,sha256:createHash('sha256').update(fs.readFileSync(downloaded)).digest('hex')};report.checks.push('MCP download contents');
  browser=await chromium.connectOverCDP('http://127.0.0.1:'+(19222+offset));
  const page=browser.contexts()[0].pages().find(p=>p.url()===url+'/');assert(page);
  await page.screenshot({path:path.join(evidence,'synthetic-browser.png')});
@@ -127,7 +130,7 @@ try{
  report.loadedLibraries=auditLoadedLibraries();report.checks.push('readable controlled-process maps limited to payload and host glibc');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  const second=await nativeLifecycle('start',configFile);assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
- ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'});assert.match(retained,/native_acceptance=retained/);assert.match(retained,/retained/);
+ ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=mcpEvaluationResult(await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'}));assert.match(retained.cookie,/native_acceptance=retained/);assert.equal(retained.storage,'retained');
  report.checks.push('restart generation / ledger identity / persistent synthetic browser session');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  for(const [id,m] of Object.entries(c.modules)){const d=new DatabaseSync(path.join(m.dataDir,databases[id]),{readOnly:true});assert.equal(Object.values(d.prepare('PRAGMA integrity_check').get())[0],'ok');d.close();}
