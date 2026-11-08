@@ -115,8 +115,12 @@ try{
  await tool('browser_evaluate',{function:'() => { document.cookie="native_acceptance=retained; max-age=3600; path=/"; localStorage.setItem("native_acceptance","retained"); return document.cookie; }'});
  snapshot=await tool('browser_snapshot');await tool('browser_click',{target:ref(snapshot,/link "Download fixture"/)});
  function findDownload(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory()){const found=findDownload(p);if(found)return found;}else if(e.name==='native-acceptance.txt')return p;}}
- const until=Date.now()+10000;let downloaded;while(!(downloaded=findDownload(evidence))&&Date.now()<until)await new Promise(r=>setTimeout(r,100));
- assert(downloaded,'MCP download file missing');assert.equal(fs.readFileSync(downloaded,'utf8'),'native FPK download acceptance\n');report.download={filename:path.basename(downloaded),bytes:fs.statSync(downloaded).size,sha256:createHash('sha256').update(fs.readFileSync(downloaded)).digest('hex')};report.checks.push('MCP download contents');
+ // Pinned upstream MCP attaches with noDefaults:true, deliberately preserving
+ // Chromium's default download directory and not enabling Playwright download
+ // events. Look only inside this newly created synthetic data root, whose HOME
+ // is also the managed Chromium HOME; never inspect the user's Downloads.
+ const until=Date.now()+10000;let downloaded;while(!(downloaded=findDownload(evidence)||findDownload(data))&&Date.now()<until)await new Promise(r=>setTimeout(r,100));
+ assert(downloaded,'MCP-triggered Chromium download file missing');assert.equal(fs.readFileSync(downloaded,'utf8'),'native FPK download acceptance\n');report.download={filename:path.basename(downloaded),relativeSyntheticPath:path.relative(data,downloaded),bytes:fs.statSync(downloaded).size,sha256:createHash('sha256').update(fs.readFileSync(downloaded)).digest('hex'),connection:'upstream MCP CDP noDefaults / Chromium default download'};fs.copyFileSync(downloaded,path.join(evidence,'download-verified.txt'));report.checks.push('MCP click / real Chromium default download contents');
  browser=await chromium.connectOverCDP('http://127.0.0.1:'+(19222+offset));
  const page=browser.contexts()[0].pages().find(p=>p.url()===url+'/');assert(page);
  await page.screenshot({path:path.join(evidence,'synthetic-browser.png')});
