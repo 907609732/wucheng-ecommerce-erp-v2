@@ -136,7 +136,7 @@ export function openStore(dir){
  });
  let transactionDepth=0;
  const transaction=fn=>{if(transactionDepth)return fn();db.exec('BEGIN IMMEDIATE');transactionDepth++;try{const r=fn();db.exec('COMMIT');return r;}catch(e){if(db.isTransaction)db.exec('ROLLBACK');throw e;}finally{transactionDepth--;}};
- const monthLocks=openMonthLocks(db,{list,transaction});
+ const monthLocks=openMonthLocks(db,{list,transaction,dataDir:dir});
  attachments=openOrderAttachments({db,dir,get,transaction,update:(id,input)=>api.update(id,input)});
  const classify=(id,version,value,batchId)=>{
   const before=get(id);if(!before)throw Error('订单不存在');
@@ -237,7 +237,7 @@ export function openStore(dir){
    db.prepare('INSERT INTO imports(id,filename,hash,file_path,created_at,imported,skipped,line_count,metadata) VALUES (?,?,?,?,?,?,?,?,?)').run(id,meta.filename,meta.hash,meta.filePath||null,new Date().toISOString(),imported,skipped,meta.lineCount,JSON.stringify(metadata));return {id,imported,skipped,...(report?{report}:{})};
   });},
   async backup(file){await backup(db,file);},
-  close(){db.close();}
+  close(){monthLocks.close();db.close();}
  };
  if(process.env.LINGTU_DATA_VERSION_DIR){api.dataVersioning=dataVersioning;dataVersioning.refresh();if(!db.prepare('SELECT 1 FROM data_version_events LIMIT 1').get()||dataVersionBaselineRequired(db))dataVersioning.baseline();const withActor=api.withActor;api.withActor=(actor,fn)=>api.dataVersioning.run({actor},()=>withActor(actor,fn));}
  return api;

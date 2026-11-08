@@ -57,15 +57,6 @@
     },
     {
       "module": "purchase",
-      "method": "POST",
-      "path": "/api/admin/password",
-      "kind": "write",
-      "remote": false,
-      "uiOnly": true,
-      "operationId": "purchase:POST:/api/admin/password"
-    },
-    {
-      "module": "purchase",
       "method": "GET",
       "path": "/api/app-info",
       "kind": "read",
@@ -1737,6 +1728,24 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "purchase:GET:/api/manual-receipts/:key"
+    },
+    {
+      "module": "purchase",
+      "method": "POST",
+      "path": "/api/month-admin/password",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "purchase:POST:/api/month-admin/password"
+    },
+    {
+      "module": "purchase",
+      "method": "GET",
+      "path": "/api/month-admin/status",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "purchase:GET:/api/month-admin/status"
     }
   ]
 }

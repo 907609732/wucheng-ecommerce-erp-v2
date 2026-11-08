@@ -2547,6 +2547,60 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "sales:GET:/workbench-base.js"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/month-admin/status",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/month-admin/status"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/month-admin/password",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/month-admin/password"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/reconciliation/locks",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/reconciliation/locks"
+    },
+    {
+      "module": "sales",
+      "method": "GET",
+      "path": "/api/reconciliation/preview",
+      "kind": "read",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "sales:GET:/api/reconciliation/preview"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/reconciliation/lock",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/reconciliation/lock"
+    },
+    {
+      "module": "sales",
+      "method": "POST",
+      "path": "/api/reconciliation/unlock",
+      "kind": "confirmation",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "sales:POST:/api/reconciliation/unlock"
     }
   ]
 }

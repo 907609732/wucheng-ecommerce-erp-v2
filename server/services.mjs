@@ -43,7 +43,7 @@ export async function createSourceServices(
     registryFile,
     agentManaged: true,
     startupTimeoutMs: 30000,
-    environment: { LINGTU_WEB_COLLECTOR: "1", LINGTU_DATA_VERSION_DIR: config.dataVersion?.enabled ? config.dataVersion.dir : "", LINGTU_DATA_VERSION_MODE: config.dataVersion?.enabled ? "enabled" : "disabled" },
+    environment: { LINGTU_MONTH_ADMIN_DIR: path.join(config.stateDir,"month-admin"), LINGTU_MONTH_ADMIN_LEGACY_PURCHASE_DIR: config.modules.purchase.dataDir, LINGTU_WEB_COLLECTOR: "1", LINGTU_DATA_VERSION_DIR: config.dataVersion?.enabled ? config.dataVersion.dir : "", LINGTU_DATA_VERSION_MODE: config.dataVersion?.enabled ? "enabled" : "disabled" },
   });
   manager.businessOnly = true;
   const ownershipFile = path.join(config.stateDir, "web-ownership.json");

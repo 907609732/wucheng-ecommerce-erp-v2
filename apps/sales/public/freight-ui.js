@@ -1,3 +1,4 @@
+import {createReconciliationUI,freightScopes} from './reconciliation-ui.js';
 import {applyChartDefaults,themeColor,chartPalette} from './ui/chart-theme.mjs';
 import {openWarehouseImportAssistant} from './warehouse-import-assistant.js';
 const channels={warehouse:'云仓发货',merchant:'商家寄件',sf:'顺丰快递'};
@@ -14,9 +15,10 @@ export function createFreightUI(ctx) {
   const attachmentLinks=items=>items.map(a=>`<div class="freight-attachment"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.filename)}</a><span>${(a.size/1024).toFixed(0)} KB</span><a href="${esc(a.url)}?download=1">下载</a></div>`).join('');
 
   async function dashboard(valid) {
+    const route=new URLSearchParams(location.hash.split('?')[1]||'');if(route.has('channel'))channel=route.get('channel');const section=route.get('section')||'center';
     const key=new URLSearchParams({period:state.period,grain:state.grain,shop:state.shop,channel,status:showVoided?'all':'active'}).toString();
     if(key!==lastFilter){page=1;lastFilter=key;}
-    const [r,list]=await Promise.all([api('/api/freight/report?'+params()),api('/api/freight/records?'+params()+'&page='+page)]);
+    const [r,list,lockState]=await Promise.all([api('/api/freight/report?'+params()),api('/api/freight/records?'+params()+'&page='+page),api('/api/reconciliation/locks?'+new URLSearchParams({month:state.period.slice(0,7),kind:'freight'}))]);
     if(!valid())return;
     if(page>1&&!list.rows.length){page--;return render();}
     $('#lock-status').textContent=r.locked?'已锁定':r.totals.count?'已登记 · 待核对':'尚未录入';$('#lock-status').className='pill '+(r.locked?'good':'');
@@ -35,6 +37,8 @@ export function createFreightUI(ctx) {
       <section class="card"><div class="card-head"><h2>各店与共用费用</h2><span class="subtext">点击归属筛选明细</span></div><div class="table-wrap"><table class="simple-table freight-shops"><thead><tr><th>归属</th><th>纯快递运费</th><th>附加费用</th><th>费用合计</th><th>记录条数</th></tr></thead><tbody>${r.by_shop.map(s=>`<tr><td><button class="text-button" data-freight-shop="${esc(s.shop_id)}">${s.shop_id==='shared'?'多店共用':esc(s.platform+' · '+s.shop)}</button>${s.shop_id==='shared'?'<small>未分摊至各店</small>':''}</td><td>${amount(s.shipping)}</td><td>${amount(s.extras)}</td><td><strong>${amount(s.total)}</strong></td><td>${s.count||'—'}</td></tr>`).join('')}</tbody></table></div></section>
       <section class="card freight-records"><div class="card-head"><div><h2>录入明细</h2><p class="subtext">${channels[channel]||'全部类型'} · ${list.count} 条${showVoided?'（含作废，作废不计入汇总）':''}</p></div><label class="checkline"><input type="checkbox" id="freight-show-void" ${showVoided?'checked':''}>显示作废记录</label></div><div id="freight-record-table"></div><div class="freight-pagination"><span>第 ${page} / ${Math.max(1,Math.ceil(list.count/list.page_size))} 页 · 每页 ${list.page_size} 条</span><div><button class="button small" id="freight-prev" ${page===1?'disabled':''}>上一页</button><button class="button small" id="freight-next" ${page*list.page_size>=list.count?'disabled':''}>下一页</button></div></div></section>
       <p class="section-note">记录条数不是包裹数。件数未完整填写时不计算平均运费；未登记的店铺和期间不视为零费用。</p></div>`;
+    const lockCards=document.createElement('section');lockCards.setAttribute('aria-label','运费月度核对');$('.overview-notice').after(lockCards);if(section==='center'){await createReconciliationUI(ctx).mount(lockCards,(lockState.scopes||freightScopes(boot.shops,list.rows)).filter(s=>(state.shop==='all'||(state.shop==='shared'?!s.shop_id:s.shop_id===state.shop))&&(channel==='all'||s.channel===channel)).map(s=>({...s,kind:'freight',month:state.period.slice(0,7)})));if(!valid())return;}
+    if(section==='center')document.querySelectorAll('.overview-kpis,.overview-secondary,.overview-charts,.freight-shops').forEach(el=>{const card=el.closest('section.card');(card||el).hidden=true;});if(section==='records')document.querySelectorAll('.overview-kpis,.overview-secondary,.overview-charts,.freight-shops').forEach(el=>{const card=el.closest('section.card');(card||el).hidden=true;});if(section!=='records')$('.freight-records').hidden=true;
     $('#warehouse-import-assistant').onclick=()=>openWarehouseImportAssistant({$,esc,dialog,toast,state,boot});
     document.querySelectorAll('[data-freight-filter]').forEach(b=>b.onclick=()=>{channel=b.dataset.freightFilter;render();});
     document.querySelectorAll('[data-freight-shop]').forEach(b=>b.onclick=()=>{state.shop=b.dataset.freightShop;$('#shop').value=state.shop;render();});

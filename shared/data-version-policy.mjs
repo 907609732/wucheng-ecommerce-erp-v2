@@ -1,7 +1,7 @@
 // Explicitly reviewed business data only. New tables require an intentional policy update.
 export const DATA_VERSION_POLICY = Object.freeze({
  purchase:{database:'purchases.sqlite',tables:['orders','imports','audit','settings','order_supplements','order_fingerprint_compat','order_origins','order_attachments','month_confirmations','month_events','image_assets','order_images','integration_transfers','integration_accounts','integration_order_sources','integration_events','addresses','purchase_staff','purchase_staff_events','supplier_profiles','supplier_shop_links','supplier_profile_history','monthly_tasks','monthly_task_events','purchase_task_assignments','purchase_task_assignment_events'],settings:['account-backfill-report'],folders:['originals','attachments','images'],files:{imports:['file_path'],order_attachments:['file_path','thumb_path'],image_assets:['file_path','thumb_path']}},
- sales:{database:'sales.sqlite',tables:['shops','settings','imports','operations','ledger','matches','coverage','rates','month_locks','month_history','audit','batch_attributions','platform_references','freight_records','freight_attachments','freight_requests','sales_staff_handoffs','sales_domain_people','sales_actor_people'],settings:['deletedShopIds'],folders:['originals'],files:{imports:['original_path'],freight_attachments:['original_path']}},
+ sales:{database:'sales.sqlite',tables:['shops','settings','imports','operations','ledger','matches','coverage','rates','month_locks','month_history','reconciliation_locks','reconciliation_history','audit','batch_attributions','platform_references','freight_records','freight_attachments','freight_requests','sales_staff_handoffs','sales_domain_people','sales_actor_people'],settings:['deletedShopIds'],folders:['originals'],files:{imports:['original_path'],freight_attachments:['original_path']}},
  overview:{database:'overview.sqlite',tables:['bills','payments','imports','coverage','overrides','snapshots','audit','payroll_sheet_requests'],settings:[],folders:['originals'],files:{imports:['path']}}
 });
 export const quoteIdentifier=value=>'"'+String(value).replaceAll('"','""')+'"';
@@ -35,9 +35,9 @@ export function sanitizeBusinessRow(module,table,row){
 }
 export const PRIMARY_BUSINESS_TABLES=Object.freeze({
  purchase:['orders','settings','addresses','supplier_profiles','supplier_shop_links','purchase_staff','monthly_tasks','purchase_task_assignments','month_confirmations','integration_accounts'],
- sales:['shops','settings','operations','ledger','matches','coverage','rates','month_locks','platform_references','freight_records','sales_staff_handoffs','sales_domain_people','sales_actor_people','batch_attributions'],
+ sales:['shops','settings','operations','ledger','matches','coverage','rates','month_locks','reconciliation_locks','platform_references','freight_records','sales_staff_handoffs','sales_domain_people','sales_actor_people','batch_attributions'],
  overview:['bills','payments','coverage','overrides','snapshots']
 });
-const helperTables=new Set(['audit','order_fingerprint_compat','month_events','monthly_task_events','purchase_task_assignment_events','purchase_staff_events','supplier_profile_history','integration_events','freight_requests','payroll_sheet_requests']);
+const helperTables=new Set(['audit','reconciliation_history','order_fingerprint_compat','month_events','monthly_task_events','purchase_task_assignment_events','purchase_staff_events','supplier_profile_history','integration_events','freight_requests','payroll_sheet_requests']);
 export const isBusinessMutation=(_module,table)=>!helperTables.has(table);
 export const isRecoverableBusinessRow=(_module,table,row)=>table!=='audit'||!/(?:^|\.)(?:stage|preview|failed)(?:\.|$)/i.test(row.action||'');

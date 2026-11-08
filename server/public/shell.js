@@ -1,4 +1,4 @@
-const ids = ["purchase", "sales", "overview", "data-versions"],
+const ids = ["purchase", "sales", "freight", "overview", "data-versions"],
   status = document.querySelector("#status"),
   message = document.querySelector("#message"),
   frame = document.querySelector("#workspace"),
@@ -43,7 +43,7 @@ function select() {
     : "purchase";
   for (const a of document.querySelectorAll("nav a"))
     a.setAttribute("aria-current", a.hash === "#" + id ? "page" : "false");
-  const next = id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/";
+  const next = id === "freight" ? "/apps/sales/?workspace=freight#freight?section=center" : id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/";
   frame.title = id === "data-versions" ? "数据版本" : "业务工作区";
   if (frame.getAttribute("src") !== next) frame.src = next;
   frame.hidden = false;

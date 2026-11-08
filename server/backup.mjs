@@ -45,6 +45,14 @@ function stopped(dataDir) {
 export async function snapshotData(config, target) {
   target = path.resolve(target);
   if (fs.existsSync(target)) throw Error("备份目录已存在");
+  const roots = Object.fromEntries(moduleIds.map(id => [id, config.modules[id].dataDir]));
+  const adminDir = config.stateDir && path.join(config.stateDir, "month-admin");
+  if (adminDir && fs.existsSync(adminDir)) roots["month-admin"] = adminDir;
+  for (const dir of Object.values(roots)) {
+    const source = path.resolve(dir);
+    if (target === source || target.startsWith(source + path.sep))
+      throw Error("备份不能写入源账本目录");
+  }
   for (const id of moduleIds) {
     const dir = path.resolve(config.modules[id].dataDir);
     if (target === dir || target.startsWith(dir + path.sep))
@@ -60,8 +68,8 @@ export async function snapshotData(config, target) {
     files: [],
   };
   try {
-    for (const id of moduleIds)
-      for (const { file, rel } of files(config.modules[id].dataDir)) {
+    for (const [id, dir] of Object.entries(roots))
+      for (const { file, rel } of files(dir)) {
         const output = path.join(target, id, rel);
         fs.mkdirSync(path.dirname(output), { recursive: true });
         if (file.endsWith(".sqlite")) {
@@ -100,7 +108,7 @@ export function verifySnapshot(target) {
   for (const r of m.files) {
     if (
       typeof r.path !== "string" ||
-      !moduleIds.includes(r.path.split("/")[0]) ||
+      ![...moduleIds, "month-admin"].includes(r.path.split("/")[0]) ||
       r.path.includes("\\") ||
       r.path.split("/").some((p) => !p || p === "." || p === "..") ||
       seen.has(r.path)

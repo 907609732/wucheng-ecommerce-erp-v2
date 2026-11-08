@@ -51,7 +51,7 @@ test('全部锁定时即使伪造勾选和提交管理员请求头也不能导�
  const f=await fixture(t);confirm(f.store);const p=await f.preview([row('BLOCK-1','2026-08-09'),row('BLOCK-2','')]),before=snapshot(f.store);
  assert.equal(p.summary.valid,0);assert.equal(p.summary.locked,2);
  const r=await f.commit(p,[0,1],{'X-Purchase-Admin':password});assert.equal(r.status,423);assert.equal(r.code,'MONTH_LOCKED');assert.equal(r.report.imported,0);assert.deepEqual(r.report.notImported.map(o=>o.orderNo),['BLOCK-1','BLOCK-2']);assert.deepEqual(snapshot(f.store),before);
- await f.store.monthLocks.cancel({...f.store.monthLocks.confirmations()[0],password});const saved=await f.commit(p,[0,1]);assert.equal(saved.status,200);assert.equal(saved.imported,2);
+ await f.store.monthLocks.cancel({...f.store.monthLocks.confirmations()[0],password,reason:'补录更正'});const saved=await f.commit(p,[0,1]);assert.equal(saved.status,200);assert.equal(saved.imported,2);
 });
 
 test('预览之后月份被锁定时整批回滚并更新预览，重新选择其他月份才会导入',async t=>{

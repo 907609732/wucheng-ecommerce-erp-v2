@@ -10,7 +10,7 @@ import {money,id,bounds,fxConvert} from '../lib/util.mjs';
 import {addLedger,editLedger,deleteLedger,createMatch,setCoverage,insertObject,normalizeOperation} from '../lib/ledger.mjs';
 import {report,reconciliationDetail,monthData} from '../lib/report.mjs';
 import {stageImport,previewImport,commitImport,rollbackImport} from '../lib/importer.mjs';
-import {closePreview,lockMonth,unlockMonth} from '../lib/close.mjs';
+import {closePreview,lockMonth as realLockMonth,unlockMonth as realUnlockMonth} from '../lib/close.mjs';
 import {makeBackup,verifyBackup,restoreBackup} from '../lib/backup.mjs';
 import {exportWorkbook} from '../lib/export.mjs';
 import {parseCbr} from '../lib/fx.mjs';
@@ -60,3 +60,6 @@ test('PDD merges repeated exports by movement identity while preserving multiple
   assert.equal(again.duplicates,5);assert.equal(again.merge.added,0);assert.equal(commitPdd(s,third.id,again.revision).added,0);
   assert.equal(s.get('SELECT COUNT(*) n FROM ledger').n,5);
 });
+
+async function lockMonth(store,input,options){if(!store.monthAdmin.configured())await store.monthAdmin.setPassword({password:"test-month-password",confirmation:"test-month-password"});return realLockMonth(store,input,options);}
+async function unlockMonth(store,input,options){return realUnlockMonth(store,{password:"test-month-password",...input},options);}

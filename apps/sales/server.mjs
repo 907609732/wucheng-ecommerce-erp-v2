@@ -27,6 +27,7 @@ import {report,reconciliationDetail,monthData} from './lib/report.mjs';
 import {stageImport,previewImport,commitImport,rollbackImport,FIELDS} from './lib/importer.mjs';
 import {makeBackup,verifyBackup,listBackups,restoreBackup} from './lib/backup.mjs';
 import {closePreview,lockMonth,unlockMonth} from './lib/close.mjs';
+import {scopedLocks,scopedPreview,lockScope,unlockScope} from './lib/scoped-locks.mjs';
 import {fetchRates} from './lib/fx.mjs';
 import {exportWorkbook,exportPddMovements} from './lib/export.mjs';
 import {sourceStatus} from './lib/jobs.mjs';
@@ -66,6 +67,17 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
     next();
   }]};
   installFreightRoutes(app,s);
+  const requireMonthUI=q=>{
+    if(q.workbenchActor&&q.workbenchActor.channel!=='ui')throw fail('请在工作台界面完成月度确认',403,'UI_CONFIRMATION_REQUIRED');
+    if(!personnel.current(q).canReconcile)throw fail('请先使用管理身份核对',403,'BOSS_REQUIRED');
+    return {actorId:q.workbenchActor?.id||personnel.current(q).actor?.id||'local:boss'};
+  };
+  app.get('/api/month-admin/status',(_q,r)=>r.json(s.monthAdmin.status()));
+  app.post('/api/month-admin/password',async(q,r)=>{const actor=requireMonthUI(q);const result=await s.monthAdmin.setPassword(q.body);s.audit('month-admin.password',actor.actorId,{configured:result.configured});r.json(result);});
+  app.get('/api/reconciliation/locks',(q,r)=>r.json(scopedLocks(s,q.query)));
+  app.get('/api/reconciliation/preview',(q,r)=>r.json(scopedPreview(s,q.query)));
+  app.post('/api/reconciliation/lock',async(q,r)=>r.json(await lockScope(s,q.body,requireMonthUI(q))));
+  app.post('/api/reconciliation/unlock',async(q,r)=>r.json(await unlockScope(s,q.body,requireMonthUI(q))));
   app.get('/api/health',(q,r)=>r.json({ok:true,app:'wucheng-sales-desk',version:integration.state.version,demo}));
   app.get('/api/bootstrap',(q,r)=>{const identity=personnel.current(q);r.json({token,personnel:identity,shops:identity.selected?s.shops():[],kinds:KINDS,datasets:DATASETS,currencies:CURRENCIES,fields:FIELDS,month:shiftMonth(beijing().month,-1),today:beijing().date,demo,pendingEdits:identity.canReconcile?s.get("SELECT COUNT(*) count FROM integration_edit_drafts WHERE state='draft'").count:0,notices:identity.canReconcile?s.all('SELECT * FROM notices ORDER BY created_at DESC LIMIT 20'):[]});});
   app.get('/api/personnel/session',(q,r)=>r.json(personnel.current(q)));
@@ -121,8 +133,8 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
   app.get('/api/imports/:id/original',(q,r)=>{const b=s.get('SELECT * FROM imports WHERE id=?',q.params.id);if(!b)throw fail('原件不存在',404);r.download(path.join(s.dir,b.original_path),b.filename);});
   app.get('/api/template/:type',(q,r)=>{const fields=FIELDS[q.params.type];if(!fields)throw fail('模板不存在');r.set('Content-Disposition',`attachment; filename="${q.params.type}-template.csv"`);r.type('text/csv').send('\ufeff'+Object.keys(fields).join(',')+'\r\n');});
   app.get('/api/close',(q,r)=>r.json(closePreview(s,month(q.query.month))));
-  app.post('/api/close/lock',async(q,r)=>r.json(await lockMonth(s,q.body)));
-  app.post('/api/close/unlock',async(q,r)=>r.json(await unlockMonth(s,q.body)));
+  app.post('/api/close/lock',async(q,r)=>{r.json(await lockMonth(s,q.body,requireMonthUI(q)));});
+  app.post('/api/close/unlock',async(q,r)=>{r.json(await unlockMonth(s,q.body,requireMonthUI(q)));});
   app.get('/api/close/history',(q,r)=>r.json(s.all('SELECT id,month,action,reason,created_at FROM month_history ORDER BY created_at DESC LIMIT 100')));
   app.get('/api/audit',(q,r)=>r.json(s.all('SELECT * FROM audit ORDER BY id DESC LIMIT 200')));
   app.post('/api/rates',async(q,r)=>{const m=month(q.body.month),data=monthData(s,m);const dates=[...data.operations.filter(x=>x.currency!=='CNY').map(x=>x.end),...data.ledger.filter(x=>x.date.startsWith(m)&&x.currency!=='CNY').map(x=>x.date)];r.json(await fetchRates(s,dates));});

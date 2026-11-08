@@ -8,7 +8,7 @@ import {openStore} from './helpers.mjs';
 import {id} from '../lib/util.mjs';
 import {saveFreight,voidFreight,freightRecord,freightReport,freightRows,freightList,exportFreight,freightAttachment} from '../lib/freight.mjs';
 import {report} from '../lib/report.mjs';
-import {closePreview,lockMonth,unlockMonth} from '../lib/close.mjs';
+import {closePreview,lockMonth as realLockMonth,unlockMonth as realUnlockMonth} from '../lib/close.mjs';
 import {makeBackup,verifyBackup,restoreBackup} from '../lib/backup.mjs';
 import {createApp,createSessionFetch} from './helpers.mjs';
 
@@ -134,3 +134,6 @@ test('freight HTTP mutations require token; multipart, review response, details 
   const reportResult=await (await fetch(base+'/api/freight/report?period=2026-09',{headers})).json();assert.equal(reportResult.totals.total,10025);
   const exported=await fetch(base+'/api/freight/export?period=2026-09',{headers});assert.equal(exported.status,200);assert.match(exported.headers.get('content-disposition'),/freight-2026-09.xlsx/);const wb=new ExcelJS.Workbook();await wb.xlsx.load(await exported.arrayBuffer());assert.equal(wb.getWorksheet('运费明细').getCell('M2').value,'00012345678901234567890');
 });
+
+async function lockMonth(store,input,options){if(!store.monthAdmin.configured())await store.monthAdmin.setPassword({password:"test-month-password",confirmation:"test-month-password"});return realLockMonth(store,input,options);}
+async function unlockMonth(store,input,options){return realUnlockMonth(store,{password:"test-month-password",...input},options);}

@@ -1,0 +1,6 @@
+# Monthly reconciliation implementation plan
+Goal: implement user-approved sales shop/month locks, independent freight reconciliation and purchase platform cards with unified password unlock.
+Architecture: retain three business services; freight is an independent shell view backed by sales. Share credential implementation and password state through managed service configuration. Existing whole-month locks remain dominant.
+Tasks: A sales/freight scoped lock service and DB enforcement; B unified password service and purchase lock/cards; C sales/freight UI and shell navigation; D controller integration, review, isolated browser QA and GitHub checks.
+Rules: ended months for sales/freight, next-month Beijing 15th for purchase; zero confirmation records no fake business rows; all unlock paths require password and reason. OLD/NEW scope checks and atomic multi-scope writes. Preserve existing untracked NAS files in original checkout. No production writes or deployment.
+Acceptance: focused lock/password/routing tests, root and module suites, check/ui/approval checks, isolated browser desktop/mobile and bad-password/relock scenarios. Push feature branch and draft PR for CI; no merge/publication.

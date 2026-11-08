@@ -6,6 +6,8 @@ import path from 'node:path';
 import { SHOPS } from './config.mjs';
 import { now, serial, id } from './util.mjs';
 import { installFreightSchema } from './freight-schema.mjs';
+import {installScopedLockSchema} from './scoped-locks.mjs';
+import {openMonthAdmin} from '../../../shared/month-admin.mjs';
 
 export function openStore(dir) {
   mkdirSync(dir,{recursive:true});
@@ -43,6 +45,7 @@ export function openStore(dir) {
   CREATE TRIGGER IF NOT EXISTS history_no_update BEFORE UPDATE ON month_history BEGIN SELECT RAISE(ABORT,'HISTORY_IMMUTABLE'); END;
   CREATE TRIGGER IF NOT EXISTS history_no_delete BEFORE DELETE ON month_history BEGIN SELECT RAISE(ABORT,'HISTORY_IMMUTABLE'); END;`);
   installFreightSchema(db);
+  installScopedLockSchema(db);
   const predicates={
     freight_records:p=>`EXISTS(SELECT 1 FROM month_locks WHERE month=${p}.month)`,
     freight_attachments:p=>`EXISTS(SELECT 1 FROM freight_records f JOIN month_locks m ON m.month=f.month WHERE f.id=${p}.record_id)`,
@@ -73,7 +76,8 @@ export function openStore(dir) {
   const nativeClose=db.close.bind(db);db.close=(...args)=>{assertOwner();return nativeClose(...args);};
   db.exec=(...args)=>{assertOwner();return nativeExec(...args);};
   db.prepare=(...args)=>{assertOwner();const statement=nativePrepare(...args);for(const method of ['run','get','all','iterate']){const original=statement[method]?.bind(statement);if(original)statement[method]=(...values)=>{assertOwner();return original(...values);};}return statement;};
-  const store={db,dir,
+  const monthAdmin=openMonthAdmin({dataDir:process.env.LINGTU_MONTH_ADMIN_DIR||dir});
+  const store={db,dir,monthAdmin,
     shops:()=>db.prepare("SELECT * FROM shops WHERE platform<>'待归属' ORDER BY rowid").all().map(s=>({...s,manual:!!s.manual})),
     all:(sql,...args)=>db.prepare(sql).all(...args),
     get:(sql,...args)=>db.prepare(sql).get(...args),
@@ -84,7 +88,7 @@ export function openStore(dir) {
     setting(key,fallback=null){const r=db.prepare('SELECT value FROM settings WHERE key=?').get(key);return r?JSON.parse(r.value):fallback;},
     setSetting(key,value){db.prepare('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,serial(value));},
     notice(message){db.prepare('INSERT INTO notices(id,message,created_at) VALUES(?,?,?)').run(id(),message,now());},
-    close(){db.close();}
+    close(){monthAdmin.close();db.close();}
   };
   if(process.env.LINGTU_DATA_VERSION_DIR){store.dataVersioning=dataVersioning;dataVersioning.refresh();if(!db.prepare('SELECT 1 FROM data_version_events LIMIT 1').get()||dataVersionBaselineRequired(db))dataVersioning.baseline();}
  return store;
