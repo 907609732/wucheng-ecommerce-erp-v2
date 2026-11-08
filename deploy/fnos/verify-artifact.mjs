@@ -5,12 +5,22 @@ import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {verifyRelease} from '../../server/release.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
+export function manifestFields(text){
+ const fields={};
+ for(const line of text.split(/\r?\n/)){
+  if(!line.trim()||/^\s*[#;]/.test(line))continue;
+  const m=/^\s*([a-zA-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+  if(!m||Object.hasOwn(fields,m[1]))throw Error('Invalid or duplicate manifest field');
+  fields[m[1]]=m[2];
+ }
+ return fields;
+}
 export function verifyArtifact(folder){
  const root=fs.realpathSync(folder),app=path.join(root,'app');
  const read=p=>fs.readFileSync(path.join(root,p),'utf8');
  const requireFile=p=>{if(!fs.statSync(path.join(root,p)).isFile())throw Error('Missing payload '+p);};
- const manifest=read('manifest');
- for(const [key,value] of Object.entries({appname:'wuchengerp',version:'0.15.0',platform:'x86'}))if(!manifest.split('\n').includes(key+'='+value))throw Error('Invalid manifest '+key);
+ const manifest=read('manifest'),fields=manifestFields(manifest);
+ for(const [key,value] of Object.entries({appname:'wuchengerp',version:'0.15.0',platform:'x86'}))if(fields[key]!==value)throw Error('Invalid manifest '+key);
  const elf=['runtime/node/bin/node','runtime/chromium/chrome',...['Xvfb','x11vnc','xauth','xkbcomp'].map(n=>'runtime/sysroot/usr/bin/'+n)];
  for(const relative of elf){
   const f=path.join(app,relative),b=fs.readFileSync(f);

@@ -86,8 +86,12 @@ node "$helper/verify-artifact.mjs" "$stage" | tee "$out/artifact-verification.js
 cp "$stage/app/THIRD-PARTY.json" "$out/THIRD-PARTY.json"
 cp "$work/sharp-source-inputs.json" "$out/sharp-source-inputs.json"
 cp "$work/canvas-source-inputs.json" "$out/canvas-source-inputs.json"
-find "$stage" -type f -printf '%P\n' | LC_ALL=C sort > "$out/PAYLOAD-FILES.txt"
-(cd "$stage"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/PAYLOAD-SHA256SUMS.txt"
+# Official fnpack normalizes manifest whitespace and adds app.tgz checksum.
+# Compare all manifest values separately; every other file/link stays exact.
+cp "$stage/manifest" "$out/MANIFEST-SOURCE.txt"
+find "$stage" -type f ! -path "$stage/manifest" -printf '%P\n' | LC_ALL=C sort > "$out/PAYLOAD-FILES.txt"
+(cd "$stage"; find . -type f ! -path ./manifest -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/PAYLOAD-SHA256SUMS.txt"
+(cd "$stage"; find . -type l -printf '%P -> %l\n' | LC_ALL=C sort) > "$out/PAYLOAD-SYMLINKS.txt"
 # The smoke uses a synthetic data root outside the stage and is never packaged.
 node "$helper/verify-artifact.mjs" "$stage"
 cd "$out"
@@ -97,9 +101,12 @@ mapfile -t packages < <(find "$out" -maxdepth 1 -name '*.fpk' -type f)
 mkdir -p "$work/unpacked/app"
 tar -xf "${packages[0]}" -C "$work/unpacked"
 tar -xzf "$work/unpacked/app.tgz" -C "$work/unpacked/app"
+node "$helper/verify-packed-manifest.mjs" "$out/MANIFEST-SOURCE.txt" "$work/unpacked/manifest" "$work/unpacked/app.tgz" > "$out/packed-manifest-verification.json"
 rm "$work/unpacked/app.tgz"
 node "$helper/verify-artifact.mjs" "$work/unpacked" > "$out/packed-artifact-verification.json"
 (cd "$work/unpacked"; sha256sum --check --strict "$out/PAYLOAD-SHA256SUMS.txt" > "$out/packed-payload-checks.log")
+diff -u "$out/PAYLOAD-FILES.txt" <(find "$work/unpacked" -type f ! -path "$work/unpacked/manifest" -printf '%P\n' | LC_ALL=C sort)
+diff -u "$out/PAYLOAD-SYMLINKS.txt" <(cd "$work/unpacked"; find . -type l -printf '%P -> %l\n' | LC_ALL=C sort)
 sha256sum "$(basename "${packages[0]}")" > SHA256SUMS.txt
 bash "$helper/build-diagnostic.sh" "$stage" "$work" "$out"
 # Sources are separate companions and must stay together with any redistribution.

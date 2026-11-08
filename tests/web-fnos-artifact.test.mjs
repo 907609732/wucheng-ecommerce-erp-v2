@@ -30,6 +30,26 @@ const run=stage=>spawnSync(process.execPath,[checker,stage],{encoding:'utf8'});
 test('complete native artifact validates its private runtime, upstream CSP and accepted release',t=>{
  const stage=fixture(t),r=run(stage);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).platform,'x86');
 });
+
+test('artifact accepts official fnpack aligned manifest fields while rejecting duplicate or changed identity',t=>{
+ const stage=fixture(t),file=path.join(stage,'manifest');
+ // Extracted from the real complete FPK produced by run42519823711/fnpack1.2.3.
+ const manifest=fs.readFileSync(path.join(root,'tests/fixtures/fnpack-1.2.3-main-manifest.txt'),'utf8');
+ fs.writeFileSync(file,manifest);assert.equal(run(stage).status,0);
+ fs.writeFileSync(file,manifest+'appname = other\n');assert.notEqual(run(stage).status,0);
+ fs.writeFileSync(file,manifest.replace('= x86','= arm'));assert.notEqual(run(stage).status,0);
+});
+
+test('packed manifest preserves every source field and verifies official app archive checksum',t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-packed-manifest-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const source=path.join(dir,'source'),packed=path.join(dir,'manifest'),archive=path.join(dir,'app.tgz');fs.writeFileSync(archive,'actual compressed payload bytes');
+ fs.writeFileSync(source,'appname=wuchengerp\nversion=0.15.0\ndesc=原生完整运行时\n');
+ const manifest='appname = wuchengerp\nversion = 0.15.0\ndesc = 原生完整运行时\nchecksum = '+createHash('md5').update(fs.readFileSync(archive)).digest('hex')+'\n';fs.writeFileSync(packed,manifest);
+ const verify=()=>spawnSync(process.execPath,[path.join(root,'deploy/fnos/verify-packed-manifest.mjs'),source,packed,archive],{encoding:'utf8'});
+ assert.equal(verify().status,0);
+ for(const invalid of [manifest.replace('原生完整运行时','changed'),manifest+'unexpected=field\n',manifest+'appname=other\n']){fs.writeFileSync(packed,invalid);assert.notEqual(verify().status,0);}
+ fs.writeFileSync(packed,manifest);fs.appendFileSync(archive,'corrupt');assert.notEqual(verify().status,0);
+});
 test('artifact rejects ledger/config/profile and modified release contents',t=>{
  const stage=fixture(t);
  for(const p of ['app/erp/data/sales/sales.sqlite','app/erp/config/web.json','app/runtime/browser-profiles/Cookies']){

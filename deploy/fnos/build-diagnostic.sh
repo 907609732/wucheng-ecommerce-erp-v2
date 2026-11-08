@@ -48,11 +48,18 @@ run=$(cat "$work/diag-volume/@wuchengerpdiag-data/active-run")
 cp -a "$work/diag-volume/@wuchengerpdiag-data/$run/evidence" "$out/diagnostic-cancel-evidence"
 if pgrep -u erpdiag >/dev/null; then ps -fu erpdiag; echo 'Diagnostic cancellation leaked processes.' >&2; exit 1; fi
 # No services are claimed running after this install-time one-shot completes.
+cp "$diag/manifest" "$out/DIAGNOSTIC-MANIFEST-SOURCE.txt"
+(cd "$diag"; find . -type f ! -path ./manifest -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/DIAGNOSTIC-PAYLOAD-SHA256SUMS.txt")
+find "$diag" -type f ! -path "$diag/manifest" -printf '%P\n' | LC_ALL=C sort > "$out/DIAGNOSTIC-PAYLOAD-FILES.txt"
+(cd "$diag"; find . -type l -printf '%P -> %l\n' | LC_ALL=C sort) > "$out/DIAGNOSTIC-PAYLOAD-SYMLINKS.txt"
 "$work/downloads/fnpack" build --directory "$diag"
 [[ -s "$out/wuchengerpdiag.fpk" ]] || { echo 'Official diagnostic FPK was not produced.' >&2; exit 1; }
 mkdir -p "$work/unpacked-diag/app"
 tar -xf "$out/wuchengerpdiag.fpk" -C "$work/unpacked-diag"
 tar -xzf "$work/unpacked-diag/app.tgz" -C "$work/unpacked-diag/app"
-(cd "$diag"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/DIAGNOSTIC-PAYLOAD-SHA256SUMS.txt")
+"$stage/app/runtime/node/bin/node" "$helper/verify-packed-manifest.mjs" "$out/DIAGNOSTIC-MANIFEST-SOURCE.txt" "$work/unpacked-diag/manifest" "$work/unpacked-diag/app.tgz" > "$out/diagnostic-packed-manifest-verification.json"
+rm "$work/unpacked-diag/app.tgz"
 (cd "$work/unpacked-diag"; sha256sum --check --strict "$out/DIAGNOSTIC-PAYLOAD-SHA256SUMS.txt" > "$out/diagnostic-packed-payload-checks.log")
+diff -u "$out/DIAGNOSTIC-PAYLOAD-FILES.txt" <(find "$work/unpacked-diag" -type f ! -path "$work/unpacked-diag/manifest" -printf '%P\n' | LC_ALL=C sort)
+diff -u "$out/DIAGNOSTIC-PAYLOAD-SYMLINKS.txt" <(cd "$work/unpacked-diag"; find . -type l -printf '%P -> %l\n' | LC_ALL=C sort)
 (cd "$out"; sha256sum wuchengerpdiag.fpk >> SHA256SUMS.txt)

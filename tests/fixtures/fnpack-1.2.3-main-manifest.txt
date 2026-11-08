@@ -1,0 +1,14 @@
+appname                    = wuchengerp
+version                    = 0.15.0
+display_name               = 五成ERP
+desc                       = 完整原生 ERP：采购、销售、经营总览、采集浏览器；独立持久账本。
+platform                   = x86
+source                     = thirdparty
+maintainer                 = Wucheng
+distributor                = Wucheng
+desktop_uidir              = ui
+desktop_applaunchname      = wuchengerp.main
+os_min_version             = 1.1.3100
+ctl_stop                   = true
+disable_authorization_path = true
+checksum                   = 963df37ed21c63f9d820c82ba65da5b4
