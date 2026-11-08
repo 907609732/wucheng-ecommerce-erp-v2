@@ -21,6 +21,17 @@ jobs:
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
+      - name: Permit unprivileged namespace sandbox only on ephemeral CI host
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ubuntu24.04 additionally restricts unprofiled Chromium userns even
+          # inside privileged Docker. This setting is NEVER applied by the FPK.
+          if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            prior=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)
+            echo "ERP_CI_APPARMOR_USERNS_PREVIOUS=$prior" >> "$GITHUB_ENV"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Build on Debian 12, test real package-user namespace sandbox
         shell: bash
         run: |
@@ -41,6 +52,10 @@ jobs:
             -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/verify-clean-runtime.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/clean-runtime.log"
+      - name: Restore ephemeral CI host namespace policy
+        if: always() && env.ERP_CI_APPARMOR_USERNS_PREVIOUS != ''
+        shell: bash
+        run: sudo sysctl -w "kernel.apparmor_restrict_unprivileged_userns=$ERP_CI_APPARMOR_USERNS_PREVIOUS"
       - name: Make exported synthetic evidence readable by artifact uploader
         if: always()
         shell: bash

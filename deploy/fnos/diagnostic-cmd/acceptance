@@ -17,7 +17,7 @@ mkdir -m700 "$RUN/evidence"
 if [ "$(id -u)" = 0 ]; then chown "$uid:$gid" "$RUN/evidence"; fi
 # The real root recovery helper requires these trusted system stdlib modules.
 # Inspect before starting any native process; python-minimal alone may lack them.
-if ! /usr/bin/python3 -I -B -c 'import sqlite3,ctypes,fcntl,json,sys; print(json.dumps({"ok":True,"version":sys.version,"sqlite":sqlite3.sqlite_version}))' > "$RUN/evidence/system-python.log" 2>&1; then
+if ! timeout --signal=TERM --kill-after=2s 10s /usr/bin/python3 -I -B -c 'import sqlite3,ctypes,fcntl,json,sys; print(json.dumps({"ok":True,"version":sys.version,"sqlite":sqlite3.sqlite_version}))' > "$RUN/evidence/system-python.log" 2>&1; then
  printf '%s\n' '{"ok":false,"stage":"system-python-preflight","error":"Trusted /usr/bin/python3 needs sqlite3,ctypes,fcntl,json; ask administrator to prepare official system Python; no native service started"}' > "$RUN/evidence/acceptance.json"
  fail "系统 Python 标准库预检失败，未启动原生进程；请管理员核对官方 python3 完整环境。证据：$RUN/evidence"
 fi

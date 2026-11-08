@@ -12,6 +12,7 @@ work=$(cat /output/release/BUILD-WORKDIR.txt)
 app="$work/stage/wuchengerp/app"
 useradd --create-home --uid 23001 erpbuild
 useradd --create-home --uid 23003 erpdiag
+runuser -u erpbuild -- unshare --user --map-root-user true
 mkdir -p /var/apps/wuchengerp /var/apps/wuchengerpdiag "$work/clean-fixture" /output/release/clean-runtime-evidence
 ln -s "$app" /var/apps/wuchengerp/target
 ln -s "$work/stage/wuchengerpdiag/app" /var/apps/wuchengerpdiag/target

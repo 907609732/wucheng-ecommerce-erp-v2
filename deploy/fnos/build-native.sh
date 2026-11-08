@@ -67,6 +67,7 @@ cp "$helper/native-inputs.env" "$out/INPUTS.env"
 cp -a "$work/diagnostic" "$out/diagnostic-xvfb"
 # Real package-user checks. This canonical path exists only in disposable CI.
 useradd --create-home --uid 23001 erpbuild
+runuser -u erpbuild -- unshare --user --map-root-user true
 mkdir -p /var/apps/wuchengerp
 ln -s "$stage/app" /var/apps/wuchengerp/target
 chmod 755 "$work"

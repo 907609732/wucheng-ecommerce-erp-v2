@@ -6,6 +6,8 @@
 
 Windows 的 `build.ps1` 明确拒绝生成旧薄包。推送分支后手动运行 GitHub Actions **fnOS native FPK**。工作流使用临时 Debian 12 构建容器；仅为测试 Chromium namespace sandbox 允许 CI 容器特权，FPK 不授予 package 用户能力，也不依赖 Docker。
 
+Ubuntu 24.04 runner 还需按 [Chromium 官方说明](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md) 临时放开其 AppArmor 对未配置 Chromium 的 userns 限制，工作流结束恢复原值。此设置只用于一次性 CI 主机，不在 FPK 或 NAS 安装钩子中执行；NAS 必须在原有策略下单独通过非 root sandbox 诊断，不能用关闭 Chromium sandbox 绕过。
+
 构建后还在全新的 Debian 12 slim 运行容器重复主包 smoke 和诊断安装钩子，只准备系统 Python、CA 和 util-linux，断言没有宿主 X11/GTK/NSS/字体/XKB。可读取的受控进程 `/proc/maps` 只允许已验包内运行时/原生 npm 依赖和明确的宿主 glibc/loader；sandbox 拒绝读取的进程单独记录。该验证避免构建机图形依赖掩盖私有闭包遗漏，仍不替代 NAS 实机验收。
 
 产物包括 `wuchengerp.fpk`、独立测试包 `wuchengerpdiag.fpk`、`SHA256SUMS.txt`、逐文件 payload 校验清单、`THIRD-PARTY.json`、对应源码 companion、编译参数及合成验收 JSON/截图。下载后先用 SHA256 验证；源码伴随包必须和对应 FPK 一并保存，未来再分发时一并提供。GitHub workflow artifacts 默认保留 14 天，不是长期公开源码下载服务。
