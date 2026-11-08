@@ -13,3 +13,4 @@ deploy/fnos/wuchengerp/wizard/* text eol=lf
 
 scripts/public-scan/scan-stage-public.mjs text eol=lf
 scripts/public-scan/gitleaks-v8.30.1.official.toml text eol=lf
+tests/fixtures/novnc-v1.6.0-* text eol=lf

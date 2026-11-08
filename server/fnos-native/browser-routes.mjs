@@ -6,6 +6,9 @@ const publicDir=path.resolve(import.meta.dirname,'../public');
 const fail=(statusCode,code,message)=>Object.assign(Error(message),{statusCode,code,workbenchPublic:true});
 const types={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.ico':'image/x-icon','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.ogg':'audio/ogg','.mp3':'audio/mpeg'};
 const csp="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'";
+// Exact inline UI bootstrap in upstream noVNC v1.6.0 vnc.html. Keep the
+// packaged HTML unchanged and authorize no other inline script or resource.
+const novncHtmlCsp=csp.replace("script-src 'self'","script-src 'self' 'sha256-/9PPJp0RDtPobChVxkPiMU+aOqJaic/KxxORSdYVFHE='");
 export async function registerNativeBrowserRoutes(app,context,config){
  const browser=config.native?.browser;if(!browser?.enabled)return;
  const specs=nativeBrowserSpecs(config);
@@ -19,7 +22,7 @@ export async function registerNativeBrowserRoutes(app,context,config){
   const relative=request.params['*'];if(!relative||relative.split('/').some(s=>!s||s.startsWith('.'))||!types[path.extname(relative)])throw fail(404,'NOVNC_ASSET_UNKNOWN','noVNC 资源不存在');
   let file,root;try{root=fs.realpathSync(browser.novncRoot);file=fs.realpathSync(path.resolve(root,relative));}catch{throw fail(404,'NOVNC_ASSET_UNKNOWN','noVNC 资源不存在');}
   if(!file.startsWith(root+path.sep)||!fs.statSync(file).isFile())throw fail(404,'NOVNC_ASSET_UNKNOWN','noVNC 资源不存在');
-  return reply.header('cache-control','private, no-cache').header('content-security-policy',csp).header('x-content-type-options','nosniff').type(types[path.extname(file)]).send(fs.readFileSync(file));
+  return reply.header('cache-control','private, no-cache').header('content-security-policy',relative==='vnc.html'?novncHtmlCsp:csp).header('x-content-type-options','nosniff').type(types[path.extname(file)]).send(fs.readFileSync(file));
  });
  for(const spec of Object.values(specs)){
   const prefix='/api/workbench/v1/native-browser/'+spec.id;
