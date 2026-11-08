@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {manifestFields} from '../deploy/fnos/verify-artifact.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const checker=path.join(root,'deploy/fnos/verify-artifact.mjs');
@@ -50,6 +51,18 @@ test('packed manifest preserves every source field and verifies official app arc
  assert.equal(verify().status,0);
  for(const invalid of [manifest.replace('原生完整运行时','changed'),manifest+'unexpected=field\n',manifest+'__proto__=ignored-extra\n',manifest+'__proto__=first\n__proto__=duplicate\n',manifest+'appname=other\n']){fs.writeFileSync(packed,invalid);assert.notEqual(verify().status,0);}
  fs.writeFileSync(packed,manifest);fs.appendFileSync(archive,'corrupt');assert.notEqual(verify().status,0);
+});
+
+test('diagnostic source declares the complete actual official fnpack manifest field set',()=>{
+ const build=fs.readFileSync(path.join(root,'deploy/fnos/build-diagnostic.sh'),'utf8');
+ const source=manifestFields(build.match(/cat > "\$diag\/manifest" <<'EOF'\r?\n([\s\S]*?)\r?\nEOF/)[1]);
+ // Entire real diagnostic manifest from run42526258527/fnpack1.2.3, with only
+ // trailing spaces on the two empty values normalized. Full archive
+ // MD5 is separately checked against that downloaded actual 624MB app.tgz.
+ const packed=manifestFields(fs.readFileSync(path.join(root,'tests/fixtures/fnpack-1.2.3-diagnostic-manifest.txt'),'utf8'));
+ for(const [key,value] of Object.entries(source))assert.equal(packed[key],value,key);
+ assert.deepEqual(Object.keys(packed).filter(k=>k!=='checksum').sort(),Object.keys(source).sort());
+ assert.equal(packed.desktop_uidir,'');assert.equal(packed.desktop_applaunchname,'');
 });
 
 test('official static metadata duplicates are complete, byte-identical and exclude business config',t=>{

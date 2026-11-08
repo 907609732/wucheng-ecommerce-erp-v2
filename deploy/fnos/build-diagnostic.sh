@@ -26,6 +26,8 @@ distributor=Wucheng
 os_min_version=1.1.3100
 ctl_stop=true
 disable_authorization_path=true
+desktop_uidir=
+desktop_applaunchname=
 EOF
 printf '%s\n' '{"defaults":{"run-as":"root"}}' > "$diag/config/privilege"
 printf '%s\n' '{}' > "$diag/config/resource"
