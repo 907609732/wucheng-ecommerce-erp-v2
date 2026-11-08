@@ -5,7 +5,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { loadConfig, developmentConfig } from "./config.mjs";
 const ops = new Set(["account", "prepare", "tasks", "submit", "download"]);
-export async function startCollector(config, { factory } = {}) {
+export async function startCollector(config, { factory, onError } = {}) {
   if (!factory)
     factory = async (id, dir) => {
       const entry = path.join(
@@ -19,7 +19,7 @@ export async function startCollector(config, { factory } = {}) {
   const servers = [],
     browsers = [],
     records = [];
-  let timer;
+  let timer, failure, stopping;
   const publish = () => {
     for (const r of records) {
       const value = {
@@ -35,15 +35,37 @@ export async function startCollector(config, { factory } = {}) {
       fs.renameSync(tmp, r.file);
     }
   };
-  async function stop() {
+  function stop() {
+    if (stopping) return stopping;
     clearInterval(timer);
-    await Promise.all(browsers.map((b) => b.disconnect().catch(() => {})));
-    await Promise.all(servers.map((s) => new Promise((r) => s.close(r))));
-    for (const r of records)
-      try {
-        if (JSON.parse(fs.readFileSync(r.file)).pid === process.pid)
-          fs.unlinkSync(r.file);
-      } catch {}
+    stopping = (async () => {
+      await Promise.all(browsers.map((b) => b.disconnect().catch(() => {})));
+      await Promise.all(servers.map((s) => new Promise((r) => s.close(r))));
+      for (const r of records)
+        try {
+          if (JSON.parse(fs.readFileSync(r.file)).pid === process.pid)
+            fs.unlinkSync(r.file);
+        } catch {}
+      for (const r of records)
+        try { fs.unlinkSync(r.file + "." + process.pid + ".tmp"); } catch {}
+    })();
+    return stopping;
+  }
+  function publishSafely() {
+    if (failure || stopping) return;
+    try { publish(); }
+    catch (error) {
+      const code = /^E[A-Z0-9]{1,30}$/.test(error.code) ? error.code : "WRITE_FAILED";
+      failure = new Error(`采集助手状态写入失败（${code}），已停止采集`);
+      clearInterval(timer);
+      console.error(failure.message);
+      process.exitCode = 1;
+      // An owner must drain module disconnect calls before closing this helper.
+      // A standalone helper owns its own teardown. Never throw from the timer.
+      void Promise.resolve().then(() => onError ? onError(failure) : stop()).catch(() => {
+        console.error("采集助手故障清理失败");
+      });
+    }
   }
   try {
     for (const id of ["sales", "overview"]) {
@@ -90,6 +112,7 @@ export async function startCollector(config, { factory } = {}) {
             chunks.push(chunk);
           }
           const { action, args = {} } = JSON.parse(Buffer.concat(chunks));
+          if (failure && action !== "disconnect") throw failure;
           if (
             ![
               "connect",
@@ -129,8 +152,9 @@ export async function startCollector(config, { factory } = {}) {
                   : await browser[action]();
           } finally {
             busy = false;
-            publish();
+            publishSafely();
           }
+          if (failure && action !== "disconnect") throw failure;
           send(200, { result: result ?? null });
         } catch (e) {
           send(409, { error: e.message });
@@ -148,8 +172,8 @@ export async function startCollector(config, { factory } = {}) {
       });
     }
     publish();
-    timer = setInterval(publish, 1000);
-    return { stop };
+    timer = setInterval(publishSafely, 1000);
+    return { stop, status: () => ({ ok: !failure && !stopping, error: failure?.message }) };
   } catch (e) {
     await stop();
     throw e;

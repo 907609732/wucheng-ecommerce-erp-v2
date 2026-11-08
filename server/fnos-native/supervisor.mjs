@@ -14,14 +14,14 @@ import {nativeBrowserSpecs} from './browsers.mjs';
 export const nativeEndpoint=stateDir=>process.platform==='win32'?'\\\\.\\pipe\\wucheng-native-'+createHash('sha256').update(stateDir).digest('hex').slice(0,32):path.join(stateDir,'native.sock');
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 export const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-export async function startNativeCollector(config){
+export async function startNativeCollector(config,{onError}={}){
  const browserSpecs=nativeBrowserSpecs(config);
  process.env.LINGTU_SALES_CDP_ENDPOINT=browserSpecs.sales?.cdpEndpoint||'http://127.0.0.1:19222';
  process.env.LINGTU_OVERVIEW_CDP_ENDPOINT=browserSpecs.overview?.cdpEndpoint||'http://127.0.0.1:19223';
  // Module children use CollectorBrowser; the owner must instantiate the real
  // adapters with the inherited forwarding flag absent, avoiding self-recursion.
  delete process.env.LINGTU_WEB_COLLECTOR;
- try{return await startCollector(config);}finally{process.env.LINGTU_WEB_COLLECTOR='1';}
+ try{return await startCollector(config,{onError});}finally{process.env.LINGTU_WEB_COLLECTOR='1';}
 }
 export function deadline(task,ms,message){let timer;return Promise.race([task,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);})]).finally(()=>clearTimeout(timer));}
 export async function nativeRequest(config,record,action='status',timeout=3000){
@@ -70,10 +70,10 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
  }catch(error){lock.close();throw error;}
  const record={schemaVersion:1,pid:process.pid,generation:randomUUID(),token:randomUUID()+randomUUID(),configFile,startedAt:new Date().toISOString()};
  const recordFile=path.join(config.stateDir,'native-supervisor.json'),endpoint=nativeEndpoint(config.stateDir);
- let runtime,collector,browsers,server,monitor,startupTask,stopping=null,ready=false,closed=false,monitoring=false;
+ let runtime,collector,browsers,server,monitor,startupTask,collectorFailure,stopping=null,ready=false,closed=false,monitoring=false;
  const cancellation=new AbortController();
  const checkCancellation=()=>{if(cancellation.signal.aborted)throw cancellation.signal.reason;};
- const health=()=>({ok:ready&&!stopping,pid:process.pid,generation:record.generation,status:stopping?'stopping':ready?'running':'starting',serverId:runtime?.gateway.serverId,dataSetId:runtime?.gateway.dataSetId,fnos:runtime?.gateway.fnosStatus(),browser:browsers?.status()||{enabled:false}});
+ const health=()=>({ok:ready&&!stopping&&!collectorFailure,pid:process.pid,generation:record.generation,status:collectorFailure?'failed':stopping?'stopping':ready?'running':'starting',error:collectorFailure?.message,serverId:runtime?.gateway.serverId,dataSetId:runtime?.gateway.dataSetId,fnos:runtime?.gateway.fnosStatus(),browser:browsers?.status()||{enabled:false}});
  async function cleanup(){
   if(closed)return;closed=true;ready=false;clearInterval(monitor);
   try{await deadline((async()=>{
@@ -93,7 +93,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
   }
  }
  const shutdown=()=>{
-  if(!stopping){cancellation.abort(Error('原生启动已取消'));runtime?.services.drain();stopping=cleanup();}
+  if(!stopping){cancellation.abort(collectorFailure||Error('原生启动已取消'));runtime?.services.drain();stopping=cleanup();}
   return stopping;
  };
  const onInterrupted=()=>void shutdown().catch(error=>{console.error(error.message);terminateDescendants();process.exit(1);});
@@ -118,7 +118,12 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
    const {createNativeBrowsers}=await import('./browsers.mjs');browsers=await createNativeBrowsers(config,{logger:runtime.logger,signal:cancellation.signal});await browsers.start();
   }else if(config.native.requireBrowsers)throw Error('原生 FPK 必须配置可运行的浏览器');
   checkCancellation();
-  collector=await startNativeCollector(config);
+  collector=await startNativeCollector(config,{onError:error=>{
+   collectorFailure=error;ready=false;
+   // Notify without awaiting: cleanup may itself be waiting for startup or the
+   // active stop request. Module disconnects still use the collector until drain.
+   void shutdown().catch(error=>{console.error(error.message);terminateDescendants();process.exit(1);});
+  }});
   checkCancellation();
   await runtime.start();
   checkCancellation();
@@ -140,6 +145,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
       // Acknowledge only after writes and collectors have drained. Close this
       // connection before closing the listener to avoid waiting on ourselves.
       ready=false;await deadline((async()=>{await runtime.quiesce();await collector.stop();await browsers?.stop();await runtime.stop();})(),70000,'停写排空超时');
+      if(collectorFailure)throw collectorFailure;
       socket.end(JSON.stringify({...health(),ok:true,status:'stopped'})+'\n',()=>{void shutdown().catch(()=>{process.exitCode=1;});});
      }else throw Error('未知原生控制操作');
     }catch(error){socket.end(JSON.stringify({...health(),ok:false,error:error.message})+'\n');}
