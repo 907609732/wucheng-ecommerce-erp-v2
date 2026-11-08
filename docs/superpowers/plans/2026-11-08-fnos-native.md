@@ -50,7 +50,18 @@
 - [ ] Wire supervisor and gateway registration; no effect when native browser disabled. Run relevant tests and prefix tests; commit task.
 - [ ] Use `@fastify/http-proxy@11.6.4` with actual WS upgrade authentication tests, including true Unix listener transport. Browser chooser reuses upstream noVNC `vnc.html` rather than creating a VNC client. Default fixed production CDP19222/19223, trusted fixture config may override ports/displays to avoid current formal instance during NAS isolated acceptance. Propagate selected CDP endpoints through startNativeCollector (Task1 currently hardcodes defaults). Package browser paths remain runtime/sysroot/usr/bin/{Xvfb,x11vnc,xauth}, runtime/chromium/chrome, runtime/novnc. Private non-glibc libs under runtime/sysroot/usr/lib/x86_64-linux-gnu and lib path. Do not default --no-sandbox; prove namespace sandbox or clearly fail. Keep browser process readiness distinct from external platform login state; do not downgrade an imported profile in place when native Chromium version is older.
 
-### Task 3: 官方完整 FPK 构建与 CI
+### Task 3: 真实账本迁移与重新安装恢复
+
+**Files:** Modify `server/fnos-native/configure.mjs`, `tests/web-fnos-native.test.mjs`, root-owned setup hooks under `deploy/fnos/wuchengerp/cmd`; add focused `tests/web-fnos-native-migration.test.mjs` as useful. Do not modify browser transport or implement build scripts in this task.
+
+**Interfaces:** `configureNative` interface remains unchanged. Migration preserves copied business databases, lock/password/audit/outbox/snapshots without generic SQL path UPDATEs. Configuration still rebases program/data directories. Valid relative original-file references resolve from unchanged directory layout. Unsupported genuine legacy absolute references must be clearly refused before atomic publication, or use explicit verified read-boundary mapping; never alter triggers to bypass protection. Root setup recovery is a separate bounded hook, not runtime repair.
+
+- [ ] Write a regression using real module openStore with dataVersion capture enabled and actual imports protected by scoped/whole-month locks; show old UPDATE migration fails. Replace dummy file fixture assumptions with meaningful real references. Verify source and migrated DB file hashes plus outbox/snapshot hashes and original-file bytes unchanged.
+- [ ] Remove remapReferences business writes. Read-only inspect actual documented reference columns, verify relative originals/evidence exist within copied data roots, and refuse unsupported absolute references before publication (implement precise read mapping only if actual required legacy data is found). Run `node --test tests/web-fnos-native-migration.test.mjs tests/web-fnos-native.test.mjs` plus narrow actual-module lock tests only as needed.
+- [ ] Replace fresh/migrate crash-stale mkdir lock with an OS-released SQLite lock in private stable sibling location. Preserve unowned staged copies, test killed initializer retry without deleting data.
+- [ ] Complete retained-data reinstall: root-owned installation/upgrade recovery may fix ownership only within validated physical retained `@wuchengerp-data/erp` and its backups after service stop, using existing no-follow/no-cross-filesystem tools. Never recursive chown target or user-selected directories, never on normal status/start. Test old/new synthetic UIDs and retained lock/password/original recovery, syntax/diff checks; commit.
+
+### Task 4: 官方完整 FPK 构建与 CI
 
 **Files:** Add `deploy/fnos/build-native.sh`, runtime dependency preparation helpers using standard Debian tooling, native CI workflow, third-party manifest and install instructions; update manifest version to 0.15.0 and package root version, existing `build.ps1` mode handling; add focused artifact tests.
 
@@ -61,7 +72,7 @@
 - [ ] Runtime build specifics: retain host glibc2.36 (exclude glibc family and loader from private LD_LIBRARY_PATH); private non-glibc closure and NSS dlopen components. Standard Debian Xvfb hardcodes xkbcomp path: build Debian source Xvfb with `--with-xkb-bin-directory=/var/apps/wuchengerp/target/runtime/sysroot/usr/bin`; keep XKB data private and pass `-xkbdir`. Use lddtree standard `--copy-to-tree`, verify actual installed flags. Task1 reserves root-owned `cmd/provision_uvcs`, selected only by `wizard_uvcs_install=1`; never root-execute replaceable target runtime scripts. Fetch official UVCS11.0.16.10616-1 amd64 deb SHA256 `b90be9da5670b8aa129b7ed3c3527192e7620c5f1f6d3f97e33f0e2733502ef6` (81720976bytes), verify before system package install; no auto dist-upgrade or unrelated package removal.
 - [ ] Push branch, execute GitHub workflow, inspect every check and artifact manifest, download FPK; commit corrections and independent whole-branch review.
 
-### Task 4: 实机备份、隔离验收与切换
+### Task 5: 实机备份、隔离验收与切换
 
 **Files:** Private evidence under `C:/Users/90760/.codex-artifacts/erp-fnos-native-20261108`; final generic docs under `docs` only, never commit credentials.
 
