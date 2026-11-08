@@ -1,3 +1,8 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
-exit 0
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/native_env"
+prepare
+provision_uvcs
+if [ -f "$CONFIG" ]; then erp_mode=existing; export erp_mode; fi
+as_package "$NODE" "$LIFECYCLE" configure || fail 'ERP 配置校验失败，保留原配置和账本。'

@@ -1,3 +1,6 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
-exit 0
+# Install preparation never touches the migration source or initializes books.
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/native_env"
+prepare

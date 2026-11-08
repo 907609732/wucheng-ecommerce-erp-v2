@@ -1,0 +1,11 @@
+[
+ {"stepTitle":"初始化五成 ERP","items":[
+  {"type":"tips","helpText":"新建仅适用于没有正式账本的实例。迁移必须使用已停止旧服务并完成完整校验的副本，原 Docker 数据保留供回退。账本保留于安装卷 @wuchengerp-data/erp，卸载只移除程序。"},
+  {"type":"select","field":"erp_mode","label":"安装方式","options":[{"label":"新建三个空账本","value":"fresh"},{"label":"迁移已校验停写副本","value":"migrate"},{"label":"恢复本应用保留数据","value":"existing"}],"rules":[{"required":true,"message":"请明确选择安装方式"}]},
+  {"type":"text","field":"erp_source","label":"停写副本完整路径（迁移填写）"},
+  {"type":"text","field":"erp_origin","label":"NAS HTTPS 地址（新建必填，含端口）"},
+  {"type":"text","field":"erp_origins","label":"飞牛允许源（新建必填，逗号分隔）"},
+  {"type":"text","field":"erp_uids","label":"授权 NAS 用户 UID（新建必填，逗号分隔）"},
+  {"type":"select","field":"wizard_uvcs_install","label":"系统 UVCS（当前托管实例迁移必需）","initValue":"0","options":[{"label":"不安装","value":"0"},{"label":"从官方源安装系统 UVCS CLI","value":"1"}]}
+ ]}
+]

@@ -1,0 +1,5 @@
+[
+ {"stepTitle":"保留账本并卸载程序","items":[
+  {"type":"tips","helpText":"卸载先停止写入，只移除程序。保留安装卷 @wuchengerp-data/erp 的账本、附件、身份、月锁、密码、数据版本与浏览器 profile，以及 @wuchengerp-data/backups。恢复时重新安装并选择沿用保留数据。当前向导不提供删除账本操作。"}
+ ]}
+]

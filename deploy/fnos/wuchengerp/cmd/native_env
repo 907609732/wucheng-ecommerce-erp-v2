@@ -1,0 +1,75 @@
+#!/bin/sh
+# Only short-lived preparation may be root. Every Node service runs as package.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fail() {
+ printf '%s\n' "$1" >&2
+ if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; fi
+ exit 1
+}
+[ -n "${TRIM_APPDEST:-}" ] || fail 'ERP 缺少 TRIM_APPDEST。'
+TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" 2>/dev/null && pwd -P) || fail 'ERP target 无法解析。'
+[ -n "${TRIM_APPDEST_VOL:-}" ] || fail 'ERP 缺少持久存储卷 TRIM_APPDEST_VOL。'
+VOLUME=$(CDPATH= cd -P "$TRIM_APPDEST_VOL" 2>/dev/null && pwd -P) || fail 'ERP 存储卷无法解析。'
+BASE="$VOLUME/@wuchengerp-data"
+DATA="$BASE/erp"
+CONFIG="$DATA/config/web.json"
+PAYLOAD="$TARGET"
+if [ ! -d "$PAYLOAD/erp" ] && [ -d "$TARGET/app/erp" ]; then PAYLOAD="$TARGET/app"; fi
+NODE="$PAYLOAD/runtime/node/bin/node"
+LIFECYCLE="$PAYLOAD/erp/server/fnos-native/lifecycle.mjs"
+ERP_NATIVE_RELEASE="$PAYLOAD/erp"
+ERP_NATIVE_DATA="$DATA"
+ERP_NATIVE_SOCKET="$TARGET/app.sock"
+ERP_NATIVE_PACKAGE=1
+export ERP_NATIVE_RELEASE ERP_NATIVE_DATA ERP_NATIVE_SOCKET ERP_NATIVE_PACKAGE
+case "$DATA/" in "$TARGET/"*) fail 'ERP 持久数据不能位于可替换 target 内。';; esac
+as_package() {
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+  PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+  [ "$PACKAGE_UID" != 0 ] || fail 'ERP 长期服务不能以 root 运行。'
+  command -v runuser >/dev/null 2>&1 || fail 'ERP 需要系统 runuser 降权。'
+  runuser -u "$TRIM_USERNAME" -- "$@"
+ else
+  "$@"
+ fi
+}
+prepare() {
+ [ ! -L "$BASE" ] && [ ! -L "$DATA" ] || fail 'ERP 持久目录不能是符号链接。'
+ # Root prepares only exact app-owned directories. All recursive copying is
+ # performed by the package process into a new isolated instance directory.
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+  PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+  [ "$PACKAGE_UID" != 0 ] || fail 'ERP package 用户不能为 root。'
+  PACKAGE_GID=$(id -g "$TRIM_USERNAME")
+  mkdir -p "$BASE"
+  chown "$PACKAGE_UID:$PACKAGE_GID" "$BASE" "$TARGET"
+  chmod 700 "$BASE"
+  chmod go-w "$TARGET"
+ else
+  mkdir -p "$BASE"
+ fi
+}
+provision_uvcs() {
+ case "${wizard_uvcs_install:-0}" in
+  0|'') return 0;;
+  1)
+   [ "$(id -u)" = 0 ] || fail '安装可选 UVCS 需要应用生命周期准备权限。'
+   [ -f "$SELF/provision_uvcs" ] && [ ! -L "$SELF/provision_uvcs" ] || fail '当前 FPK 未包含可选 UVCS 安装脚本。'
+   # The app payload target is package-owned; only appcenter cmd is trusted root code.
+   TRUSTED="$SELF/provision_uvcs"
+   while :; do
+    [ "$(stat -c %u "$TRUSTED")" = 0 ] || fail 'UVCS 准备脚本及父目录必须由 root 所有。'
+    RIGHTS=$(stat -c %a "$TRUSTED")
+    [ "$((0$RIGHTS & 022))" = 0 ] || fail 'UVCS 准备路径不能被非 root 用户写入。'
+    [ "$TRUSTED" != / ] || break
+    TRUSTED=$(dirname "$TRUSTED")
+   done
+   /bin/sh "$SELF/provision_uvcs" || fail '系统 UVCS 安装失败，保留原账本和托管队列。'
+   ERP_NATIVE_CM_PATH=/usr/bin/cm
+   export ERP_NATIVE_CM_PATH;;
+  *) fail 'UVCS 安装选项只允许 0 或 1。';;
+ esac
+}

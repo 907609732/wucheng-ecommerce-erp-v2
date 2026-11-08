@@ -1,3 +1,11 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
-exit 0
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/native_env"
+if [ -f "$CONFIG" ]; then
+ BACKUP="$BASE/backups/before-upgrade-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+ as_package "$NODE" "$LIFECYCLE" backup --config "$CONFIG" --output "$BACKUP" || fail 'ERP 停写备份或恢复校验失败，已阻止升级。'
+ printf '%s\n' "ERP 完整停写备份：$BACKUP"
+else
+ printf '%s\n' 'ERP 尚无原生持久配置；升级后必须从停写副本初始化。'
+fi

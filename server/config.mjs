@@ -40,6 +40,9 @@ export function developmentConfig({
 export function validateConfig(value) {
   const c = structuredClone(value);
   c.fnos = validateFnos(c.fnos);
+  c.tcpEnabled ??= true;
+  if(typeof c.tcpEnabled!=='boolean')throw Error('TCP 开关必须为布尔值');
+  if(!c.tcpEnabled&&!c.fnos.enabled)throw Error('禁用 TCP 必须启用飞牛 fnOS 入口');
   if (
     c.schemaVersion !== 1 ||
     !["development", "production"].includes(c.mode) ||
@@ -118,6 +121,13 @@ export function validateConfig(value) {
       if(!within(v.workspace,v.dir)||path.resolve(v.workspace)===path.resolve(v.dir))throw Error('数据版本工作区必须位于独立版本目录内');
       if(moduleIds.some(id=>within(v.dir,c.modules[id].dataDir)||within(c.modules[id].dataDir,v.dir)))throw Error('数据版本目录不能包含或位于正式数据目录');
     }
+  }
+  if(c.native!==undefined){
+    const n=c.native;
+    if(!n||!absolute(n.dataRoot)||!absolute(n.home)||path.resolve(c.stateDir)!==path.resolve(n.dataRoot,'state')||moduleIds.some(id=>path.resolve(c.modules[id].dataDir)!==path.resolve(n.dataRoot,'data',id)))throw Error('原生持久数据路径不能重定向');
+    const inside=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
+    if(c.releaseRoot&&(inside(n.dataRoot,c.releaseRoot)||inside(c.releaseRoot,n.dataRoot)))throw Error('原生持久数据必须位于可替换版本目录外');
+    if(!inside(n.home,n.dataRoot))throw Error('原生 HOME 必须位于持久数据根内');
   }
   return c;
 }

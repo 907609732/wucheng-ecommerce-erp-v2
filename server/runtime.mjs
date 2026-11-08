@@ -82,6 +82,7 @@ export async function createWebRuntime(
       storeDir: path.join(config.stateDir, "gateway"),
       publicOrigin: config.publicOrigin,
       fnos: config.fnos,
+      tcpEnabled: config.tcpEnabled,
       port: config.port,
       moduleIds,
       cacheStaticAssets: config.mode === "production",
