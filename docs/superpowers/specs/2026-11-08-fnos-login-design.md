@@ -11,12 +11,13 @@
 ## 接入设计
 
 - 同一ERP进程、services、状态库、数据版本worker增加独立Unix HTTP listener。原TCP入口仅接受原Tailscale身份；不得信任TCP上的X-Trim字段。两个入口共用现有审计、签名actor、幂等、维护排空、月锁及数据集绑定。
-- listener内部标记请求来源，不能凭header或空remoteAddress判定Unix。Unix路径必须显式配置，socket0600、受控父目录，不覆盖既有文件/活动socket；部署时只有ERP与root官方网关可以连接。
+- listener内部标记请求来源，不能凭header或空remoteAddress判定Unix。Unix路径必须显式配置，socket0600、由ERP用户所有且不可组/全局写的物理父目录，不覆盖既有文件/活动socket；部署时只有ERP与root官方网关可以连接。经过同UID、同inode检查及连接被拒绝证明已失效的旧socket可受控清理，以支持异常退出重启。
 - fnOS配置默认关闭。开启需明确instanceId、socketPath、固定basePrefix、allowedOrigins及allowedUids；初次仅授权已实测UID1000。UID稳定用于身份；username仅显示。fnOS管理员标记不自动授予未授权UID访问ERP。
 - 主体fnos:{instanceId}:{uid}与tailscale:{login}隔离。旧会话/成员/审计兼容迁移；会话绑定provider-qualified主体，fnOS使用独立cookie并限定应用路径，每次请求仍经NAS登录态验证。
 - 固定允许源包括实测FN Connect HTTPS源；局域网入口可显式配置当前NAS HTTP源，HTTPS外网不得降级。Host仅接受已配置源的精确host或经实测NAS转发移除端口后的hostname；Origin仍严格匹配配置，每次写入要求正确Origin及CSRF。
 - 在Unix入口剥离准确basePrefix后交给同一路由器，公开资源/API/跳转/cookie带回该前缀。模块公共前缀通过已签名actor声明传递，不信任未签名转发头。对编码斜线/点路径/错前缀明确拒绝。
 - FPK只注册飞牛入口和状态检测，不管理Docker daemon、不接触账本、不停止ERP。启停或卸载飞牛入口不破坏Tailscale。安装/配置/恢复脚本不得创建新空账本或使用通配删除。
+- 私有固定绑定名.app.sock.listener保留，app.sock通过同inode硬链接发布；FPK解析TRIM_APPDEST物理路径并校验二者同inode及私有监听记录。fnOS监听运行故障降级并记录状态，不能停止已启动的Tailscale备用入口。飞牛shell只允许同源桌面iframe；Tailscale shell继续禁止被嵌入。
 
 ## 页面体验
 

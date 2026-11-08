@@ -23,7 +23,7 @@ test('thin FPK registers only the official authenticated Unix gateway',()=>{
 test('lifecycle is shell-only, read-only and cannot manage ERP or data',()=>{
  const main=read('cmd/main');
  assert.doesNotMatch(main,/\b(?:docker|python[23]?|curl|wget|kill|rm|mkdir|touch|chmod|chown|eval|source)\b|>>|\/var\/run/);
- assert.match(main,/\/proc\/net\/unix/);assert.match(main,/00010000/);assert.match(main,/\[ -S "\$SOCKET" \]/);
+ assert.match(main,/cd -P/);assert.match(main,/\.app\.sock\.listener/);assert.match(main,/\[ \"\$SOCKET\" -ef \"\$PRIVATE\" \]/);assert.match(main,/\/proc\/net\/unix/);assert.match(main,/00010000/);assert.match(main,/\[ -S "\$SOCKET" \]/);
  for(const name of fs.readdirSync(path.join(pkg,'cmd'))){
   if(name==='main')continue;
   assert.match(read('cmd/'+name),/^#!\/bin\/sh\n(?:#[^\n]*\n)*exit 0\n$/);
@@ -50,20 +50,27 @@ test('packager delegates to official CLI and stages an explicit source allowlist
  assert.match(script,/manifest/);assert.match(script,/config\/privilege/);
 });
 
-test('Linux: active Unix listener succeeds; stale socket and symlink do not', {skip:process.platform!=='linux'}, async()=>{
- const net=await import('node:net');
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-package-unix-'));
- const socket=path.join(dir,'app.sock');
- const server=net.createServer();
- const run=action=>spawnSync(bash,[path.join(pkg,'cmd/main'),action],{env:{...process.env,TRIM_APPDEST:dir},encoding:'utf8'});
+test('Linux: real backend listener and FPK lifecycle share the private socket contract', {skip:process.platform!=='linux'}, async()=>{
+ const {createFnosListener}=await import('../server/gateway/fnos.mjs');
+ const http=await import('node:http');
+ const dir=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-package-unix-')));
+ const socket=path.join(dir,'app.sock'),privateSocket=path.join(dir,'.app.sock.listener');
+ const alias=dir+'-installed-target';
+ const listener=createFnosListener({routing(_req,res){res.end('ready');}},{enabled:true,socketPath:socket,basePrefix:'/app/wuchengerp'});
+ const run=(action,target=dir)=>spawnSync(bash,[path.join(pkg,'cmd/main'),action],{env:{...process.env,TRIM_APPDEST:target},encoding:'utf8'});
+ const get=()=>new Promise((resolve,reject)=>{const request=http.get({socketPath:socket,path:'/app/wuchengerp/'},response=>{let text='';response.on('data',chunk=>text+=chunk);response.on('end',()=>resolve(text));});request.on('error',reject);});
  try{
-  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve);});
-  fs.chmodSync(socket,0o600);
+  await listener.start();
+  assert.ok(fs.statSync(privateSocket).isSocket());assert.equal(fs.statSync(socket).ino,fs.statSync(privateSocket).ino);
+  assert.equal(fs.statSync(socket).mode&0o777,0o600);
   assert.equal(run('start').status,0);assert.equal(run('status').status,0);
-  assert.equal(run('stop').status,0);assert.ok(server.listening);assert.ok(fs.statSync(socket).isSocket());
-  const alias=path.join(dir,'alias');fs.mkdirSync(alias);fs.symlinkSync(socket,path.join(alias,'app.sock'));
-  assert.equal(spawnSync(bash,[path.join(pkg,'cmd/main'),'status'],{env:{...process.env,TRIM_APPDEST:alias}}).status,3);
+  fs.symlinkSync(dir,alias);assert.equal(run('start',alias).status,0);assert.equal(run('status',alias).status,0);
+  assert.equal(run('stop').status,0);assert.equal(await get(),'ready');
+  // Publishing a different inode or a symlink must not make a package appear ready.
+  fs.unlinkSync(socket);fs.symlinkSync(privateSocket,socket);assert.equal(run('status').status,3);
+  fs.unlinkSync(socket);fs.writeFileSync(socket,'foreign replacement');assert.equal(run('status').status,3);
+  await listener.stop();assert.equal(fs.readFileSync(socket,'utf8'),'foreign replacement');assert.equal(run('status').status,3);
  }finally{
-  await new Promise(resolve=>server.close(resolve));fs.rmSync(dir,{recursive:true,force:true});
+  await listener.stop();if(fs.existsSync(alias))fs.unlinkSync(alias);fs.rmSync(dir,{recursive:true,force:true});
  }
 });

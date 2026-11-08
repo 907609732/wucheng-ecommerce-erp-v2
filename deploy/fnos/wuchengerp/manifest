@@ -1,5 +1,5 @@
 appname=wuchengerp
-version=0.1.0
+version=0.14.4
 display_name=五成ERP
 desc=飞牛可信登录入口；复用现有唯一ERP服务，不创建或管理账本。
 platform=all

@@ -6,13 +6,21 @@ if [ -z "${TRIM_APPDEST:-}" ]; then
  printf '%s\n' 'Missing fnOS application target; ERP entry cannot be checked.' >&2
  exit 1
 fi
-SOCKET="${TRIM_APPDEST}/app.sock"
+# The official target entry can be a symlink; compare physical socket paths.
+if ! TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" 2>/dev/null && pwd -P); then
+ printf '%s\n' 'Cannot resolve fnOS application target directory.' >&2
+ exit 1
+fi
+SOCKET="$TARGET/app.sock"
+PRIVATE="$TARGET/.app.sock.listener"
 entry_ready() {
  [ -S "$SOCKET" ] && [ ! -L "$SOCKET" ] || return 1
+ [ -S "$PRIVATE" ] && [ ! -L "$PRIVATE" ] || return 1
+ [ "$SOCKET" -ef "$PRIVATE" ] || return 1
  [ -r /proc/net/unix ] || return 1
  # Flags=accepting, Type=stream, State=unconnected/listening; exact path only.
  # Docker must bind the SAME absolute socket path in the host network namespace.
- awk -v expected="$SOCKET" 'NF == 8 && $4 == "00010000" && $5 == "0001" && $6 == "01" && $8 == expected {found=1} END {exit !found}' /proc/net/unix
+ awk -v expected="$PRIVATE" 'NF == 8 && $4 == "00010000" && $5 == "0001" && $6 == "01" && $8 == expected {found=1} END {exit !found}' /proc/net/unix
 }
 case "${1:-}" in
  start)

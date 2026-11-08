@@ -12,7 +12,7 @@ function unix(socketPath,url=prefix+'/api/workbench/v1/session',headers={}){retu
 test('TCP never accepts fnOS gateway identity',async t=>{const {g}=await gateway(t);const r=await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test','tailscale-user-login':'user@example.test','x-trim-userid':'1000'}});assert.equal(r.statusCode,400);});
 test('fnOS requires explicit UID allowlist and secure external origins',async()=>{for(const patch of [{allowedUids:[]},{allowedOrigins:['http://external.example.test']},{instanceId:''},{basePrefix:'/bad'}]){await assert.rejects(createWorkbenchGateway({services:{},storeDir:'unused',publicOrigin:'https://erp.example.test',fnos:{...config(os.tmpdir()),...patch}}));}});
 test('real Unix and TCP share owner; identity stable across rename, no fallback, prefix and socket safety',{skip:process.platform==='win32'},async t=>{const {g,dir}=await gateway(t);await g.start();assert.equal(fs.statSync(path.join(dir,'app.sock')).mode&0o777,0o600);const a=await unix(path.join(dir,'app.sock'));assert.equal(a.statusCode,200,a.body);assert.equal(a.json().actor.id,'fnos:nas1:1000');assert.equal(a.json().actor.publicPrefix,prefix);assert.match(a.headers['set-cookie'][0],/Path=\/app\/wuchengerp/);assert.doesNotMatch(a.headers['set-cookie'][0],/; Secure/);const b=await unix(path.join(dir,'app.sock'),undefined,{'x-trim-username':'renamed',cookie:a.headers['set-cookie'][0].split(';')[0]});assert.equal(b.json().sessionId,a.json().sessionId);assert.equal(b.json().actor.label,'renamed');for(const headers of [{'x-trim-userid':'1001'},{'x-trim-userid':['1000','1000']},{'x-trim-userid':'','tailscale-user-login':'admin@example.test'},{origin:'https://evil.test'},{host:'evil.test'}])assert.notEqual((await unix(path.join(dir,'app.sock'),undefined,headers)).statusCode,200);assert.equal((await unix(path.join(dir,'app.sock'),'/api/workbench/v1/session')).statusCode,400);const tcp=await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test','tailscale-user-login':'a@example.test'}});assert.equal(tcp.json().serverId,a.json().serverId);assert.equal(tcp.json().dataSetId,a.json().dataSetId);});
-test('Unix startup refuses existing files without replacing them',{skip:process.platform==='win32'},async t=>{const {g,dir}=await gateway(t);const file=path.join(dir,'app.sock');fs.writeFileSync(file,'keep');await assert.rejects(g.start());assert.equal(fs.readFileSync(file,'utf8'),'keep');});
+test('Unix startup refuses existing files without replacing them',{skip:process.platform==='win32'},async t=>{const {g,dir}=await gateway(t);const file=path.join(dir,'app.sock');fs.writeFileSync(file,'keep');await g.start();assert.equal(g.fnosStatus().state,'degraded');assert.equal((await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test','tailscale-user-login':'backup@example.test'}})).statusCode,200);assert.equal(fs.readFileSync(file,'utf8'),'keep');});
 import {fnosIdentity,validateFnos} from '../server/gateway/fnos.mjs';
 import {createGatewayStore,digest} from '../server/gateway/store.mjs';
 import {DatabaseSync} from 'node:sqlite';
@@ -31,3 +31,30 @@ test('real Unix write CSRF, provider cookies and genuine TCP spoof boundary',{sk
 });
 
 test('shutdown leaves a replacement socket path untouched',{skip:process.platform==='win32'},async t=>{const {g,dir}=await gateway(t);await g.start();const file=path.join(dir,'app.sock');fs.unlinkSync(file);fs.writeFileSync(file,'new owner');await g.stop();assert.equal(fs.readFileSync(file,'utf8'),'new owner');});
+
+test('fnOS bind failure preserves TCP backup and one owner',async t=>{const {g,dir}=await gateway(t);if(process.platform!=='win32')fs.writeFileSync(path.join(dir,'app.sock'),'keep');await g.start();assert.equal(g.fnosStatus().state,'degraded');const r=await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test','tailscale-user-login':'backup@example.test'}});assert.equal(r.statusCode,200);assert.throws(()=>createGatewayStore(path.join(dir,'store')),{code:'GATEWAY_STORE_BUSY'});});
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import net from 'node:net';
+test('SIGKILL stale owned socket pair restarts and publishes fixed readiness inode',{skip:process.platform==='win32'},async t=>{
+  const {g,dir}=await gateway(t),publicPath=path.join(dir,'app.sock'),boundPath=path.join(dir,'.app.sock.listener');
+  const source=`const fs=require('node:fs'),net=require('node:net');const [bound,pub]=process.argv.slice(1);const s=net.createServer(c=>c.destroy());s.listen(bound,()=>{fs.chmodSync(bound,0o600);fs.linkSync(bound,pub);console.log('ready');});`;
+  const child=spawn(process.execPath,['-e',source,boundPath,publicPath],{stdio:['ignore','pipe','pipe']});
+  t.after(()=>{if(child.exitCode===null&&!child.killed)child.kill('SIGKILL');});
+  await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('socket fixture exited '+code)));});
+  const exited=once(child,'exit');child.kill('SIGKILL');await exited;
+  assert.equal(fs.lstatSync(publicPath).isSocket(),true);assert.equal(fs.lstatSync(boundPath).isSocket(),true);
+  await g.start();assert.equal(g.fnosStatus().state,'ready');assert.equal(g.fnosStatus().boundPath,boundPath);
+  const a=fs.lstatSync(publicPath),b=fs.lstatSync(boundPath);assert.equal(a.ino,b.ino);assert.equal(a.dev,b.dev);
+  assert(fs.readFileSync('/proc/net/unix','utf8').split('\n').some(line=>line.trim().endsWith(' '+boundPath)));
+  assert.equal((await unix(publicPath)).statusCode,200);
+});
+test('active public or private socket is never removed and TCP remains available',{skip:process.platform==='win32'},async t=>{
+  for(const name of ['app.sock','.app.sock.listener'])await t.test(name,async sub=>{
+    const {g,dir}=await gateway(sub),file=path.join(dir,name),server=net.createServer(c=>c.destroy());
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(file,resolve);});
+    sub.after(()=>new Promise(resolve=>server.close(resolve)));const inode=fs.lstatSync(file).ino;
+    await g.start();assert.equal(g.fnosStatus().state,'degraded');assert.equal(fs.lstatSync(file).ino,inode);assert.equal(server.listening,true);
+    assert.equal((await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test','tailscale-user-login':'backup@example.test'}})).statusCode,200);
+  });
+});

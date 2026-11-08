@@ -114,7 +114,7 @@ export async function createWebRuntime(
             .header("cache-control", "no-store")
             .header(
               "content-security-policy",
-              "default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'",
+              "default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors " + (context.publicPrefix(_q) ? "'self'" : "'none'") + "; object-src 'none'",
             )
             .type("text/html")
             .send(

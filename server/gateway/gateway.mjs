@@ -201,7 +201,7 @@ export async function createWorkbenchGateway(options={}) {
       }catch(error){store.finish(operationKey,{state:'unknown',status:502});writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:'unknown',details:{code:error.code||'UPSTREAM_UNCERTAIN'}});throw fail(502,'OPERATION_OUTCOME_UNKNOWN','连接中断，操作可能已完成；请查询结果后再处理，系统已阻止重复写入');}
     }finally{if(body.file)fs.rmSync(body.file,{force:true});}
   }
-  app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId}));
+  app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,fnos:fnosListener.status()}));
   app.get(API+'/session',async(request,reply)=>{
     const identity=identityOf(request),login=identity.login,channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
     let session=store.session(request.cookies[identity.cookie]),token=request.cookies[identity.cookie];
@@ -237,7 +237,7 @@ export async function createWorkbenchGateway(options={}) {
   if(registerRoutes)await registerRoutes(app,context);
   const fnosListener=createFnosListener(app,fnos);
   app.addHook('onClose',async()=>{try{await fnosListener.stop();}finally{clearInterval(summary);store.close();}});
-  return {app,...context,async start(){try{const address=await app.listen({host,port});await fnosListener.start();return address;}catch(error){await app.close();throw error;}},async stop(){await app.close();}};
+  return {app,...context,fnosStatus:fnosListener.status,async start(){let address;try{address=await app.listen({host,port});}catch(error){await app.close();throw error;}try{await fnosListener.start();}catch(error){log.error('飞牛入口启动失败，Tailscale备用入口继续运行',{error:error.message});}return address;},async stop(){await app.close();}};
 }
 
 export {validatePolicy};
