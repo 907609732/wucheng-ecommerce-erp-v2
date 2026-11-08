@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {verifySandboxResult,mcpEvaluationResult} from './smoke-checks.mjs';
+import {verifySandboxResult,mcpEvaluationResult,isAllowedRuntimeLibrary} from './smoke-checks.mjs';
 const args={};for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const app=fs.realpathSync(args['app-root']),release=path.join(app,'erp'),runtime=path.join(app,'runtime');
 const data=path.resolve(args['data-root']),evidence=path.resolve(args['evidence-dir']),offset=Number(args['port-offset']||0),diagnostic=args.diagnostic==='1';
@@ -73,9 +73,7 @@ function auditLoadedLibraries(){
   let maps;try{maps=fs.readFileSync('/proc/'+pid+'/maps','utf8');}catch(e){if(e.code==='EACCES'||e.code==='EPERM'){unreadable.push({pid,reason:'sandbox process denies package-user maps access'});continue;}if(e.code==='ENOENT')continue;throw e;}
   const libs=[...new Set(maps.split('\n').map(l=>l.trim().split(/\s+/).slice(5).join(' ').replace(/ \(deleted\)$/,'')).filter(f=>f.startsWith('/')&&(/\.so(?:\.|$)/.test(f)||path.basename(f).startsWith('ld-linux'))))];
   for(const file of libs){
-   const privateFile=file.startsWith(runtime+path.sep)||file.startsWith(release+path.sep);
-   const hostLibc=/^(?:ld-linux-x86-64\.so\.2|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(path.basename(file))||/^\/(?:usr\/)?lib\/x86_64-linux-gnu\/gconv\//.test(file);
-   if(!privateFile&&!hostLibc)unexpected.push({pid,file});
+   if(!isAllowedRuntimeLibrary(file,runtime,release))unexpected.push({pid,file});
   }
   let exe;try{exe=fs.readlinkSync('/proc/'+pid+'/exe');}catch(e){if(!['ENOENT','EACCES','EPERM'].includes(e.code))throw e;exe='unavailable: '+e.code;}
   observed.push({pid,exe,libraries:libs});

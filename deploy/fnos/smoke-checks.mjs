@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+export function isAllowedRuntimeLibrary(file,runtime,release){
+ if(file.startsWith(runtime+'/')||file.startsWith(release+'/'))return true;
+ if(/^\/(?:usr\/)?lib64\/ld-linux-x86-64\.so\.2$/.test(file))return true;
+ return /^\/(?:usr\/)?lib\/x86_64-linux-gnu\/(?:ld-linux-x86-64\.so\.2|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\.[^/]+)*|gconv\/[^/]+\.so)$/.test(file);
+}
 export function mcpEvaluationResult(text){
  const match=text.match(/### Result\s*\n([\s\S]*?)(?=\n### |$)/);
  if(!match)throw Error('MCP evaluation JSON result missing');
