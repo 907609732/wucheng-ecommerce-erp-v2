@@ -76,7 +76,17 @@
 - [ ] Produce an optional test-only official FPK `wuchengerpdiag`, reusing the exact runtime/release and parameterized smoke script with a separately compiled Xvfb helper prefix `/var/apps/wuchengerpdiag/target/runtime/sysroot/usr/bin`. Its trusted install hook only prepares its own private physical `@wuchengerpdiag-data` and runs the bounded smoke as its dedicated package user, never root. Use explicit synthetic production data, fnOS disabled, independent loopback TCP/module/CDP/VNC/display ranges, no UVCS, no formal paths or Tailscale changes. Reuse actual nativeLifecycle/supervisor and official noVNC for automated RFB keyboard/mouse/Chinese/screenshot/download checks; all temporary endpoints remain loopback and finally stop. No new remote auth adapter or PID framework. Export JSON/screenshot evidence; desktop report UI only if supported without a new service. A one-shot diagnostic package may remain stopped after successful checks; it is not the main application or production identity acceptance. Verify diagnostic stop/cancellation cleanup and hard timeout rather than leaving unmanaged test children.
 - [ ] Push branch, execute GitHub workflow, inspect every check and artifact manifest, download FPK; commit corrections and independent whole-branch review.
 
-### Task 5: 实机备份、隔离验收与切换
+### Task 5: 旧 Windows 相对原件路径兼容
+
+**Files:** A focused shared stored-file resolver if needed, `server/fnos-native/configure.mjs`, owning sales original/freight/evidence/backup/agent file-read boundaries and overview `sourceOriginal`, with focused migration and original-download tests. Reuse existing safe path/symlink checks and release asset mechanisms. Do not modify unrelated UI or rewrite any business SQL, snapshots or outbox.
+
+**Interfaces:** Real NAS read-only census found legacy stored values such as `originals\\filename` with physical `originals/filename` files. Normalize separators only at the verified relative-file read boundary. Reject POSIX absolute paths, Windows drive/UNC/drive-relative paths, traversal, symlink escape and missing originals. Keep native POSIX references and Windows execution working. Migration preflight and all directly affected readers must resolve the same file without modifying stored values.
+
+- [ ] Write real-store migration regression with Windows-style relative imports, freight attachments and platform-reference evidence; verify DB/lock/password/outbox/snapshot/source hashes unchanged and actual original bytes readable after migration. Include traversal/absolute/symlink refusal.
+- [ ] Apply one precise resolver at affected migration validation, sales HTTP and agent original/evidence/freight readers, sales backup/verification and overview source-original boundary. Inspect importer and handoff verification reads of the same stored columns, cover directly affected paths. Preserve folder allowlists and immutable snapshots. Do not create duplicate backslash filenames, symlinks or fake SQL authorization.
+- [ ] Run focused module/migration/security tests; independent task review, then refresh both FPK artifacts through the Task 4 workflow and verify checksums before NAS installation. A second full suite is required only for new cross-module changes or unresolved failures.
+
+### Task 6: 实机备份、隔离验收与切换
 
 **Files:** Private evidence under `C:/Users/90760/.codex-artifacts/erp-fnos-native-20261108`; final generic docs under `docs` only, never commit credentials.
 

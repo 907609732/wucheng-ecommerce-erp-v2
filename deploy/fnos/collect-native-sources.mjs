@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 const [runtime,work]=process.argv.slice(2),sources=path.join(work,'sources');
-function run(command,args,options={}){const r=spawnSync(command,args,{encoding:'utf8',maxBuffer:16*1024*1024,...options});if(r.status!==0)throw Error(command+' '+args.join(' ')+'\n'+r.stderr);return r.stdout.trim();}
+function run(command,args,options={}){const r=spawnSync(command,args,{encoding:'utf8',maxBuffer:16*1024*1024,...options});if(r.status!==0)throw Error(command+' '+args.join(' ')+'\n'+r.stderr);return (r.stdout||'').trim();}
 const packages=[];const done=new Set();
 for(const owner of fs.readFileSync(path.join(work,'owners.txt'),'utf8').trim().split('\n')){
  const fields=run('dpkg-query',['-W','-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}',owner]).split('\t');

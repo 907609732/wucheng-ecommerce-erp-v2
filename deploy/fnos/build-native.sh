@@ -65,6 +65,7 @@ chmod 755 "$work"
 chown erpbuild:erpbuild "$stage/app"
 mkdir -p "$work/fixture" "$work/smoke-evidence"; chown erpbuild:erpbuild "$work/fixture" "$work/smoke-evidence"
 runuser -u erpbuild -- env PATH="$PATH" "$runtime/node/bin/node" "$helper/smoke-native.mjs" --app-root /var/apps/wuchengerp/target --data-root "$work/fixture/data" --evidence-dir "$work/smoke-evidence" --port-offset 1000
+strace -f -e trace=%file -o "$out/private-runtime-file-probe.log" runuser -u erpbuild -- env LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/chromium/chrome" --version
 cp -a "$work/smoke-evidence" "$out/smoke-evidence"
 # The smoke uses a synthetic data root outside the stage and is never packaged.
 node "$helper/verify-artifact.mjs" "$stage"

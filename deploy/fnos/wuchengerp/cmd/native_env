@@ -17,6 +17,7 @@ CONFIG="$DATA/config/web.json"
 PAYLOAD="$TARGET"
 if [ ! -d "$PAYLOAD/erp" ] && [ -d "$TARGET/app/erp" ]; then PAYLOAD="$TARGET/app"; fi
 NODE="$PAYLOAD/runtime/node/bin/node"
+CHILD_LIB_PATH="$PAYLOAD/runtime/sysroot/usr/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/usr/lib:$PAYLOAD/runtime/sysroot/lib"
 LIFECYCLE="$PAYLOAD/erp/server/fnos-native/lifecycle.mjs"
 ERP_NATIVE_RELEASE="$PAYLOAD/erp"
 ERP_NATIVE_DATA="$DATA"
@@ -30,9 +31,9 @@ as_package() {
   PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
   [ "$PACKAGE_UID" != 0 ] || fail 'ERP 长期服务不能以 root 运行。'
   command -v runuser >/dev/null 2>&1 || fail 'ERP 需要系统 runuser 降权。'
-  runuser -u "$TRIM_USERNAME" -- "$@"
+  runuser -u "$TRIM_USERNAME" -- env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"
  else
-  "$@"
+  env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"
  fi
 }
 recover_retained() {
