@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {EventEmitter} from 'node:events';
+
+function fixture(t){
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-browser-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const runtimeRoot=path.join(root,'runtime');
+ for(const file of ['sysroot/usr/bin/Xvfb','sysroot/usr/bin/x11vnc','sysroot/usr/bin/xauth','chromium/chrome','novnc/vnc.html']){const p=path.join(runtimeRoot,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,'fixture');}
+ return {native:{dataRoot:path.join(root,'data'),browser:{enabled:true,runtimeRoot,chromiumPath:path.join(runtimeRoot,'chromium/chrome'),novncRoot:path.join(runtimeRoot,'novnc')}},stateDir:path.join(root,'data/state')};
+}
+function processes({fail}={}){
+ const calls=[];let count=100;
+ const spawnProcess=(file,args,options)=>{
+  const child=new EventEmitter();child.pid=++count;child.exitCode=null;child.signalCode=null;child.stdout=new EventEmitter();child.stderr=new EventEmitter();
+  child.kill=signal=>{child.signalCode=signal;child.emit('exit',null,signal);return true;};calls.push({file,args,options,child});
+  queueMicrotask(()=>{if(args.includes('--version')){child.stdout.emit('data','Chromium 130.0.1.2\n');child.exitCode=0;child.emit('exit',0);}else if(path.basename(file)==='xauth'){child.exitCode=0;child.emit('exit',0);}else if(fail===path.basename(file)){child.exitCode=1;child.emit('exit',1);}});
+  return child;
+ };return {calls,spawnProcess};
+}
+test('native browser manager owns two private loopback profiles and stops only its children',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const config=fixture(t),p=processes();
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>manager.stop());
+ await manager.start();const state=manager.status();assert.equal(state.ready,true);assert.equal(state.browsers.sales.cdpEndpoint,'http://127.0.0.1:19222');assert.equal(state.browsers.overview.cdpEndpoint,'http://127.0.0.1:19223');assert.equal(state.browsers.sales.login,'unknown');
+ const chrome=p.calls.filter(c=>c.file===config.native.browser.chromiumPath&&!c.args.includes('--version'));assert.equal(chrome.length,2);
+ assert.notEqual(chrome[0].options.env.DISPLAY,chrome[1].options.env.DISPLAY);
+ for(const c of chrome){assert(c.args.includes('--remote-debugging-address=127.0.0.1'));assert(!c.args.includes('--no-sandbox'));assert(c.args.some(a=>a.startsWith('--user-data-dir='+path.join(config.native.dataRoot,'browser-profiles'))));assert(c.options.env.LD_LIBRARY_PATH.includes('sysroot'));assert(c.options.env.XAUTHORITY);}
+ for(const c of p.calls.filter(c=>path.basename(c.file)==='Xvfb')){assert(c.args.includes('-auth'));assert(c.args.includes('-nolisten'));assert(!c.args.includes('-ac'));}
+ for(const c of p.calls.filter(c=>path.basename(c.file)==='x11vnc')){assert(c.args.includes('127.0.0.1'));assert(c.args.includes('-no6'));assert(c.args.includes('-rfbport'));for(const disabled of ['-nosel','-noprimary','-nosetprimary','-nosetclipboard'])assert(!c.args.includes(disabled),'authenticated clipboard must remain usable inside private Xvfb');}
+ await manager.stop();assert.equal(manager.status().ready,false);assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});
+test('failed readiness cleans partial children and never reports a logged-out browser as a process failure',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const p=processes(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>false,readinessTimeoutMs:15});
+ await assert.rejects(m.start(),/就绪|readiness/);assert.equal(m.status().state,'failed');assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});
+test('older Chromium retains imported profile archive and opens a clean need-login profile',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const config=fixture(t),profile=path.join(config.native.dataRoot,'browser-profiles/sales');fs.mkdirSync(profile,{recursive:true});fs.writeFileSync(path.join(profile,'Last Version'),'150.0.0.1');fs.writeFileSync(path.join(profile,'Cookies'),'RETAIN');const p=processes(),m=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();const s=m.status().browsers.sales;assert.equal(s.login,'need-login');assert.equal(fs.readFileSync(path.join(s.retainedProfile,'Cookies'),'utf8'),'RETAIN');assert.equal(fs.existsSync(path.join(profile,'Cookies')),false);
+});
+test('profile downgrade protection compares full Chromium versions, including same-major patches',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),config=fixture(t),profile=path.join(config.native.dataRoot,'browser-profiles/sales');fs.mkdirSync(profile,{recursive:true});fs.writeFileSync(path.join(profile,'Last Version'),'130.0.1.3');fs.writeFileSync(path.join(profile,'Cookies'),'RETAIN PATCH');const p=processes(),m=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();const s=m.status().browsers.sales;assert.equal(s.login,'need-login');assert.equal(fs.readFileSync(path.join(s.retainedProfile,'Cookies'),'utf8'),'RETAIN PATCH');
+});
+test('trusted fixture ports propagate and invalid or colliding browser targets fail closed',async t=>{
+ const {nativeBrowserSpecs}=await import('../server/fnos-native/browsers.mjs');const c=fixture(t);c.native.browser.instances={sales:{cdpPort:20222,vncPort:20322,display:222},overview:{cdpPort:20223,vncPort:20323,display:223}};assert.equal(nativeBrowserSpecs(c).sales.cdpEndpoint,'http://127.0.0.1:20222');
+ for(const patch of [{vncPort:80},{display:0},{cdpPort:20223},{host:'evil.test'}]){c.native.browser.instances.sales={cdpPort:20222,vncPort:20322,display:222,...patch};assert.throws(()=>nativeBrowserSpecs(c));}
+});
+test('browser manager can restart after stopping and refuses a crashed x11vnc',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),p=processes(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();await m.stop();await m.start();assert.equal(m.status().ready,true);
+ const q=processes({fail:'x11vnc'}),bad=createNativeBrowsers(fixture(t),{spawnProcess:q.spawnProcess,probe:async()=>true,readinessTimeoutMs:20});await assert.rejects(bad.start(),/未就绪/);assert.equal(bad.status().state,'failed');
+});
+test('process readiness drops immediately when a browser exits, independently from login',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),c=fixture(t),p=processes(),m=createNativeBrowsers(c,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();p.calls.find(call=>call.file===c.native.browser.chromiumPath&&call.args.some(arg=>arg.includes('--remote-debugging-port=19222'))).child.kill('SIGTERM');const s=m.status();assert.equal(s.ready,false);assert.equal(s.state,'degraded');assert.equal(s.browsers.sales.ready,false);assert.equal(s.browsers.overview.ready,true);
+});
+test('trusted selected CDP ports reach the actual native collector adapter environment',async t=>{
+ const {startNativeCollector}=await import('../server/fnos-native/supervisor.mjs'),{collectorConnection}=await import('../server/collector-browser-connection.mjs'),c=fixture(t),release=path.resolve(import.meta.dirname,'..');
+ c.native.browser.instances={sales:{cdpPort:21222,vncPort:21322,display:322},overview:{cdpPort:21223,vncPort:21323,display:323}};c.modules=Object.fromEntries(['sales','overview'].map(id=>[id,{root:path.join(release,'apps',id),dataDir:path.join(c.native.dataRoot,'data',id)}]));
+ const keys=['LINGTU_WEB_COLLECTOR','LINGTU_SALES_CDP_ENDPOINT','LINGTU_OVERVIEW_CDP_ENDPOINT'],previous=Object.fromEntries(keys.map(k=>[k,process.env[k]]));let collector;
+ try{collector=await startNativeCollector(c);assert.equal(process.env.LINGTU_SALES_CDP_ENDPOINT,'http://127.0.0.1:21222');assert.equal(process.env.LINGTU_OVERVIEW_CDP_ENDPOINT,'http://127.0.0.1:21223');assert(collectorConnection('sales',{platform:'linux'}).args.includes('http://127.0.0.1:21222'));}
+ finally{await collector?.stop();for(const key of keys)if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
+});
+test('cancelling startup stops owned acquisitions before another browser launch',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),p=processes(),controller=new AbortController(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>false,readinessTimeoutMs:500,signal:controller.signal}),started=m.start();setTimeout(()=>controller.abort(Error('fixture cancel')),30);const now=Date.now();await assert.rejects(started,/fixture cancel/);assert(Date.now()-now<250);assert(p.calls.every(c=>!c.args.some(a=>a.startsWith('--remote-debugging-port='))));assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});

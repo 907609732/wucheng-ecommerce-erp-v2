@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {registerNativeBrowserRoutes} from './fnos-native/browser-routes.mjs';
 import path from "node:path";
 import net from "node:net";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -87,7 +88,9 @@ export async function createWebRuntime(
       moduleIds,
       cacheStaticAssets: config.mode === "production",
       localDevelopment: config.mode === "development",
+      nativeBrowserEnabled: config.native?.browser?.enabled===true,
       registerRoutes: async (app, context) => {
+        await registerNativeBrowserRoutes(app,context,config);
         registerDataVersionRoutes(app, context, dataVersions);
         app.addHook("onRequest", async (req, reply) => {
           if (!["GET", "HEAD"].includes(req.method)) {

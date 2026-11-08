@@ -8,11 +8,15 @@ import {loadConfig,moduleIds} from '../config.mjs';
 import {createWebRuntime} from '../runtime.mjs';
 import {startCollector} from '../collector.mjs';
 import {atomicJson,physicalPath} from './configure.mjs';
+import {nativeBrowserSpecs} from './browsers.mjs';
 
 export const nativeEndpoint=stateDir=>process.platform==='win32'?'\\\\.\\pipe\\wucheng-native-'+createHash('sha256').update(stateDir).digest('hex').slice(0,32):path.join(stateDir,'native.sock');
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 export const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export async function startNativeCollector(config){
+ const browserSpecs=nativeBrowserSpecs(config);
+ process.env.LINGTU_SALES_CDP_ENDPOINT=browserSpecs.sales?.cdpEndpoint||'http://127.0.0.1:19222';
+ process.env.LINGTU_OVERVIEW_CDP_ENDPOINT=browserSpecs.overview?.cdpEndpoint||'http://127.0.0.1:19223';
  // Module children use CollectorBrowser; the owner must instantiate the real
  // adapters with the inherited forwarding flag absent, avoiding self-recursion.
  delete process.env.LINGTU_WEB_COLLECTOR;
@@ -107,11 +111,9 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
   if(config.native.browser?.enabled){
    // Absence of the Task 2 payload must fail the real package, never silently
    // report ready with a missing browser service.
-   const {createNativeBrowsers}=await import('./browsers.mjs');browsers=await createNativeBrowsers(config,{logger:runtime.logger});await browsers.start();
+   const {createNativeBrowsers}=await import('./browsers.mjs');browsers=await createNativeBrowsers(config,{logger:runtime.logger,signal:cancellation.signal});await browsers.start();
   }else if(config.native.requireBrowsers)throw Error('原生 FPK 必须配置可运行的浏览器');
   checkCancellation();
-  process.env.LINGTU_SALES_CDP_ENDPOINT='http://127.0.0.1:19222';
-  process.env.LINGTU_OVERVIEW_CDP_ENDPOINT='http://127.0.0.1:19223';
   collector=await startNativeCollector(config);
   checkCancellation();
   await runtime.start();

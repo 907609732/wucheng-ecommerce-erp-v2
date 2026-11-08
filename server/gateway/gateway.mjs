@@ -211,7 +211,7 @@ export async function createWorkbenchGateway(options={}) {
     reply.setCookie(identity.cookie,token,{secure:identity.secure,httpOnly:true,sameSite:'strict',path:identity.publicPrefix||'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
     store.observeIdentity(identity);
     const actor=companyActor({...identity,channel});
-    return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor)};
+    return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor),...(options.nativeBrowserEnabled===true?{nativeBrowser:{enabled:true}}:{})};
   });
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));
   app.get(API+'/modules/:id/connection',{preHandler:requireSession},async request=>{

@@ -15,7 +15,7 @@ export class CainiaoBrowser{
  constructor(dir){if(process.env.LINGTU_WEB_COLLECTOR==='1'){const {CollectorBrowser}=require(path.resolve(import.meta.dirname,'../../../server/collector-client.mjs'));return new CollectorBrowser(dir);}this.dir=path.join(dir,'.cainiao-staging');fs.mkdirSync(this.dir,{recursive:true});this.authorization=new CainiaoAuthorization(dir);this.state={status:'disconnected',account:'',message:'连接已登录菜鸟的 Chrome'};this.client=null;this.connecting=null;this.generation=0;}
  status(){return {...this.state,authorizationSaved:process.platform==='win32'&&this.authorization.has()};}
  async connect(){
-  if(this.connecting)return this.connecting;const oldClient=this.client;this.client=null;const generation=++this.generation;this.state={status:'connecting',account:'',message:process.platform==='linux'?'正在连接 NAS 持久浏览器，请先在浏览器中手动登录菜鸟':this.authorization.has()?'正在使用已保存的授权连接 Chrome':'请在 Chrome 的 Playwright 扩展页面确认连接，选择菜鸟金掌柜标签页'};
+  if(this.connecting)return this.connecting;const oldClient=this.client;this.client=null;const generation=++this.generation;this.state={status:'connecting',account:'',message:process.platform==='linux'?'正在连接 NAS 持久浏览器，请先在工作台“菜鸟登录”中打开对应浏览器并登录菜鸟':this.authorization.has()?'正在使用已保存的授权连接 Chrome':'请在 Chrome 的 Playwright 扩展页面确认连接，选择菜鸟金掌柜标签页'};
   this.connecting=(async()=>{let client;try{
    await oldClient?.close().catch(()=>{});if(generation!==this.generation)return this.status();
    const connection=collectorConnection('overview');
@@ -43,4 +43,4 @@ export class CainiaoBrowser{
   const part=text.match(/### Result\s*\n([\s\S]*?)(?=\n### |$)/)?.[1]?.trim();if(!part)throw Error('浏览器未返回有效结果');return JSON.parse(part);
  }
 }
-export function humanError(e){const text=String(e.message||e);if(process.platform==='linux'&&/connect|timed out|timeout|closed|disconnected/i.test(text))return 'NAS 浏览器连接中断或操作等待超时，请检查浏览器容器与登录状态后重连。';if(/extension|connect|timed out|timeout|closed|disconnected/i.test(text))return 'Chrome 连接中断或操作等待超时。请保持 Chrome 开启，重新连接并在扩展页面确认；已安装扩展无需重复安装。';return text.replace(/^### Error\s*/, '').slice(0,350);}
+export function humanError(e){const text=String(e.message||e);if(process.platform==='linux'&&/connect|timed out|timeout|closed|disconnected/i.test(text))return 'NAS 浏览器连接中断或操作等待超时，请在工作台“菜鸟登录”中检查对应浏览器与登录状态后重连。';if(/extension|connect|timed out|timeout|closed|disconnected/i.test(text))return 'Chrome 连接中断或操作等待超时。请保持 Chrome 开启，重新连接并在扩展页面确认；已安装扩展无需重复安装。';return text.replace(/^### Error\s*/, '').slice(0,350);}
