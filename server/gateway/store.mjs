@@ -26,11 +26,18 @@ function openGatewayStore(storeDir,ownership) {
     CREATE TABLE IF NOT EXISTS session_modules(session_id TEXT NOT NULL,module TEXT NOT NULL,data_set_id TEXT NOT NULL,PRIMARY KEY(session_id,module));
     CREATE TABLE IF NOT EXISTS operations(operation_key TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,actor_id TEXT NOT NULL,session_id TEXT NOT NULL,state TEXT NOT NULL,request_id TEXT NOT NULL,status INTEGER,headers TEXT,body BLOB,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,at INTEGER NOT NULL,request_id TEXT NOT NULL,actor_id TEXT NOT NULL,module TEXT NOT NULL,operation TEXT NOT NULL,outcome TEXT NOT NULL,details TEXT NOT NULL);`);
+  if(!db.prepare('PRAGMA table_info(sessions)').all().some(c=>c.name==='actor_id')){db.exec("ALTER TABLE sessions ADD COLUMN actor_id TEXT;");}
+  db.exec("UPDATE sessions SET actor_id='tailscale:' || login WHERE actor_id IS NULL");
+  db.exec('CREATE TABLE IF NOT EXISTS provider_members(actor_id TEXT PRIMARY KEY,login TEXT NOT NULL,label TEXT NOT NULL,first_seen INTEGER NOT NULL,last_seen INTEGER NOT NULL)');
   // A crashed request might already have committed upstream; never replay it blindly.
   db.prepare("UPDATE operations SET state='unknown',updated_at=? WHERE state='pending'").run(Date.now());
   const api={...identity,db,
     session(token){return token?db.prepare('SELECT * FROM sessions WHERE token_hash=? AND expires_at>?').get(digest(token),Date.now()):null;},
-    saveSession(token,s){db.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?)').run(digest(token),s.sessionId,s.login,s.channel,s.csrfToken,s.expiresAt);},
+    saveSession(token,s){db.prepare('INSERT INTO sessions(token_hash,session_id,login,channel,csrf,expires_at,actor_id) VALUES(?,?,?,?,?,?,?)').run(digest(token),s.sessionId,s.login,s.channel,s.csrfToken,s.expiresAt,s.actorId||'tailscale:'+s.login);},
+    observeIdentity(identity){
+      if(identity.provider!=='fnos')return api.observeMember(identity.login);
+      const now=Date.now();db.prepare('INSERT INTO provider_members VALUES(?,?,?,?,?) ON CONFLICT(actor_id) DO UPDATE SET login=excluded.login,label=excluded.label,last_seen=excluded.last_seen').run(identity.id,identity.login,identity.label,now,now);
+    },
     observeMember(login){
       if(!validCompanyLogin(login))throw Object.assign(Error('公司登录身份无效'),{code:'IDENTITY_REQUIRED',statusCode:401});
       const now=Date.now();db.prepare('INSERT INTO company_members VALUES(?,?,?,?) ON CONFLICT(login) DO UPDATE SET last_seen=excluded.last_seen').run(login,login,now,now);

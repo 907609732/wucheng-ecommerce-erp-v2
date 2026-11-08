@@ -1,3 +1,4 @@
+import { validateFnos } from './gateway/fnos.mjs';
 import fs from "node:fs";
 import path from "node:path";
 export const moduleIds = ["purchase", "sales", "overview"];
@@ -38,6 +39,7 @@ export function developmentConfig({
 }
 export function validateConfig(value) {
   const c = structuredClone(value);
+  c.fnos = validateFnos(c.fnos);
   if (
     c.schemaVersion !== 1 ||
     !["development", "production"].includes(c.mode) ||

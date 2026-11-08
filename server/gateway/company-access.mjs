@@ -20,9 +20,14 @@ export function readCompanyMembers(storeDir){
   const db=new DatabaseSync(file,{readOnly:true});
   try{
     if(!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='company_members'").get())return [];
-    return db.prepare('SELECT login,label FROM company_members ORDER BY login').all().map(row=>{
+    const legacy=db.prepare('SELECT login,label FROM company_members ORDER BY login').all().map(row=>{
       if(!validCompanyLogin(row.login)||typeof row.label!=='string'||row.label.length>254)throw Object.assign(Error('公司登录记录无效'),{code:'COMPANY_DIRECTORY_INVALID',statusCode:503});
       return {id:'tailscale:'+row.login,login:row.login,label:row.label||row.login};
     });
+    const providers=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='provider_members'").get()?db.prepare('SELECT actor_id,login,label FROM provider_members ORDER BY actor_id').all().map(row=>{
+      if(!/^fnos:[A-Za-z0-9_-]{1,80}:(?:0|[1-9]\d{0,9})$/.test(row.actor_id)||typeof row.login!=='string'||!row.login||row.login.length>254||typeof row.label!=='string'||row.label.length>254)throw Object.assign(Error('公司登录记录无效'),{code:'COMPANY_DIRECTORY_INVALID',statusCode:503});
+      return {id:row.actor_id,login:row.login,label:row.label};
+    }):[];
+    return [...legacy,...providers];
   }finally{db.close();}
 }
