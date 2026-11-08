@@ -39,7 +39,13 @@ export async function closeNativeBrowser(config,spec,{connect,timeoutMs=2000}={}
  // this TCP port. Keep upstream defaults untouched and use its public CDP API.
  const browser=await connect(spec.browserWebSocketUrl,{noDefaults:true,timeout:Math.min(timeoutMs,1500)});let timer;
  try{await Promise.race([(async()=>{const session=await browser.newBrowserCDPSession();await session.send('Browser.close');})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Chromium graceful close timeout')),timeoutMs);})]);}
- finally{clearTimeout(timer);await browser.close().catch(()=>{});}
+ finally{
+  clearTimeout(timer);let disconnectTimer;
+  // Start the official disconnect immediately, but its WebSocket close handshake
+  // must not postpone the caller's identity-checked process cleanup. Any pending
+  // transport is tied to this old socket and ends when that owned Chrome exits.
+  try{await Promise.race([browser.close().catch(()=>{}),new Promise(resolve=>{disconnectTimer=setTimeout(resolve,100);})]);}finally{clearTimeout(disconnectTimer);}
+ }
 }
 export async function probeNativeBrowserReady(kind,spec){
  try{

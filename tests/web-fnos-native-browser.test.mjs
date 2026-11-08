@@ -20,6 +20,7 @@ test('graceful close uses the saved unique browser socket and disconnects on bou
  const connect=async (url,options)=>{connected=url;assert.equal(options.noDefaults,true);return {newBrowserCDPSession:async()=>({send:async name=>{command=name;}}),close:async()=>{closed++;}};};
  await closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{connect});assert.equal(connected,endpoint);assert.equal(command,'Browser.close');assert.equal(closed,1);
  await assert.rejects(closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{timeoutMs:20,connect:async()=>({newBrowserCDPSession:async()=>({send:()=>new Promise(()=>{})}),close:async()=>{closed++;}})}),/timeout|超时/);assert.equal(closed,2);
+ const completed=await Promise.race([closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{connect:async()=>({newBrowserCDPSession:async()=>({send:async()=>{}}),close:()=>new Promise(()=>{})})}).then(()=>true),new Promise(r=>setTimeout(()=>r(false),300))]);assert.equal(completed,true,'disconnect handshake must not block owned-process cleanup');
 });
 
 test('native VNC readiness sends the Origin required by LibVNCServer',async t=>{
