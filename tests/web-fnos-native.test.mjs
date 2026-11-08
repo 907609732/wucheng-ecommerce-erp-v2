@@ -49,6 +49,36 @@ test('fresh resolves the exact localhost relay without Origin to the explicitly 
  assert.throws(()=>fnosIdentity(request({host:'untrusted.example.com',forwarded:'host=localhost;proto=https','x-forwarded-host':'localhost'}),c.fnos),{code:'INVALID_HOST'});
  assert.throws(()=>fnosIdentity(request({origin:secondary}),c.fnos),{code:'ORIGIN_DENIED'});
 });
+for(const replaceOrigins of [false,true])test(`existing fnOS-only primary change moves its managed relay and authenticates the new entry (replace origins: ${replaceOrigins})`,async t=>{
+ const dir=fixture(t),data=path.join(dir,'relay-change'),secondary='https://secondary.example.com',next='https://new-nas.example.com';
+ const file=await configureNative({...options(data),allowedOrigins:[origin,secondary]}),before=loadConfig(file);
+ before.fnos.hostAliases['secondary-relay']=secondary;fs.writeFileSync(file,JSON.stringify(before));
+ const c=loadConfig(await configureNative({releaseRoot,dataRoot:data,mode:'existing',publicOrigin:'https://NEW-NAS.example.com:443/',...(replaceOrigins?{allowedOrigins:[secondary]}:{})}));
+ const request=patch=>{const headers={host:'localhost','x-trim-userid':'1000','x-trim-username':'NAS Member',...patch};return {headers,raw:{rawHeaders:Object.entries(headers).flat()}};};
+ assert.equal(c.publicOrigin,next);assert.equal(c.fnos.instanceId,before.fnos.instanceId);
+ assert.deepEqual(c.fnos.hostAliases,{localhost:next,'secondary-relay':secondary});
+ assert.deepEqual(c.fnos.allowedOrigins,replaceOrigins?[secondary,next]:[origin,secondary,next]);
+ assert.equal(fnosIdentity(request(),c.fnos).origin,next,'no-Origin first GET must use the new HTTPS entry');
+ assert.equal(fnosIdentity(request({origin:next}),c.fnos).origin,next);
+ assert.equal(fnosIdentity(request({host:'secondary-relay',origin:secondary}),c.fnos).origin,secondary);
+ assert.throws(()=>fnosIdentity(request({origin}),c.fnos),{code:'ORIGIN_DENIED'});
+ if(replaceOrigins)assert.throws(()=>fnosIdentity(request({host:'nas.example.com:5667',origin}),c.fnos),{code:'INVALID_HOST'});
+ const saved=fs.readFileSync(file);
+ for(const publicOrigin of ['http://localhost','https://nas.invalid','https://placeholder.example.ts.net','https://user:pass@new-nas.example.com','https://new-nas.example.com/path','https://new-nas.example.com/?query=1']){
+  await assert.rejects(configureNative({releaseRoot,dataRoot:data,mode:'existing',publicOrigin}),/HTTPS|源地址/);
+  assert.deepEqual(fs.readFileSync(file),saved,'invalid primary must not publish a partial ACL/alias change');
+ }
+});
+test('existing configuration preserves explicit non-managed relay aliases and TCP Tailscale primary',async t=>{
+ const dir=fixture(t),data=path.join(dir,'explicit-relay'),file=await configureNative(options(data)),c=loadConfig(file),secondary='https://secondary.example.com';
+ c.fnos.allowedOrigins.push(secondary);c.fnos.hostAliases.localhost=secondary;fs.writeFileSync(file,JSON.stringify(c));
+ const custom=loadConfig(await configureNative({releaseRoot,dataRoot:data,mode:'existing',publicOrigin:'https://new-nas.example.com'}));
+ assert.deepEqual(custom.fnos.hostAliases,{localhost:secondary},'an unrelated explicit localhost mapping is not a managed primary alias');
+ custom.tcpEnabled=true;custom.publicOrigin='https://original.example.ts.net';fs.writeFileSync(file,JSON.stringify(custom));
+ const updated=loadConfig(await configureNative({releaseRoot,dataRoot:data,mode:'existing',publicOrigin:'https://other-nas.example.com',allowedOrigins:[secondary]}));
+ assert.equal(updated.publicOrigin,'https://original.example.ts.net');assert.equal(updated.tcpEnabled,true);
+ assert.deepEqual(updated.fnos.hostAliases,custom.fnos.hostAliases);assert.deepEqual(updated.fnos.allowedOrigins,[secondary]);
+});
 test('migration requires stopped verified complete source and preserves private identities and locks without source writes',async t=>{
  const dir=fixture(t),source=path.join(dir,'old'),target=path.join(dir,'new');
  const file=await configureNative(options(source));const c=loadConfig(file);

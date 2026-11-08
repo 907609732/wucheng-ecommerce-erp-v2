@@ -11,13 +11,16 @@ import time
 assert os.geteuid() == 0 and os.environ.get("ERP_DIAG_STOP_CI") == "1"
 cmd, work, output = map(Path, sys.argv[1:4])
 results = []
-for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
-    volume = work / ("stop-b" if starts == 0 else "stop-a")
+cases = [("main", "before-config", 0), ("main", "after-first-start", 1),
+         ("upgrade_init", "before-config", 0), ("uninstall_init", "after-first-start", 1)]
+for index, (hook, phase, starts) in enumerate(cases):
+    volume = work / ("stop-" + str(index))
     volume.mkdir()
     env = {**os.environ, "TRIM_APPDEST_VOL": str(volume), "ERP_DIAGNOSTIC_TEST_PAUSE": phase}
     base = volume / "@wuchengerpdiag-data"
-    log = output / ("external-stop-" + phase + ".log")
-    record = {"phase": phase, "ok": False}
+    label = phase if hook == "main" else hook + "-" + phase
+    log = output / ("external-stop-" + label + ".log")
+    record = {"hook": hook, "phase": phase, "ok": False}
     job = None
     run = None
     with log.open("w") as stream:
@@ -38,7 +41,7 @@ for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
             record["unixSocketPathBytes"] = {name: len(str(run / "data/state" / name).encode()) for name in ["web.sock", "native.sock"]}
             assert max(record["unixSocketPathBytes"].values()) < 108, "CI Unix socket fixture path exceeds sun_path"
             assert (run / "data/config/web.json").exists() == (starts == 1)
-            stopped = subprocess.run(["/bin/sh", str(cmd / "main"), "stop"], env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=55)
+            stopped = subprocess.run(["/bin/sh", str(cmd / hook)] + (["stop"] if hook == "main" else []), env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=55)
             assert stopped.returncode == 0, "External stop failed"
             time.sleep(0.2)
             assert job.poll() is not None, "EXTERNAL STOP RETURNED WHILE ACCEPTANCE STILL ACTIVE"
@@ -67,7 +70,7 @@ for phase, starts in [("before-config", 0), ("after-first-start", 1)]:
                     record["cleanupError"] = "Acceptance exceeded its original timeout/cleanup budget"
             subprocess.run(["/bin/sh", str(cmd / "main"), "stop"], env=env, stdout=stream, stderr=subprocess.STDOUT, timeout=85)
             if run and (run / "evidence").exists():
-                shutil.copytree(run / "evidence", output / ("external-stop-" + phase + "-evidence"))
+                shutil.copytree(run / "evidence", output / ("external-stop-" + label + "-evidence"))
             if not record["ok"]:
                 print(log.read_text(errors="replace")[-12000:], flush=True)
     results.append(record)

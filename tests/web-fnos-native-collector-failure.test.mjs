@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {configureNative} from '../server/fnos-native/configure.mjs';
-import {nativeLifecycle} from '../server/fnos-native/lifecycle.mjs';
+import {nativeRequest} from '../server/fnos-native/supervisor.mjs';
 import {loadConfig} from '../server/config.mjs';
 
 const moduleUrl=file=>pathToFileURL(path.resolve(file)).href;
@@ -37,7 +37,7 @@ for(const phase of ['drain','startup'])test(`native collector heartbeat failure 
     runSupervisor(${JSON.stringify(file)},{createRuntime:async(...args)=>{
       const runtime=await createWebRuntime(...args);
       const quiesce=runtime.quiesce.bind(runtime);let draining;
-      runtime.quiesce=()=>draining??=(async()=>{if(phase==='drain'){armed=true;await wait();}return quiesce();})();
+      runtime.quiesce=()=>draining??=(async()=>{if(phase==='drain'){armed=true;process.send({phase:'drain'});await wait();}return quiesce();})();
       if(phase==='startup'){
         const ensure=runtime.services.ensure.bind(runtime.services);let first=true;
         runtime.services.ensure=async(...values)=>{const value=await ensure(...values);if(first){first=false;armed=true;await wait();}return value;};
@@ -47,17 +47,24 @@ for(const phase of ['drain','startup'])test(`native collector heartbeat failure 
   `);
   child=spawn(process.execPath,[entry],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
   let stderr='',ready=false;child.stderr.on('data',chunk=>stderr+=chunk);child.on('message',message=>{if(message.ready)ready=true;});
+  const draining=new Promise(resolve=>child.on('message',message=>{if(message.phase==='drain')resolve();}));
   closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
   const first=await bounded(Promise.race([new Promise(resolve=>child.on('message',message=>{if(message.ready)resolve('ready');})),closed.then(()=> 'closed')]),20000);
   if(phase==='startup')assert.equal(first,'closed','failed collector must cancel startup instead of publishing ready');
   if(phase==='drain'){
     assert.equal(first,'ready',stderr);
-    const stopping=nativeLifecycle('stop',file);
+    // This fixture deliberately injects createRuntime through child.mjs. It is
+    // not the CLI supervisor entry checked by Linux lifecycle commandIdentity.
+    // Exercise the real authenticated control protocol of this owned child.
+    const record=JSON.parse(fs.readFileSync(path.join(config.stateDir,'native-supervisor.json')));
+    assert.equal(record.pid,child.pid);assert.equal(record.configFile,file);
+    assert.equal((await nativeRequest(config,record)).ok,true,'owned fixture must actually reach ready');
+    const stopping=nativeRequest(config,record,'stop',75000).then(()=>({ok:true}),error=>({error:error.message}));
+    await bounded(draining,5000);
     // Observe while the controlled drain is still blocked, after one heartbeat.
     await new Promise(r=>setTimeout(r,1150));
-    const health=await nativeLifecycle('status',file);
-    const result=await stopping.then(()=>({ok:true}),error=>({error:error.message}));
-    assert.equal(health.ok,false,'collector failure must never report ready');
+    await assert.rejects(nativeRequest(config,record),/采集助手状态写入失败.*EPERM/,'collector failure must never report ready');
+    const result=await stopping;
     assert.match(result.error||'',/采集助手状态写入失败/,'stop must report collector failure, not acknowledge false success');
   }
   const outcome=await bounded(closed,15000);

@@ -188,8 +188,17 @@ export async function configureNative(o={}){
     try{ownership.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch{throw Error('原生 supervisor 正在运行或启动，拒绝配置更新 (ownership)');}
     // Reload and merge only after both lifecycle and generation ownership are held.
     c=JSON.parse(fs.readFileSync(configFileAt(dataRoot),'utf8'));assertStopped(dataRoot);c=rebaseConfig(c,dataRoot,releaseRoot).config;
-    if(o.publicOrigin&&c.tcpEnabled===false)c.publicOrigin=o.publicOrigin;
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
+    if(o.publicOrigin&&c.tcpEnabled===false){
+     const u=new URL(o.publicOrigin);
+     if(u.protocol!=='https:'||/\.invalid$|\.example\.ts\.net$/.test(u.hostname))throw Error('必须配置真实 NAS HTTPS 地址');
+     if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('NAS HTTPS 地址必须为源地址');
+     // Only the fresh-install primary binding is managed here. Preserve other
+     // explicit aliases, including a localhost alias for a different entry.
+     if(c.fnos.hostAliases?.localhost===new URL(c.publicOrigin).origin)c.fnos.hostAliases.localhost=u.origin;
+     c.publicOrigin=u.origin;
+     if(Array.isArray(c.fnos.allowedOrigins))c.fnos.allowedOrigins=[...new Set([...c.fnos.allowedOrigins,u.origin])];
+    }
     if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
     if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
     if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});

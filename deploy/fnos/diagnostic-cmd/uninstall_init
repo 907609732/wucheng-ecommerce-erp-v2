@@ -2,5 +2,5 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/diag_env"
-stop_diag
+/bin/sh "$SELF/main" stop
 printf '%s\n' "保留独立合成诊断证据：$BASE"
