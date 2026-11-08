@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
+import {verifySandboxResult} from './smoke-checks.mjs';
 const args={};for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const app=fs.realpathSync(args['app-root']),release=path.join(app,'erp'),runtime=path.join(app,'runtime');
 const data=path.resolve(args['data-root']),evidence=path.resolve(args['evidence-dir']),offset=Number(args['port-offset']||0),diagnostic=args.diagnostic==='1';
@@ -103,7 +104,7 @@ try{
  await tool('browser_navigate',{url:'chrome://sandbox/'});
  const sandbox=await tool('browser_evaluate',{function:'() => document.body.innerText'});
  fs.writeFileSync(path.join(evidence,'chromium-sandbox.txt'),sandbox);
- assert.match(sandbox,/Namespace Sandbox[^\n]*(?:Yes|yes)|namespace sandbox[^\n]*(?:Yes|yes)/i);assert.match(sandbox,/Seccomp-BPF[^\n]*(?:Yes|yes)/i);report.sandbox=true;
+ report.sandboxStatus=verifySandboxResult(sandbox);report.sandbox=true;
  await tool('browser_navigate',{url:'https://example.com/'});assert.match(await tool('browser_snapshot'),/Example Domain/);report.checks.push('HTTPS CA/NSS navigation');
  await tool('browser_navigate',{url});let snapshot=await tool('browser_snapshot');assert.match(snapshot,/五成 ERP 原生验收/);
  await tool('browser_type',{ref:ref(snapshot,/textbox "Acceptance input"/),text:'MCP input verified'});

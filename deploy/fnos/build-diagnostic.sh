@@ -9,6 +9,7 @@ cp -a "$stage/app/." "$diag/app/"
 rm -rf "$diag/app/ui"
 install -m755 "$work/diagnostic/Xvfb" "$diag/app/runtime/sysroot/usr/bin/Xvfb"
 cp "$helper/smoke-native.mjs" "$diag/app/smoke-native.mjs"
+cp "$helper/smoke-checks.mjs" "$diag/app/smoke-checks.mjs"
 "$stage/app/runtime/node/bin/node" --input-type=module - "$diag/app/THIRD-PARTY.json" <<'EOF'
 import fs from 'node:fs';const f=process.argv[2],j=JSON.parse(fs.readFileSync(f));j.packageName='wuchengerpdiag';j.xvfbBuild.xkbBinDir='/var/apps/wuchengerpdiag/target/runtime/sysroot/usr/bin';j.xvfbBuild.xkbDir='/var/apps/wuchengerpdiag/target/runtime/sysroot/usr/share/X11/xkb';fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n');
 EOF
