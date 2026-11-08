@@ -35,6 +35,13 @@ jobs:
           cache: npm
       - name: Verify Linux data-version recovery
         run: node --test tests/web-data-version-worker.test.mjs tests/web-collector-connection.test.mjs tests/web-collector.test.mjs
+      - name: Verify real fnOS Unix entry and authentication boundaries
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix apps/purchase --ignore-scripts
+          npm ci --prefix apps/sales --ignore-scripts
+          npm ci --prefix apps/overview --ignore-scripts
+          node --test tests/web-fnos*.test.mjs
       - name: Prepare and accept Linux release
         shell: bash
         run: |

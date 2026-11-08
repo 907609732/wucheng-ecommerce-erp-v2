@@ -1,3 +1,4 @@
+const publicPrefix = (document.currentScript?.src || '').match(/^(?:https?:\/\/[^/]+)?(\/app\/wuchengerp)\/web\//)?.[1] || '';
 const ids = ["purchase", "sales", "freight", "overview", "data-versions"],
   status = document.querySelector("#status"),
   message = document.querySelector("#message"),
@@ -15,7 +16,7 @@ async function refreshHosting() {
   hostingController = controller;
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch("/api/workbench/v1/data-versions/summary", { cache: "no-store", signal: controller.signal });
+    const response = await fetch(publicPrefix+"/api/workbench/v1/data-versions/summary", { cache: "no-store", signal: controller.signal });
     if (!response.ok) throw Error("托管状态查询失败");
     const summary = await response.json();
     if (hostingController !== controller || document.hidden || disposed) return;
@@ -43,7 +44,7 @@ function select() {
     : "purchase";
   for (const a of document.querySelectorAll("nav a"))
     a.setAttribute("aria-current", a.hash === "#" + id ? "page" : "false");
-  const next = id === "freight" ? "/apps/sales/?workspace=freight#freight?section=center" : id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/";
+  const next = publicPrefix + (id === "freight" ? "/apps/sales/?workspace=freight#freight?section=center" : id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/");
   frame.title = id === "data-versions" ? "数据版本" : "业务工作区";
   if (frame.getAttribute("src") !== next) frame.src = next;
   frame.hidden = false;
@@ -51,7 +52,7 @@ function select() {
 }
 async function connect() {
   try {
-    const r = await fetch("/api/workbench/v1/session", { cache: "no-store" }),
+    const r = await fetch(publicPrefix+"/api/workbench/v1/session", { cache: "no-store" }),
       s = await r.json();
     if (!r.ok) throw Error(s.error || "连接失败");
     connected = true;

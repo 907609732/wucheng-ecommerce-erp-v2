@@ -1,0 +1,4 @@
+wuchengerp/cmd/* text eol=lf
+wuchengerp/manifest text eol=lf
+wuchengerp/config/* text eol=lf
+wuchengerp/app/ui/config text eol=lf

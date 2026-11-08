@@ -81,6 +81,7 @@ export async function createWebRuntime(
       logger,
       storeDir: path.join(config.stateDir, "gateway"),
       publicOrigin: config.publicOrigin,
+      fnos: config.fnos,
       port: config.port,
       moduleIds,
       cacheStaticAssets: config.mode === "production",
@@ -113,7 +114,7 @@ export async function createWebRuntime(
             .header("cache-control", "no-store")
             .header(
               "content-security-policy",
-              "default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors 'none'; object-src 'none'",
+              "default-src 'self'; script-src 'self'; style-src 'self'; frame-src 'self'; frame-ancestors " + (context.publicPrefix(_q) ? "'self'" : "'none'") + "; object-src 'none'",
             )
             .type("text/html")
             .send(
@@ -130,7 +131,7 @@ export async function createWebRuntime(
                 .replaceAll(
                   "/web/shell.js",
                   "/web/shell.js?v=" + assetVersion(),
-                ),
+                ).replaceAll('/web/',context.publicPrefix(_q)+'/web/'),
             ),
         );
         for (const [name, type] of [
@@ -142,7 +143,8 @@ export async function createWebRuntime(
           ["data-versions.css", "text/css"],
         ])
           app.get("/web/" + name, async (q, r) => {
-            const bytes = fs.readFileSync(path.join(publicDir, name)),
+            const rawBytes = fs.readFileSync(path.join(publicDir, name)),
+              bytes = name.endsWith('.html') ? Buffer.from(rawBytes.toString('utf8').replaceAll('/web/',context.publicPrefix(q)+'/web/')) : rawBytes,
               etag =
                 '"' + createHash("sha256").update(bytes).digest("hex") + '"';
             r.header(

@@ -1,3 +1,4 @@
+import {validateFnos,fnosContext,fnosIdentity,createFnosListener} from './fnos.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomBytes,randomUUID,createHash,timingSafeEqual} from 'node:crypto';
@@ -29,9 +30,9 @@ function readKey(config,name){let key;try{key=fs.readFileSync(path.join(config.d
 function redactedHeaders(headers){
   const result={};for(const key of ['content-type','content-disposition','etag','last-modified','content-range','accept-ranges'])if(headers[key])result[key]=headers[key];return result;
 }
-function rewriteCookies(headers,id){
+function rewriteCookies(headers,id,prefix='',secure=true){
   const cookies=headers['set-cookie'];if(!cookies)return undefined;
-  return (Array.isArray(cookies)?cookies:[cookies]).map(raw=>{const pieces=raw.split(';');const at=pieces[0].indexOf('=');if(at<1)return null;const name=pieces[0].slice(0,at);if(!/^[\w-]+$/.test(name))return null;const rest=pieces.slice(1).filter(p=>!/^\s*(?:path|domain|samesite|secure)\s*(?:=|$)/i.test(p));return scopedCookie(id,name)+pieces[0].slice(at)+';'+rest.join(';')+'; Path=/apps/'+id+'/; Secure; SameSite=Strict';}).filter(Boolean);
+  return (Array.isArray(cookies)?cookies:[cookies]).map(raw=>{const pieces=raw.split(';');const at=pieces[0].indexOf('=');if(at<1)return null;const name=pieces[0].slice(0,at);if(!/^[\w-]+$/.test(name))return null;const rest=pieces.slice(1).filter(p=>!/^\s*(?:path|domain|samesite|secure)\s*(?:=|$)/i.test(p));return scopedCookie(id,name)+pieces[0].slice(at)+';'+rest.join(';')+'; Path='+prefix+'/apps/'+id+'/;'+(secure?' Secure;':'')+' SameSite=Strict';}).filter(Boolean);
 }
 function backendCookies(request,id){return Object.entries(request.cookies||{}).filter(([name])=>name.startsWith('wb_'+id+'_')).map(([name,value])=>name.slice(('wb_'+id+'_').length)+'='+encodeURIComponent(value)).join('; ');}
 
@@ -53,6 +54,7 @@ export async function createWorkbenchGateway(options={}) {
   const {services,storeDir,getManifest,registerRoutes,logger=null,maxUploadBytes=128*1024*1024,maxResponseBytes=16*1024*1024,sessionTtlMs=12*60*60*1000}=options;
   if(!services||!storeDir)throw Error('缺少工作台服务注册表或存储目录');
   const log=(logger||silentLogger).child('gateway');
+  const fnos=validateFnos(options.fnos);
   const localDevelopment=options.localDevelopment===true;
   if(localDevelopment&&!/^http:\/\/127\.0\.0\.1:\d+$/.test(options.publicOrigin||''))throw Error('开发入口必须是本机 HTTP 地址');
   const publicOrigin=localDevelopment?new URL(options.publicOrigin).origin:validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
@@ -98,6 +100,12 @@ export async function createWorkbenchGateway(options={}) {
     if(!error.workbenchPublic&&(error.statusCode||500)>=500)log.error('请求处理失败：'+error.message,{requestId:request.id,method:request.method,url:request.raw.url,code:error.code,stack:log.enabled('debug')?error.stack:undefined});
     reply.code(error.statusCode||500).send({ok:false,code:error.code||'WORKBENCH_ERROR',error:error.workbenchPublic||error.statusCode&&error.statusCode<500?error.message:'工作台请求失败，请检查本机服务状态',requestId:request.id});
   });
+  function identityOf(request){
+    if(Object.keys(request.headers).some(k=>['x-workbench-actor','x-workbench-actor-signature','x-workbench-prefix','x-workbench-api-base'].includes(k)))throw fail(400,'SPOOFED_ACTOR','客户端不得提供模块代理身份');
+    if(fnosContext(request.raw))return fnosIdentity(request,fnos);
+    if(Object.keys(request.headers).some(k=>k.startsWith('x-trim-')))throw fail(400,'FNOS_TRANSPORT_REQUIRED','飞牛身份只能来自专用Unix入口');
+    const login=loginOf(request);return {id:'tailscale:'+login,login,label:login,provider:'tailscale',publicPrefix:'',origin:publicOrigin,secure:!localDevelopment,cookie:sessionCookie};
+  }
   function loginOf(request){
     if(!loopback(request.ip))throw fail(403,'LOOPBACK_REQUIRED','只能由本机 Tailscale Serve 转发');
     if(request.headers.host!==publicHost)throw fail(421,'INVALID_HOST','入口地址与本机配置不一致');
@@ -110,13 +118,14 @@ export async function createWorkbenchGateway(options={}) {
     if(['cross-site','same-site'].includes(request.headers['sec-fetch-site']))throw fail(403,'ORIGIN_DENIED','请求来源不受信任');
     return login;
   }
+  app.addHook('onRequest',async request=>{if(fnosContext(request.raw)||Object.keys(request.headers).some(k=>k.startsWith('x-trim-')))identityOf(request);});
   function resolveActor(request,{csrf=!readonly(request.method)}={}){
-    const login=loginOf(request),session=store.session(request.cookies[sessionCookie]);
-    if(!session||session.login!==login)throw fail(401,'SESSION_REQUIRED','请先连接工作台以建立会话');
+    const identity=identityOf(request),session=store.session(request.cookies[identity.cookie]);
+    if(!session||session.actor_id!==identity.id)throw fail(401,'SESSION_REQUIRED','请先连接工作台以建立会话');
     const channel=request.headers['x-workbench-channel'];if(channel&&channel!==session.channel)throw fail(403,'CHANNEL_DENIED','本次会话不能切换调用通道');
-    if(csrf&&(!equal(request.headers['x-workbench-csrf'],session.csrf)||request.headers.origin!==publicOrigin))throw fail(403,'CSRF_DENIED','本次修改缺少有效的界面确认来源');
-    store.observeMember(login);
-    return companyActor({v:1,id:'tailscale:'+login,login,label:login,sessionId:session.session_id,channel:session.channel});
+    if(csrf&&(!equal(request.headers['x-workbench-csrf'],session.csrf)||request.headers.origin!==identity.origin))throw fail(403,'CSRF_DENIED','本次修改缺少有效的界面确认来源');
+    store.observeIdentity(identity);
+    return companyActor({...identity,v:1,sessionId:session.session_id,channel:session.channel});
   }
   const requireSession=async(request,reply)=>{try{request.workbenchActor=resolveActor(request);}catch(e){reply.code(e.statusCode||500).send({ok:false,code:e.code,error:e.message});}};
   const requireAdmin=requireSession; // Legacy route name; all authenticated company members have equal access.
@@ -144,15 +153,15 @@ export async function createWorkbenchGateway(options={}) {
     const manifest=await loadOperationManifest(id,{config,capabilities:cap,getManifest,integrationKey});
     return {config,cap,url,integrationKey,actorKey,manifest};
   }
-  function responseHeaders(headers,id,upstream,ui,target=''){
-    const result=redactedHeaders(headers);const cookies=rewriteCookies(headers,id);if(cookies?.length)result['set-cookie']=cookies;
-    if(headers.location){const location=new URL(headers.location,upstream.url);if(location.origin!==upstream.url)throw fail(502,'MODULE_REDIRECT_DENIED','模块返回了外部重定向');result.location='/apps/'+id+location.pathname+location.search;}
+  function responseHeaders(headers,id,upstream,ui,target='',actor={}){
+    const result=redactedHeaders(headers);const cookies=rewriteCookies(headers,id,actor.publicPrefix||'',actor.secure!==false);if(cookies?.length)result['set-cookie']=cookies;
+    if(headers.location){const location=new URL(headers.location,upstream.url);if(location.origin!==upstream.url)throw fail(502,'MODULE_REDIRECT_DENIED','模块返回了外部重定向');result.location=(actor.publicPrefix||'')+'/apps/'+id+location.pathname+location.search;}
     result['cache-control']=options.cacheStaticAssets===true&&ui&&!target.startsWith('/api/')&&/\.(?:js|mjs|css|png|jpg|jpeg|svg|woff2?|ico)$/.test(target.split('?')[0])?'private, no-cache':'no-store';result['x-content-type-options']='nosniff';result['referrer-policy']='same-origin';
     if(ui)result['content-security-policy']=headers['content-security-policy']||"frame-ancestors 'self'; object-src 'none'; base-uri 'self'";
     return result;
   }
   function outboundHeaders(request,id,upstream,actor,target,requestId){
-    const h={authorization:'Bearer '+upstream.integrationKey,'accept-encoding':'identity','x-workbench-prefix':'/apps/'+id,'x-workbench-api-base':API+'/modules/'+id,...signWorkbenchActor({...actor,requestId,issuedAt:Date.now(),expiresAt:Date.now()+30000,module:id,method:request.method,path:target},upstream.actorKey)};
+    const h={authorization:'Bearer '+upstream.integrationKey,'accept-encoding':'identity','x-workbench-prefix':actor.publicPrefix+'/apps/'+id,'x-workbench-api-base':actor.publicPrefix+API+'/modules/'+id,...signWorkbenchActor({...actor,requestId,issuedAt:Date.now(),expiresAt:Date.now()+30000,module:id,method:request.method,path:target},upstream.actorKey)};
     for(const key of ['content-type','accept','if-none-match','if-modified-since','range','x-integration-review-nonce','x-review-token','idempotency-key'])if(request.headers[key])h[key]=request.headers[key];
     const cookies=backendCookies(request,id);if(cookies)h.cookie=cookies;return h;
   }
@@ -171,7 +180,7 @@ export async function createWorkbenchGateway(options={}) {
     if(!ui&&operation.kind==='ui')throw fail(404,'OPERATION_UNLISTED','请通过模块页面入口打开');
     if((operation.uiOnly||operation.kind==='confirmation')&&actor.channel!=='ui')throw fail(403,'UI_CONFIRMATION_REQUIRED','此操作必须在界面完成两次确认');
     const requestId=randomUUID();
-    if(readonly(request.method))return reply.from(upstream.url+target,{rewriteRequestHeaders:()=>outboundHeaders(request,id,upstream,actor,target,requestId),rewriteHeaders:h=>responseHeaders(h,id,upstream,ui,target),retriesCount:0,timeout:60000});
+    if(readonly(request.method))return reply.from(upstream.url+target,{rewriteRequestHeaders:()=>outboundHeaders(request,id,upstream,actor,target,requestId),rewriteHeaders:h=>responseHeaders(h,id,upstream,ui,target,actor),retriesCount:0,timeout:60000});
     const key=request.headers['idempotency-key'];if(typeof key!=='string'||!/^[A-Za-z0-9._:-]{8,160}$/.test(key))throw fail(400,'IDEMPOTENCY_KEY_REQUIRED','修改请求必须带有唯一操作标识');
     const body=await spoolBody(request,spoolDir,maxUploadBytes);
     try{
@@ -186,20 +195,20 @@ export async function createWorkbenchGateway(options={}) {
         const headers=outboundHeaders(request,id,upstream,currentActor,target,requestId);
         const response=await fetch(upstream.url+target,{method:request.method,headers,...(body.bytes?{body:fs.createReadStream(body.file),duplex:'half'}:{}),redirect:'manual',signal:AbortSignal.timeout(120000)});
         const result=await boundedResponse(response,maxResponseBytes),rawHeaders=Object.fromEntries(response.headers);if(response.headers.getSetCookie)rawHeaders['set-cookie']=response.headers.getSetCookie();
-        const safeHeaders=responseHeaders(rawHeaders,id,upstream,ui,target);
+        const safeHeaders=responseHeaders(rawHeaders,id,upstream,ui,target,actor);
         store.finish(operationKey,{status:response.status,headers:safeHeaders,body:result});writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:response.ok?'completed':'rejected',details:{status:response.status}});
         reply.code(response.status);for(const [k,v] of Object.entries(safeHeaders))reply.header(k,v);return reply.send(result);
       }catch(error){store.finish(operationKey,{state:'unknown',status:502});writeAudit({requestId,actorId:actor.id,module:id,operation:operation.operationId,outcome:'unknown',details:{code:error.code||'UPSTREAM_UNCERTAIN'}});throw fail(502,'OPERATION_OUTCOME_UNKNOWN','连接中断，操作可能已完成；请查询结果后再处理，系统已阻止重复写入');}
     }finally{if(body.file)fs.rmSync(body.file,{force:true});}
   }
-  app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId}));
+  app.get(API+'/health',async()=>({ok:true,service:'wucheng-workbench',protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,fnos:fnosListener.status()}));
   app.get(API+'/session',async(request,reply)=>{
-    const login=loginOf(request),channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
-    let session=store.session(request.cookies[sessionCookie]),token=request.cookies[sessionCookie];
-    if(!session||session.login!==login||session.channel!==channel){token=randomBytes(32).toString('base64url');const s={sessionId:randomUUID(),login,channel,csrfToken:randomBytes(32).toString('base64url'),expiresAt:Date.now()+sessionTtlMs};store.saveSession(token,s);session=store.session(token);}
-    reply.setCookie(sessionCookie,token,{secure:!localDevelopment,httpOnly:true,sameSite:'strict',path:'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
-    store.observeMember(login);
-    const actor=companyActor({id:'tailscale:'+login,login,label:login,channel});
+    const identity=identityOf(request),login=identity.login,channel=request.headers['x-workbench-channel']||'ui';if(!channels.has(channel))throw fail(400,'CHANNEL_INVALID','调用通道无效');
+    let session=store.session(request.cookies[identity.cookie]),token=request.cookies[identity.cookie];
+    if(!session||session.actor_id!==identity.id||session.channel!==channel){token=randomBytes(32).toString('base64url');const s={sessionId:randomUUID(),actorId:identity.id,login,channel,csrfToken:randomBytes(32).toString('base64url'),expiresAt:Date.now()+sessionTtlMs};store.saveSession(token,s);session=store.session(token);}
+    reply.setCookie(identity.cookie,token,{secure:identity.secure,httpOnly:true,sameSite:'strict',path:identity.publicPrefix||'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
+    store.observeIdentity(identity);
+    const actor=companyActor({...identity,channel});
     return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor)};
   });
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));
@@ -224,10 +233,11 @@ export async function createWorkbenchGateway(options={}) {
   app.route({method:methods,url:API+'/modules/:id/*',handler:(req,reply)=>proxy(req,reply,false)});
   app.route({method:methods,url:'/apps/:id/',handler:(req,reply)=>proxy(req,reply,true)});
   app.route({method:methods,url:'/apps/:id/*',handler:(req,reply)=>proxy(req,reply,true)});
-  const context={requireSession,requireAdmin,resolveActor,writeAudit,operationStore:store,storeDir,serverId:store.serverId,dataSetId:store.dataSetId,publicOrigin};
+  const context={publicPrefix:request=>fnosContext(request.raw)?.publicPrefix||'',requireSession,requireAdmin,resolveActor,writeAudit,operationStore:store,storeDir,serverId:store.serverId,dataSetId:store.dataSetId,publicOrigin};
   if(registerRoutes)await registerRoutes(app,context);
-  app.addHook('onClose',async()=>{clearInterval(summary);store.close();});
-  return {app,...context,async start(){try{return await app.listen({host,port});}catch(error){await app.close();throw error;}},async stop(){await app.close();}};
+  const fnosListener=createFnosListener(app,fnos);
+  app.addHook('onClose',async()=>{try{await fnosListener.stop();}finally{clearInterval(summary);store.close();}});
+  return {app,...context,fnosStatus:fnosListener.status,async start(){let address;try{address=await app.listen({host,port});}catch(error){await app.close();throw error;}try{await fnosListener.start();}catch(error){log.error('飞牛入口启动失败，Tailscale备用入口继续运行',{error:error.message});}return address;},async stop(){await app.close();}};
 }
 
 export {validatePolicy};

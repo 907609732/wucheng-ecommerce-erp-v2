@@ -1,4 +1,5 @@
-const API = '/api/workbench/v1/data-versions';
+const publicPrefix = typeof location !== 'undefined' ? location.pathname.match(/^(\/app\/wuchengerp)\/web\//)?.[1] || '' : '';
+const API = publicPrefix + '/api/workbench/v1/data-versions';
 const modules = { purchase: '采购', sales: '销售', overview: '经营总览' };
 
 export function statusInfo(value) {
@@ -207,7 +208,7 @@ if (typeof document !== 'undefined') {
     $('#retry-message').classList.remove('error');
     $('#retry-message').textContent = '正在请求重试托管…';
     try {
-      const session = await request('/api/workbench/v1/session', { signal: controller.signal });
+      const session = await request(publicPrefix+'/api/workbench/v1/session', { signal: controller.signal });
       if (!session.csrfToken) throw Error('会话已失效，请刷新后重试');
       await request(`${API}/${encodeURIComponent(id)}/retry`, { method: 'POST', headers: { 'x-workbench-csrf': session.csrfToken }, signal: controller.signal });
       if (dialog.open && currentId === id) { await openDetail(id); $('#retry-message').textContent = '已请求重试，远端确认后才会显示已托管。'; }
