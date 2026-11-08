@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+export function diagnosticInitializationCleanup(services){
+ // This source manager belongs to one disposable initializer, never to a later
+ // lifecycle generation. Signal cleanup and its finally must await the same
+ // authenticated stop, including its original rejection and child-exit wait.
+ let stopping;
+ return ()=>stopping??=Promise.resolve().then(()=>services.stopOwned());
+}
 export function diagnosticCancellation(file,onRequest){
  let requested=false,watcher;
  const inspect=()=>{if(file&&!requested&&fs.existsSync(file)){requested=true;onRequest();}};

@@ -43,6 +43,10 @@ run=$(cat "$work/diag-volume/@wuchengerpdiag-data/active-run")
 cp -a "$work/diag-volume/@wuchengerpdiag-data/$run/evidence/." "$out/diagnostic-evidence/"
 status=0; /bin/sh "$diag/cmd/main" status || status=$?; [[ $status = 3 ]]
 /bin/sh "$diag/cmd/main" stop
+# Establish a real clean boundary between the full diagnostic and the forced
+# cancellation generation. A previous leak must not be attributed to the latter.
+if pgrep -u erpdiag >/dev/null; then ps -o pid,ppid,lstart,args -u erpdiag; echo 'Full diagnostic left package processes before timeout case.' >&2; exit 1; fi
+printf '%s\n' '{"uid":23003,"processes":[],"checkedAfterFullDiagnostic":true}' > "$out/diagnostic-timeout-baseline.json"
 # Short bounded run forces TERM while synthetic initialization may still be in
 # flight. It must fail honestly, preserve its report and leave no package child.
 if /bin/sh "$diag/cmd/acceptance" 1; then echo 'Timed diagnostic unexpectedly passed.' >&2; exit 1; fi

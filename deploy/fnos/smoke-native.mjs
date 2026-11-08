@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {verifySandboxResult,mcpEvaluationResult,isAllowedRuntimeLibrary,diagnosticCancellation} from './smoke-checks.mjs';
+import {verifySandboxResult,mcpEvaluationResult,isAllowedRuntimeLibrary,diagnosticCancellation,diagnosticInitializationCleanup} from './smoke-checks.mjs';
 const args={};for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const app=fs.realpathSync(args['app-root']),release=path.join(app,'erp'),runtime=path.join(app,'runtime');
 const data=path.resolve(args['data-root']),evidence=path.resolve(args['evidence-dir']),offset=Number(args['port-offset']||0),diagnostic=args.diagnostic==='1';
@@ -39,14 +39,14 @@ const fixture=http.createServer((req,res)=>{
 });
 await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+fixture.address().port;
 report.fixturePort=fixture.address().port;
-let configFile,client,transport,browser,viewerBrowser,initializingServices,pendingClient,pendingTransport,cancellation,cleanupTask;
+let configFile,client,transport,browser,viewerBrowser,stopInitializingServices,pendingClient,pendingTransport,cancellation,cleanupTask;
 let interrupting=false;
 function checkCancellation(){cancellation?.check();assert(!interrupting,'Diagnostic acceptance cancelled');}
 async function cleanupOwned(){
  if(cleanupTask)return cleanupTask;
  cleanupTask=(async()=>{
   const errors=[];cancellation?.close();
-  try{await initializingServices?.stopOwned();}catch(error){errors.push(error);}
+  try{await stopInitializingServices?.();}catch(error){errors.push(error);}
   try{await stopClients();}catch(error){errors.push(error);}
   try{if(configFile)await nativeLifecycle('stop',configFile);}catch(error){errors.push(error);}
   try{fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}catch(error){errors.push(error);}
@@ -57,11 +57,23 @@ async function cleanupOwned(){
 async function interrupt(reason='signal'){
  if(interrupting)return;interrupting=true;report.cancelReason=reason;report.error='Acceptance cancelled: '+reason;report.ok=false;
  const hard=setTimeout(()=>process.exit(124),40000);
+ report.cancellationProcessesBefore=diagnosticProcesses();
  await cleanupOwned().catch(e=>{report.cleanupError=e.message;});
+ report.cancellationProcessesAfter=diagnosticProcesses();
  fs.writeFileSync(path.join(evidence,'acceptance.json'),JSON.stringify(report,null,2)+'\n');clearTimeout(hard);process.exit(124);
 }
 process.on('SIGTERM',()=>{void interrupt('signal');});process.on('SIGINT',()=>{void interrupt('signal');});
 cancellation=diagnosticCancellation(cancelFile,()=>{void interrupt('external-stop');});
+function diagnosticProcesses(){
+ const rows=[];
+ for(const pid of fs.readdirSync('/proc').filter(n=>/^\d+$/.test(n)))try{
+  if(Number(pid)===process.pid||fs.statSync('/proc/'+pid).uid!==process.getuid())continue;
+  const raw=fs.readFileSync('/proc/'+pid+'/stat','utf8'),fields=raw.slice(raw.lastIndexOf(')')+2).split(' ');
+  const environment=Object.fromEntries(fs.readFileSync('/proc/'+pid+'/environ','utf8').split('\0').filter(v=>/^(?:PURCHASE|SALES|OVERVIEW)_DATA_DIR=/.test(v)).map(v=>{const i=v.indexOf('=');return [v.slice(0,i),v.slice(i+1)];}));
+  rows.push({pid:Number(pid),parent:Number(fields[1]),startTicks:fields[19],cmdline:fs.readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0').filter(Boolean),dataDirectories:environment});
+ }catch(error){if(!['ENOENT','ESRCH'].includes(error.code))rows.push({pid:Number(pid),unreadable:error.code});}
+ return rows;
+}
 // Bounded CI-only phase barrier makes external-stop races reproducible while
 // retaining the real Node/lifecycle/collector/Chromium/MCP/fixture processes.
 async function checkpoint(phase){
@@ -120,7 +132,7 @@ try{
   const c=developmentConfig({root:release,stateDir:state,port:29430});
   for(const [id,m] of Object.entries(c.modules)){m.dataDir=path.join(data,'data',id);}
   const {createSourceServices}=await import(pathToFileURL(path.join(release,'server/services.mjs')));
-  const services=initializingServices=await createSourceServices(c);try{for(const id of Object.keys(c.modules)){checkCancellation();await services.ensure(id);}}finally{await services.stopOwned();initializingServices=null;}
+  const services=await createSourceServices(c);stopInitializingServices=diagnosticInitializationCleanup(services);try{for(const id of Object.keys(c.modules)){checkCancellation();await services.ensure(id);}}finally{await stopInitializingServices();stopInitializingServices=null;}
   c.mode='production';c.releaseRoot=release;c.tcpEnabled=true;c.fnos={enabled:false};c.publicOrigin='https://native-acceptance.example.com';c.dataVersion={enabled:false};
   c.native={dataRoot:data,home:path.join(data,'uvcs-home'),nodePath:process.execPath,requireBrowsers:true,browser:browserConfig};fs.mkdirSync(c.native.home,{mode:0o700});
   await checkpoint('before-config');fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
