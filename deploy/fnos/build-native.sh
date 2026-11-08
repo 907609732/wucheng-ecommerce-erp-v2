@@ -80,10 +80,12 @@ cp -a "$work/smoke-evidence" "$out/smoke-evidence"
 # not mask early private-runtime failures. License/owner metadata already exists.
 node "$helper/collect-native-sources.mjs" "$runtime" "$work" --download-sources
 node "$helper/collect-sharp-sources.mjs" "$stage" "$work"
+node "$helper/collect-canvas-sources.mjs" "$stage" "$work"
 node "$helper/write-native-manifest.mjs" "$stage" "$work"
 node "$helper/verify-artifact.mjs" "$stage" | tee "$out/artifact-verification.json"
 cp "$stage/app/THIRD-PARTY.json" "$out/THIRD-PARTY.json"
 cp "$work/sharp-source-inputs.json" "$out/sharp-source-inputs.json"
+cp "$work/canvas-source-inputs.json" "$out/canvas-source-inputs.json"
 find "$stage" -type f -printf '%P\n' | LC_ALL=C sort > "$out/PAYLOAD-FILES.txt"
 (cd "$stage"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/PAYLOAD-SHA256SUMS.txt"
 # The smoke uses a synthetic data root outside the stage and is never packaged.

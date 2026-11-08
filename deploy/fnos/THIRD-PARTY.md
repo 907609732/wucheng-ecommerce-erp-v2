@@ -34,6 +34,18 @@ lockfile. Other upstream source archives are obtained over HTTPS with calculated
 SHA256s, without detached signature verification. This is distinct from Debian's
 signed index verification.
 
+The sales native `@napi-rs/canvas-linux-x64-gnu@1.0.11` binary is checked against
+its bundled CycloneDX SBOM. Its Rust component license texts and the enabled
+Skia libraries' original notices are included in `runtime/licenses/canvas`.
+The companion includes the exact four MPL-2.0 Rust crate sources (`cssparser`,
+`cssparser-color`, `cssparser-macros`, `dtoa-short`) checked against that SBOM's
+SHA256s. Other Rust source archives are used only to recover original notices;
+their full sources are not included. Skia notices/DEPS use its fixed submodule
+commit; vendored notices use the component commits recorded by the upstream
+Linux SBOM. Missing crate notices are recovered at the crate's `.cargo_vcs_info`
+revision. `canvas-source-inputs.json` records URLs, coverage and every delivered
+file hash. These HTTPS materials are not separately signature verified.
+
 Pinned input provenance in `native-inputs.env`: Node SHA256 is checked against
 the official `SHASUMS256.txt` over HTTPS (detached signature not checked here).
 fnpack 1.2.3 and noVNC tag archive hashes were calculated from their official HTTPS

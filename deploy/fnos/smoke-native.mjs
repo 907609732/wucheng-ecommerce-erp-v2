@@ -21,7 +21,9 @@ const {databases,loadConfig,developmentConfig,validateConfig}=await import(pathT
 const require=createRequire(path.join(release,'apps/sales/package.json'));
 const {Client}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/index.js')));
 const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/stdio.js')));
-const {chromium}=await import(pathToFileURL(require.resolve('playwright-core')));
+// The pinned core entry is CommonJS with computed exports; use its public CJS
+// API rather than assuming Node synthesizes named ESM exports for it.
+const {chromium}=require('playwright-core');
 const report={ok:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,checks:[],ports:{sales:19222+offset,overview:19223+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/download'){res.writeHead(200,{'content-type':'text/plain','content-disposition':'attachment; filename="native-acceptance.txt"'});res.end('native FPK download acceptance\n');return;}
