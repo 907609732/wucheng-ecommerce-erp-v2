@@ -3,21 +3,27 @@ set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/diag_env"
 prepare_diag
+# Root may prepare only the exact physical app base. Re-enter this fixed trusted
+# cmd script synchronously as the package user before reading/writing any marker
+# or run/evidence file in the package-owned tree. No payload code runs as root.
+if [ "$(id -u)" = 0 ]; then
+ as_package /bin/sh "$SELF/acceptance" "$@"
+ exit 0
+fi
+[ ! -L "$BASE/active-run" ] || fail '诊断运行标记不能是符号链接；请先检查独立诊断目录。'
 stop_diag
 run="run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 RUN="$BASE/$run"
 mkdir -m700 "$RUN"
-if [ "$(id -u)" = 0 ]; then chown "$uid:$gid" "$RUN"; fi
 printf '%s\n' "$run" > "$BASE/active-run"
 status=0
 limit=${1:-240}
 case "$limit" in ''|*[!0-9]*) fail '诊断时间限制必须为 1–240 秒。';; esac
 [ "$limit" -ge 1 ] && [ "$limit" -le 240 ] || fail '诊断时间限制必须为 1–240 秒。'
 mkdir -m700 "$RUN/evidence"
-if [ "$(id -u)" = 0 ]; then chown "$uid:$gid" "$RUN/evidence"; fi
 # The real root recovery helper requires these trusted system stdlib modules.
 # Inspect before starting any native process; python-minimal alone may lack them.
-if ! timeout --signal=TERM --kill-after=2s 10s /usr/bin/python3 -I -B -c 'import sqlite3,ctypes,fcntl,json,sys; print(json.dumps({"ok":True,"version":sys.version,"sqlite":sqlite3.sqlite_version}))' > "$RUN/evidence/system-python.log" 2>&1; then
+if ! timeout --signal=TERM --kill-after=2s 10s env -u LD_LIBRARY_PATH -u LD_PRELOAD /usr/bin/python3 -I -B -c 'import sqlite3,ctypes,fcntl,json,sys; print(json.dumps({"ok":True,"version":sys.version,"sqlite":sqlite3.sqlite_version}))' > "$RUN/evidence/system-python.log" 2>&1; then
  printf '%s\n' '{"ok":false,"stage":"system-python-preflight","error":"Trusted /usr/bin/python3 needs sqlite3,ctypes,fcntl,json; ask administrator to prepare official system Python; no native service started"}' > "$RUN/evidence/acceptance.json"
  fail "系统 Python 标准库预检失败，未启动原生进程；请管理员核对官方 python3 完整环境。证据：$RUN/evidence"
 fi
