@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
+import {spawn} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {configureNative,sealStoppedSource,backupNative} from '../server/fnos-native/configure.mjs';
 import {nativeLifecycle} from '../server/fnos-native/lifecycle.mjs';
-import {startNativeCollector} from '../server/fnos-native/supervisor.mjs';
+import {startNativeCollector,deadline} from '../server/fnos-native/supervisor.mjs';
 import {loadConfig,validateConfig,developmentConfig,databases} from '../server/config.mjs';
 const releaseRoot=path.resolve(import.meta.dirname,'..');
 const origin='https://nas.example.com:5667';
@@ -66,11 +68,54 @@ test('migration requires stopped verified complete source and preserves private 
  assert.equal(migratedDb.prepare('SELECT original_path FROM native_attachment_fixture').get().original_path,path.join(target,'data','sales','originals','invoice.pdf'));migratedDb.close();
  assert.equal(hash(file),before);assert.equal(hash(path.join(source,'state','month-admin','secret.json')),admin);
  const sourceIdentity=path.join(source,'state','gateway','identity.json'),savedIdentity=fs.readFileSync(sourceIdentity);
+ c.tcpEnabled=false;fs.writeFileSync(file,JSON.stringify(c));await sealStoppedSource(source);
+ const unixOnly=loadConfig(await configureNative({...options(path.join(dir,'unix-only')),mode:'migrate',sourceRoot:source}));
+ assert.equal(unixOnly.tcpEnabled,false,'migration must retain an explicit TCP-disabled source');
+ delete c.tcpEnabled;fs.writeFileSync(file,JSON.stringify(c));await sealStoppedSource(source);
+ assert.equal(loadConfig(await configureNative({...options(path.join(dir,'legacy-default')),mode:'migrate',sourceRoot:source})).tcpEnabled,true);
  fs.unlinkSync(sourceIdentity);await sealStoppedSource(source);
  await assert.rejects(configureNative({...options(path.join(dir,'missing-identity')),mode:'migrate',sourceRoot:source}),/身份|identity/);
  fs.writeFileSync(sourceIdentity,savedIdentity);await sealStoppedSource(source);
  fs.rmSync(path.join(source,'data','sales',databases.sales));
  await assert.rejects(configureNative({...options(path.join(dir,'missing')),mode:'migrate',sourceRoot:source}),/账本|完整|校验/);
+});
+test('existing configure waits for the lifecycle transaction and merges independent updates after reload',async t=>{
+ const dir=fixture(t),data=path.join(dir,'instance'),file=await configureNative(options(data)),c=loadConfig(file);
+ const lock=new DatabaseSync(path.join(c.stateDir,'native-lifecycle.sqlite'));lock.exec('BEGIN EXCLUSIVE');
+ let finished=0;const first=configureNative({...options(data),mode:'existing',allowedOrigins:undefined,allowedUids:['1002']}).then(v=>{finished++;return v;});
+ const second=configureNative({...options(data),mode:'existing',allowedUids:undefined,allowedOrigins:['https://second-nas.example.com']}).then(v=>{finished++;return v;});
+ let early;try{await new Promise(r=>setTimeout(r,100));early=finished;}finally{lock.close();}
+ await Promise.all([first,second]);
+ assert.equal(early,0,'configuration may not commit inside a start/stop critical section');
+ const updated=loadConfig(file);assert.deepEqual(updated.fnos.allowedUids,['1002']);assert.deepEqual(updated.fnos.allowedOrigins,['https://second-nas.example.com']);
+});
+test('existing configure refuses the ownership window before the supervisor publishes a PID record',async t=>{
+ const dir=fixture(t),data=path.join(dir,'instance'),file=await configureNative(options(data)),c=loadConfig(file);
+ const lock=new DatabaseSync(path.join(c.stateDir,'native-ownership.sqlite'));lock.exec('BEGIN EXCLUSIVE');
+ try{await assert.rejects(configureNative({...options(data),mode:'existing',allowedUids:['9999']}),/运行|启动|ownership/);}finally{lock.close();}
+ assert.deepEqual(loadConfig(file).fnos.allowedUids,['1000']);
+});
+test('interrupting a blocked startup drains its already-owned module before supervisor exit',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-interrupt-')),file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
+ c.fnos={enabled:false};c.tcpEnabled=true;c.port=45000+Math.floor(Math.random()*1000);
+ for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
+ fs.writeFileSync(file,JSON.stringify(c));const marker=path.join(dir,'owned-child.json');
+ const source=`import fs from 'node:fs';import {runSupervisor} from ${JSON.stringify(pathToFileURL(path.join(releaseRoot,'server/fnos-native/supervisor.mjs')).href)};import {createWebRuntime} from ${JSON.stringify(pathToFileURL(path.join(releaseRoot,'server/runtime.mjs')).href)};process.on('message',m=>{if(m==='interrupt')process.emit('SIGTERM');});runSupervisor(${JSON.stringify(file)},{createRuntime:async(config,options)=>{const runtime=await createWebRuntime(config,options),ensure=runtime.services.ensure.bind(runtime.services);runtime.services.ensure=async id=>{const cap=await ensure(id);if(id==='purchase'){fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:cap.pid}));await new Promise((resolve,reject)=>{if(options.signal.aborted)reject(options.signal.reason);else options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});}return cap;};return runtime;}}).then(()=>{}).catch(e=>{console.error(e.message);process.disconnect?.();process.exitCode=1;});`;
+ const child=spawn(process.execPath,['--input-type=module','-e',source],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});let exited=false;child.once('exit',()=>{exited=true;});
+ const closed=new Promise(resolve=>child.once('close',resolve));
+ t.after(async()=>{
+  if(!exited&&child.connected)child.send('interrupt');
+  for(const id of ['purchase','sales','overview'])try{const m=c.modules[id],cap=await(await fetch('http://127.0.0.1:'+m.port+'/api/integration/v1/capabilities',{signal:AbortSignal.timeout(1000)})).json();if(path.resolve(cap.dataDir)===path.resolve(m.dataDir)){const key=fs.readFileSync(path.join(m.dataDir,'.integration-key'),'utf8').trim();await fetch('http://127.0.0.1:'+m.port+'/api/integration/v1/stop',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify({confirm:true})});}}catch{}
+  if(!exited){child.kill();await closed;}
+  fs.rmSync(dir,{recursive:true,force:true});
+ });
+ const end=Date.now()+15000;while(!fs.existsSync(marker)&&Date.now()<end&&!exited)await new Promise(r=>setTimeout(r,50));
+ assert.equal(fs.existsSync(marker),true,'startup must reach a real owned child before interruption');
+ await assert.rejects(configureNative({...options(path.join(dir,'data')),mode:'existing',allowedUids:['9999']}),/运行|启动|ownership/);
+ const owned=JSON.parse(fs.readFileSync(marker));child.send('interrupt');
+ await deadline(closed,40000,'blocked startup failed to stop');
+ assert.throws(()=>process.kill(owned.pid,0),e=>e.code==='ESRCH','owned module must exit before the supervisor');
+ assert.equal(fs.existsSync(path.join(c.stateDir,'native-supervisor.json')),false);
 });
 test('sealing refuses live owner and migration refuses changed or linked files',async t=>{
  const dir=fixture(t),source=path.join(dir,'old');await configureNative(options(source));
@@ -108,6 +153,9 @@ test('lifecycle starts one generation, validates PID identity and stops only its
  fs.writeFileSync(identityFile,JSON.stringify({...JSON.parse(identity),serverId:'replacement-server-id'}));
  try{await nativeLifecycle('stop',file);}finally{fs.writeFileSync(identityFile,identity);}
  assert.equal((await nativeLifecycle('status',file)).status,'stopped');
+ await assert.rejects(nativeLifecycle('start',file,{startupTimeoutMs:1}),/超时.*清理已确认/);
+ assert.equal(fs.existsSync(record),false,'timeout must wait for the partial generation to finish cleanup');
+ for(const m of Object.values(c.modules))await assert.rejects(fetch('http://127.0.0.1:'+m.port+'/api/integration/v1/capabilities',{signal:AbortSignal.timeout(1000)}));
 });
 test('Linux package user: Unix-only native instance reports real identity over private IPC with no TCP listener',{skip:process.platform!=='linux'||process.getuid?.()===0},async t=>{
  let file;t.after(async()=>{if(file)await nativeLifecycle('stop',file).catch(()=>{});});

@@ -20,6 +20,17 @@ export function atomicJson(file,value){
  fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});const temporary=file+'.'+randomUUID()+'.tmp';
  try{fs.writeFileSync(temporary,JSON.stringify(value,null,2)+'\n',{flag:'wx',mode:0o600});fs.renameSync(temporary,file);}finally{fs.rmSync(temporary,{force:true});}
 }
+export async function withNativeLifecycleLock(stateDir,action,{timeoutMs=100000}={}){
+ stateDir=physicalPath(stateDir);fs.mkdirSync(stateDir,{recursive:true,mode:0o700});
+ const lock=new DatabaseSync(path.join(stateDir,'native-lifecycle.sqlite')),until=Date.now()+timeoutMs;
+ try{
+  while(true){try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');break;}catch(error){
+   if(error.code!=='ERR_SQLITE_ERROR'||!error.message.includes('locked')||Date.now()>until)throw error;
+   await new Promise(r=>setTimeout(r,50));
+  }}
+  return await action();
+ }finally{lock.close();}
+}
 export function configFileAt(root){
  const candidates=[path.join(root,'config.json'),path.join(root,'config','web.json')].filter(fs.existsSync);
  if(candidates.length!==1)throw Error('完整副本需要唯一 config.json 或 config/web.json');return candidates[0];
@@ -150,12 +161,21 @@ export async function configureNative(o={}){
   const {validateFnos}=await import('../gateway/fnos.mjs');validateFnos(c.fnos);
   if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('NAS HTTPS 地址必须为源地址');
  }else if(o.mode==='existing'){
-  complete(dataRoot);c=JSON.parse(fs.readFileSync(configFileAt(dataRoot),'utf8'));assertStopped(dataRoot);c=rebaseConfig(c,dataRoot,releaseRoot).config;
-  if(o.publicOrigin&&c.tcpEnabled===false)c.publicOrigin=o.publicOrigin;
-  if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
-  if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
-  if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
-  c=validateConfig(c);checkUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
+  complete(dataRoot);
+  return withNativeLifecycleLock(path.join(dataRoot,'state'),async()=>{
+   complete(dataRoot);
+   const ownership=new DatabaseSync(path.join(dataRoot,'state','native-ownership.sqlite'));
+   try{
+    try{ownership.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch{throw Error('原生 supervisor 正在运行或启动，拒绝配置更新 (ownership)');}
+    // Reload and merge only after both lifecycle and generation ownership are held.
+    c=JSON.parse(fs.readFileSync(configFileAt(dataRoot),'utf8'));assertStopped(dataRoot);c=rebaseConfig(c,dataRoot,releaseRoot).config;
+    if(o.publicOrigin&&c.tcpEnabled===false)c.publicOrigin=o.publicOrigin;
+    if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
+    if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
+    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
+    c=validateConfig(c);checkUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
+   }finally{ownership.close();}
+  });
  }
  const lock=dataRoot+'.configure-lock';fs.mkdirSync(path.dirname(dataRoot),{recursive:true});fs.mkdirSync(lock);
  const stage=dataRoot+'.staging-'+randomUUID();
@@ -172,7 +192,7 @@ export async function configureNative(o={}){
    fs.cpSync(source,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});verifySource(source);
    const old=JSON.parse(fs.readFileSync(configFileAt(stage),'utf8')),rebased=rebaseConfig(old,dataRoot,releaseRoot);c=rebased.config;
    if(!c.fnos?.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
-   c.tcpEnabled=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
+   c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
    remapReferences(stage,rebased.maps);
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));

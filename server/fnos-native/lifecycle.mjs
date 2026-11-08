@@ -1,11 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-import {DatabaseSync} from 'node:sqlite';
 import {pathToFileURL} from 'node:url';
 import {loadConfig} from '../config.mjs';
-import {configureNative,sealStoppedSource,backupNative,physicalPath} from './configure.mjs';
-import {nativeRequest,sleep} from './supervisor.mjs';
+import {configureNative,sealStoppedSource,backupNative,physicalPath,withNativeLifecycleLock} from './configure.mjs';
+import {nativeRequest,sleep,deadline} from './supervisor.mjs';
 
 function readRecord(c){try{return JSON.parse(fs.readFileSync(path.join(c.stateDir,'native-supervisor.json'),'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
 function commandIdentity(record,file){
@@ -28,14 +27,15 @@ async function status(c,file){
   return result;
  }catch(error){return {ok:false,status:'unavailable',error:error.message};}
 }
-export async function nativeLifecycle(action,configFile){
+export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,cancellationTimeoutMs=85000}={}){
  if(!['start','stop','status'].includes(action))throw Error('未知原生生命周期操作');
- configFile=physicalPath(configFile);const c=loadConfig(configFile);
+ if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>300000||!Number.isInteger(cancellationTimeoutMs)||cancellationTimeoutMs<1||cancellationTimeoutMs>100000)throw Error('生命周期等待时间必须有界');
+ configFile=physicalPath(configFile);let c=loadConfig(configFile);
  if(action==='status')return status(c,configFile);
  fs.mkdirSync(c.stateDir,{recursive:true,mode:0o700});
- const lock=new DatabaseSync(path.join(c.stateDir,'native-lifecycle.sqlite'));const until=Date.now()+100000;
- try{
-  while(true){try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');break;}catch(error){if(error.code!=='ERR_SQLITE_ERROR'||!error.message.includes('locked')||Date.now()>until)throw error;await sleep(100);}}
+ const stateDir=c.stateDir;
+ return withNativeLifecycleLock(stateDir,async()=>{
+  c=loadConfig(configFile);if(c.stateDir!==stateDir)throw Error('生命周期锁目录不能在操作期间改变');
   const current=await status(c,configFile);
   if(action==='stop'){
    const record=readRecord(c);if(!record)return {ok:true,status:'stopped'};
@@ -49,16 +49,22 @@ export async function nativeLifecycle(action,configFile){
   if(current.status==='unavailable')throw Error('已有未确认身份的原生服务，拒绝重复启动：'+current.error);
   const log=fs.openSync(path.join(c.stateDir,'native-supervisor.log'),'a',0o600);
   let child;
-  try{child=spawn(c.native?.nodePath||process.execPath,[path.join(c.releaseRoot,'server','fnos-native','supervisor.mjs'),'--config',configFile],{cwd:c.releaseRoot,env:{...process.env,...(c.native?.home?{HOME:c.native.home}:{})},windowsHide:true,detached:true,stdio:['ignore',log,log]});}finally{fs.closeSync(log);}
-  let spawnError,exited=false;child.once('error',error=>{spawnError=error;});child.once('exit',()=>{exited=true;});child.unref();
-  const end=Date.now()+90000;
+  try{child=spawn(c.native?.nodePath||process.execPath,[path.join(c.releaseRoot,'server','fnos-native','supervisor.mjs'),'--config',configFile],{cwd:c.releaseRoot,env:{...process.env,...(c.native?.home?{HOME:c.native.home}:{})},windowsHide:true,detached:true,stdio:['ignore',log,log,'ipc']});}finally{fs.closeSync(log);}
+  let spawnError,exited=false;child.once('error',error=>{spawnError=error;});child.once('exit',()=>{exited=true;});
+  const closed=new Promise(resolve=>child.once('close',resolve));child.unref();child.channel?.unref();
+  const end=Date.now()+startupTimeoutMs;
   while(Date.now()<end){
    if(spawnError)throw spawnError;if(exited)throw Error('原生服务启动失败，请检查 '+path.join(c.stateDir,'native-supervisor.log'));
-   const next=await status(c,configFile);if(next.ok&&next.pid===child.pid)return next;await sleep(200);
+   const next=await status(c,configFile);if(next.ok&&next.pid===child.pid){if(child.connected)child.disconnect();return next;}await sleep(200);
   }
-  // child handle was created by this invocation; never signal a persisted PID.
-  child.kill('SIGTERM');throw Error('原生服务启动健康检查超时');
- }finally{lock.close();}
+  // IPC cancellation is graceful on Windows too; SIGTERM there terminates Node
+  // without delivering its JS handler. Confirm this owned generation exits
+  // before releasing the lifecycle transaction or claiming timeout cleanup.
+  if(child.connected)child.send({action:'cancel-start'},error=>{if(error&&!exited&&process.platform!=='win32')child.kill('SIGTERM');});
+  else if(!exited&&process.platform!=='win32')child.kill('SIGTERM');
+  await deadline(closed,cancellationTimeoutMs,'原生启动取消后清理尚未确认，已阻止安全重试');
+  throw Error('原生服务启动健康检查超时；本代清理已确认');
+ });
 }
 export async function main(argv=process.argv.slice(2)){
  const action=argv.shift(),o={};for(let i=0;i<argv.length;i+=2){if(!argv[i].startsWith('--')||argv[i+1]===undefined)throw Error('参数必须为 --name value');o[argv[i].slice(2)]=argv[i+1];}

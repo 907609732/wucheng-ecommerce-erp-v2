@@ -49,7 +49,7 @@ function terminateDescendants(){
   if(fields[19]===parents.get(pid).start&&fs.statSync(file).uid===process.getuid())process.kill(pid,'SIGKILL');
  }catch{}
 }
-export async function runSupervisor(configFile){
+export async function runSupervisor(configFile,{createRuntime=createWebRuntime}={}){
  configFile=physicalPath(configFile);const config=loadConfig(configFile);
  if(config.mode!=='production'||!config.native)throw Error('原生 supervisor 需要正式配置');
  if(process.platform==='linux'&&process.getuid()===0)throw Error('长期服务必须使用专用 package 用户，不能以 root 运行');
@@ -57,34 +57,60 @@ export async function runSupervisor(configFile){
  const lock=new DatabaseSync(path.join(config.stateDir,'native-ownership.sqlite'));try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch(error){lock.close();throw Error('原生实例已有 supervisor，拒绝重复启动');}
  const record={schemaVersion:1,pid:process.pid,generation:randomUUID(),token:randomUUID()+randomUUID(),configFile,startedAt:new Date().toISOString()};
  const recordFile=path.join(config.stateDir,'native-supervisor.json'),endpoint=nativeEndpoint(config.stateDir);
- let runtime,collector,browsers,server,monitor,stopping=null,ready=false,closed=false,monitoring=false;
+ let runtime,collector,browsers,server,monitor,startupTask,stopping=null,ready=false,closed=false,monitoring=false;
+ const cancellation=new AbortController();
+ const checkCancellation=()=>{if(cancellation.signal.aborted)throw cancellation.signal.reason;};
  const health=()=>({ok:ready&&!stopping,pid:process.pid,generation:record.generation,status:stopping?'stopping':ready?'running':'starting',serverId:runtime?.gateway.serverId,dataSetId:runtime?.gateway.dataSetId,fnos:runtime?.gateway.fnosStatus(),browser:browsers?.status()||{enabled:false}});
  async function cleanup(){
   if(closed)return;closed=true;ready=false;clearInterval(monitor);
-  try{await deadline((async()=>{if(runtime)await runtime.quiesce();await collector?.stop();await browsers?.stop();await runtime?.stop();})(),75000,'原生服务停止超时');}
+  try{await deadline((async()=>{
+   // Startup may still be acquiring resources. Its cancellation checks prevent
+   // another launch; wait for the in-flight acquisition before final teardown.
+   await startupTask?.catch(()=>{});
+   if(runtime)await runtime.quiesce();await collector?.stop();await browsers?.stop();await runtime?.stop();
+  })(),75000,'原生服务停止超时');}
   catch(error){console.error(error.message);terminateDescendants();throw error;}
   finally{
    if(server)await new Promise(r=>{server.close(r);server.closeAllConnections?.();});
    try{if(JSON.parse(fs.readFileSync(recordFile)).generation===record.generation)fs.unlinkSync(recordFile);}catch{}
    lock.close();
+   for(const signal of ['SIGTERM','SIGINT'])process.off(signal,onInterrupted);
+   process.off('message',onParentMessage);process.off('disconnect',onParentDisconnect);
+   if(process.connected){process.send?.({type:'native-stopped',pid:process.pid,generation:record.generation});process.disconnect();}
   }
  }
- const shutdown=()=>{if(!stopping)stopping=cleanup();return stopping;};
- try{
+ const shutdown=()=>{
+  if(!stopping){cancellation.abort(Error('原生启动已取消'));runtime?.services.drain();stopping=cleanup();}
+  return stopping;
+ };
+ const onInterrupted=()=>void shutdown().catch(error=>{console.error(error.message);terminateDescendants();process.exit(1);});
+ const onParentMessage=message=>{if(message?.action==='cancel-start')onInterrupted();};
+ const onParentDisconnect=()=>{if(!ready)onInterrupted();};
+ // Install control before the first await or launch, including partial startup.
+ for(const signal of ['SIGTERM','SIGINT'])process.once(signal,onInterrupted);
+ process.on('message',onParentMessage);process.once('disconnect',onParentDisconnect);
+ startupTask=(async()=>{
+  atomicJson(recordFile,record);
+  process.send?.({type:'native-starting',pid:process.pid,generation:record.generation});
   if(config.native.home){physicalPath(config.native.home);process.env.HOME=config.native.home;}
   await cleanEndpoint(endpoint);
-  runtime=await createWebRuntime(config,{watch:false,superviseMs:5000});
+  checkCancellation();
+  runtime=await createRuntime(config,{watch:false,superviseMs:5000,signal:cancellation.signal});
+  checkCancellation();
   if(config.native.browser?.enabled){
    // Absence of the Task 2 payload must fail the real package, never silently
    // report ready with a missing browser service.
    const {createNativeBrowsers}=await import('./browsers.mjs');browsers=await createNativeBrowsers(config,{logger:runtime.logger});await browsers.start();
   }else if(config.native.requireBrowsers)throw Error('原生 FPK 必须配置可运行的浏览器');
+  checkCancellation();
   process.env.LINGTU_SALES_CDP_ENDPOINT='http://127.0.0.1:19222';
   process.env.LINGTU_OVERVIEW_CDP_ENDPOINT='http://127.0.0.1:19223';
   collector=await startNativeCollector(config);
+  checkCancellation();
   await runtime.start();
+  checkCancellation();
   if(config.fnos.enabled&&runtime.gateway.fnosStatus().state!=='ready')throw Error('飞牛可信 Unix 入口未就绪');
-  for(const id of moduleIds)await runtime.services.ensure(id);
+  for(const id of moduleIds){checkCancellation();await runtime.services.ensure(id);checkCancellation();}
   if(browsers){const b=browsers.status();if(b.ready===false||b.state==='degraded'||b.state==='failed')throw Error('原生浏览器未就绪');}
   server=net.createServer(socket=>{
    let buffer='',handled=false;socket.setTimeout(80000,()=>socket.destroy());socket.on('error',()=>{});
@@ -108,6 +134,7 @@ export async function runSupervisor(configFile){
   });
   const oldMask=process.umask(0o177);try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(endpoint,resolve);});}finally{process.umask(oldMask);}
   if(process.platform!=='win32')fs.chmodSync(endpoint,0o600);
+  checkCancellation();
   ready=true;atomicJson(recordFile,record);
   let failures=0;
   monitor=setInterval(async()=>{
@@ -119,9 +146,9 @@ export async function runSupervisor(configFile){
    }catch(error){console.error(error.message);if(++failures>=3){await shutdown().catch(()=>{terminateDescendants();process.exit(1);});process.exitCode=1;}}
    finally{monitoring=false;}
   },5000);monitor.unref();
-  for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>void shutdown().catch(error=>{console.error(error.message);terminateDescendants();process.exit(1);}));
   return {status:health,stop:shutdown};
- }catch(error){await cleanup().catch(()=>{});throw error;}
+ })();
+ try{return await startupTask;}catch(error){await shutdown().catch(()=>{});throw error;}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const args=process.argv.slice(2);if(args.length!==2||args[0]!=='--config'){console.error('需要 --config <absolute>');process.exitCode=1;}
