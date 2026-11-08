@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../../shared/stored-file.mjs';
 import ExcelJS from 'exceljs';
 import {parse} from 'csv-parse/sync';
 import {writeFileSync,readFileSync,existsSync} from 'node:fs';
@@ -43,7 +44,7 @@ export async function stageImport(s,buffer,filename,ctx) {
 export async function previewImport(s,importId,options) {
   const batch=s.get('SELECT * FROM imports WHERE id=?',importId);if(!batch||batch.status==='committed')throw fail('导入批次不存在或已提交');
   const ctx={...JSON.parse(batch.context_json),source:options.source,definition:options.definition,compatible:options.compatible,default_kind:options.default_kind,default_currency:options.default_currency||'CNY'};
-  const table=await readTable(readFileSync(path.join(s.dir,batch.original_path)),batch.filename,ctx.sheet,ctx.header_row);
+  const table=await readTable(readFileSync(resolveStoredFile(s.dir,batch.original_path,{folders:['originals']}).file),batch.filename,ctx.sheet,ctx.header_row);
   const mapping=options.mapping||{},records=[],errors=[],duplicates=[],conflicts=[],seen=new Map();const [start,end]=bounds(ctx.month);
   for(const [i,row]of table.rows.entries()) {
     try {

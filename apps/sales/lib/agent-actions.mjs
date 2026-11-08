@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../../shared/stored-file.mjs';
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {backup} from 'node:sqlite';
 import JSZip from 'jszip';
 import {createSalesDomainPeople} from './agent-people.mjs';
@@ -22,7 +23,7 @@ const safeInput=value=>{if(Array.isArray(value))return value.map(safeInput);if(!
 export function createSalesAgentActions({store:s,personnel,cainiao,domainPeople=createSalesDomainPeople(s),archiveHandoffs=createArchiveHandoffs(s)}){
  const hydrate=(input,c)=>({...input,...(input.file?.id?{file:c.resolveFile(input.file.id)}:{}),...(input.files?{files:input.files.map(f=>f.id?c.resolveFile(f.id):f)}:{})});
  const pFor=t=>t===s?personnel:createPersonnel(t);
- const rawFile=(relative,filename,mime)=>{const absolute=path.resolve(s.dir,relative);if(!absolute.startsWith(path.resolve(s.dir)+path.sep))throw fail('原件路径越界');return {filename,mime,bytes:fs.readFileSync(absolute)};};
+ const rawFile=(relative,filename,mime)=>{const {file:absolute}=resolveStoredFile(s.dir,relative,{folders:['originals','reports']});return {filename,mime,bytes:fs.readFileSync(absolute)};};
  const queries={
   'personnel-state':(_i,c)=>domainPeople.inspect(c.actor),
   shops:()=>s.shops(),'task-center':(i,c)=>personnel.taskCenter(request(c),month(i.month)),'manual-summary':i=>personnel.manualSummary(month(i.month),i.shop||'all'),sources:(i,c)=>personnel.sources(request(c),month(i.month)),
@@ -91,7 +92,7 @@ export function createSalesAgentActions({store:s,personnel,cainiao,domainPeople=
    if(['shop-create','ledger-create','ledger-update','match-create','job-create'].includes(op)){const table=op.startsWith('shop')?'shops':op.startsWith('ledger')?'ledger':op.startsWith('match')?'matches':'jobs';row=s.get('SELECT * FROM '+table+' WHERE id=?',result.id);ok=!!row;}
    else if(['shop-delete','ledger-delete','match-delete'].includes(op)){const table=op.startsWith('shop')?'shops':op.startsWith('ledger')?'ledger':'matches';ok=!s.get('SELECT 1 FROM '+table+' WHERE id=?',i.id);}
    else if(op==='coverage'){row=s.get('SELECT * FROM coverage WHERE shop_id=? AND month=? AND dataset=?',i.shop_id,i.month,i.dataset);ok=row?.status===i.status;}
-   else if(['import','taobao-import','pdd-import','import-rollback'].includes(op)){row=s.get('SELECT * FROM imports WHERE id=?',result.batchId||i.id);ok=!!row&&(op==='import-rollback'?row.status!=='committed':result.stagedOnly||row.status==='committed');if(row)ok=ok&&hash(fs.readFileSync(path.join(s.dir,row.original_path)))===row.sha256;}
+   else if(['import','taobao-import','pdd-import','import-rollback'].includes(op)){row=s.get('SELECT * FROM imports WHERE id=?',result.batchId||i.id);ok=!!row&&(op==='import-rollback'?row.status!=='committed':result.stagedOnly||row.status==='committed');if(row)ok=ok&&hash(fs.readFileSync(resolveStoredFile(s.dir,row.original_path,{folders:['originals']}).file))===row.sha256;}
    else if(op==='batch-attribution'){row=s.get('SELECT * FROM batch_attributions WHERE import_id=?',i.id);ok=!!row;}
    else if(op==='pdd-reference'){row=s.get('SELECT * FROM platform_references WHERE shop_id=? AND month=?',i.shop_id,i.month);ok=!!row;}
    else if(op.startsWith('freight-')||op==='cainiao-posting'||op==='cainiao-archive-posting'){row=freightRecord(s,result.id||i.id);ok=op==='freight-void'?row.status==='void':row.status==='active';for(const a of row.attachments||[]){const f=freightAttachment(s,a.id);ok=ok&&hash(fs.readFileSync(f.absolute))===a.sha256;}}

@@ -2,6 +2,14 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
+case "${wizard_uvcs_verify:-0}" in
+ 0|'') ;;
+ 1)
+  [ -f "$CONFIG" ] || fail '尚无原生配置，不能执行 UVCS 只读验证。'
+  as_package "$NODE" "$PAYLOAD/erp/server/fnos-native/verify-uvcs.mjs" --config "$CONFIG" || fail 'UVCS 只读验证失败。服务保持停止，请查看私有诊断报告；配置和账本未更新。'
+  exit 0;;
+ *) fail 'UVCS 验证选项只允许 0 或 1。';;
+esac
 prepare
 provision_uvcs
 if [ -f "$CONFIG" ]; then erp_mode=existing; export erp_mode; fi

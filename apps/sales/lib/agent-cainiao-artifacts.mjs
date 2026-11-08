@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../../shared/stored-file.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {classifyCainiaoMonth,readCainiaoDocuments,amountString} from './agent-cainiao-classify.mjs';
@@ -44,8 +45,7 @@ function verifiedPrevious(store,record,sourceKey,month){
  for(const member of manifest.members){
   const matching=attachments.filter(file=>file.sha256===member.sha256&&file.filename===member.filename&&file.size===member.bytes);
   if(matching.length!==1)throw fail('已有记录附件不能唯一对应已固化原件');
-  const target=path.resolve(store.dir,matching[0].original_path);
-  if(!target.startsWith(path.resolve(store.dir)+path.sep))throw fail('已有记录附件路径无效');
+  const {file:target}=resolveStoredFile(store.dir,matching[0].original_path,{folders:['originals']});
   const bytes=fs.readFileSync(target);if(bytes.length!==member.bytes||hash(bytes)!==member.sha256)throw fail('已有记录附件原件校验失败');
  }
  return {manifest,attachments};

@@ -40,3 +40,22 @@ sudo bash deploy/fnos/build-native.sh /tmp/new-native-output
 活跃诊断由系统 flock 租约串行化。外部 `cmd/main stop` 以诊断 UID 写入本次作业的取消请求，并等待作业及其客户端/fixture/原生进程清理结束；每次 native start 前同步检查取消。45 秒内无法确认作业清理时明确失败，不返回停止成功；原有 timeout 和真实 nativeLifecycle stop 继续保底。CI 分别在配置生成前和首次启动/MCP 连接后执行真实外部 stop 回归。
 
 验收包含真实 SQLite、nativeLifecycle/collector、MCP 导航/快照/输入/下载、HTTPS/NSS、namespace/seccomp sandbox、上游 noVNC 到 x11vnc 的真实 RFB 画面和键鼠、中文显示截图、持久合成浏览器 session 和重启停止。中文输入法、真实平台登录和正式 fnOS 授权 GUI 仍需实机人工验收；诊断成功不替代正式主包固定路径与身份验收。
+
+
+## 停写副本的 UVCS 连续性
+
+旧 Windows 的 `originals\文件` 相对引用在文件读取边界转换为可移植分隔符，数据库、审计、锁、原件、版本快照和 outbox 不改写。盘符、UNC、绝对路径、点段、遍历、缺失原件和符号链接仍阻止迁移。新生成的销售备份使用规范相对路径并合并同一原件的重复引用。
+
+启用 UVCS 的停写迁移副本必须附带可信的原工作区 ID、名称、仓库 RepSpec 和当前 `.plastic` 摘要。首次从旧部署封存时，操作员从原部署的只读记录取得身份后，传入固定 CLI 参数；不能把目标注册结果当作预期 ID：
+
+```sh
+node server/fnos-native/lifecycle.mjs seal-source --source /物理停写副本 --workspace-id 原工作区ID --workspace-name 原工作区名 --repository 原仓库规格
+```
+
+副本校验及 stage 原子发布后，package 用户仅以官方 `cm workspace list`、`cm showselector 最终工作区`、再次 `cm workspace list` 完成登记准备。全工作区字节必须不变，允许副本 HOME 的官方登记更新。准备失败会保留完整已发布账本、配置和 pending 状态，普通启动及直接 supervisor 启动都被阻止；修复环境后用 existing 配置重试。不能重建 workspace、编辑官方 XML、创建旧路径别名、回删已发布账本或关闭 UVCS。合法的新提交可以改变 `.plastic`；后续启动保留原身份，备份重新封存当前元数据摘要。
+
+应用中心的“仅执行原生 UVCS 只读验证”默认关闭。开启时配置向导先安全停服，忽略本页其他设置，以 package 用户执行固定验证命令；不运行 prepare、安装 UVCS 或保存配置。它要求已准备且已登记的原工作区、现有 HOME、队列、CLI、停止的服务及无未确认命令租约。先核对本地登记，再查官方仓库和全部 submitted 事件的唯一 changeset；不创建 worker、不提交、不重试、不清理 staging。单个查询最多 60 秒，查询总预算最多 180 秒，超时取消确认本次子进程退出。
+
+新脱敏报告保存至私有 `state/diagnostics/uvcs-verify-时间-随机ID.json`（0600），包含 UID、平台、Docker 标记、版本和事件匹配结果，不包含仓库地址、路径、凭据、人员或原始 CLI 输出。对 HOME、workspace、队列逻辑行和相关文件做前后检查；官方客户端若刷新认证或缓存，会报告状态变化并失败，不能称为纯只读成功。完成后在应用中心手动启动。报告只证明该执行环境的认证、仓库及已有提交映射，不证明附件恢复、新云端提交或真实平台登录。
+
+系统 CLI 配置会将官方 `/usr/bin/cm` 链接解析为实体路径。只对系统 CLI 的链接链、实体和祖先应用 root 所有权检查：拒绝其他用户所有或任意用户可写，组可写仅接受 `gid=0` 的可信 root 组。官方固定包的 `/opt/plasticscm5/client` 为 root:root 775，属于这个明确假设；不修改它的权限。此例外不适用于账本、HOME、报告或 root 恢复钩子。每次直接 supervisor 启动还会在持有实例所有权后，以最多 10 秒的官方本地 list 核对当前登记，缺登记/身份漂移不会触发隐式修复；启动取消会终止这次查询。

@@ -1,3 +1,4 @@
+import {assertNativeUvcsPrepared} from './uvcs-registration.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
@@ -47,6 +48,7 @@ export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,
   }
   if(current.ok)return current;
   if(current.status==='unavailable')throw Error('已有未确认身份的原生服务，拒绝重复启动：'+current.error);
+  assertNativeUvcsPrepared(c);
   const log=fs.openSync(path.join(c.stateDir,'native-supervisor.log'),'a',0o600);
   let child;
   try{child=spawn(c.native?.nodePath||process.execPath,[path.join(c.releaseRoot,'server','fnos-native','supervisor.mjs'),'--config',configFile],{cwd:c.releaseRoot,env:{...process.env,...(c.native?.home?{HOME:c.native.home}:{})},windowsHide:true,detached:true,stdio:['ignore',log,log,'ipc']});}finally{fs.closeSync(log);}
@@ -68,7 +70,7 @@ export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,
 }
 export async function main(argv=process.argv.slice(2)){
  const action=argv.shift(),o={};for(let i=0;i<argv.length;i+=2){if(!argv[i].startsWith('--')||argv[i+1]===undefined)throw Error('参数必须为 --name value');o[argv[i].slice(2)]=argv[i+1];}
- if(action==='seal-source')return {ok:true,manifest:await sealStoppedSource(o.source)};
+ if(action==='seal-source')return {ok:true,manifest:await sealStoppedSource(o.source,{workspaceIdentity:o['workspace-id']||o['workspace-name']||o.repository?{id:o['workspace-id'],name:o['workspace-name'],repository:o.repository}:undefined})};
  if(action==='backup'){
   const c=loadConfig(o.config);await nativeLifecycle('stop',o.config);
   return backupNative(c.native.dataRoot,o.output);

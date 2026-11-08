@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../../shared/stored-file.mjs';
 import path from 'node:path';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import ExcelJS from 'exceljs';
@@ -200,8 +201,7 @@ export function freightAttachment(s,attachmentId) {
   const a=s.get('SELECT * FROM freight_attachments WHERE id=?',attachmentId);if(!a)throw fail('附件不存在',404);
   const record=freightRecord(s,a.record_id);
   if(![...record.attachments,...record.attachment_history].some(x=>x.id===a.id))throw fail('快照中没有此附件',404);
-  const absolute=path.resolve(s.dir,a.original_path);
-  if(!absolute.startsWith(path.resolve(s.dir,'originals')+path.sep))throw fail('附件路径无效');
+  const {file:absolute}=resolveStoredFile(s.dir,a.original_path,{folders:['originals']});
   return {...a,absolute};
 }
 

@@ -1,3 +1,4 @@
+import {assertNativeUvcsPrepared,assertNativeUvcsRegistration} from './uvcs-registration.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
@@ -64,6 +65,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
  try{
   config=loadConfig(configFile);
   if(physicalPath(config.stateDir)!==ownershipStateDir)throw Error('原生配置状态/所有权锁绑定已改变，拒绝启动');
+  assertNativeUvcsPrepared(config);
   if(config.mode!=='production'||!config.native)throw Error('原生 supervisor 需要正式配置');
  }catch(error){lock.close();throw error;}
  const record={schemaVersion:1,pid:process.pid,generation:randomUUID(),token:randomUUID()+randomUUID(),configFile,startedAt:new Date().toISOString()};
@@ -104,6 +106,8 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
   atomicJson(recordFile,record);
   process.send?.({type:'native-starting',pid:process.pid,generation:record.generation});
   if(config.native.home){physicalPath(config.native.home);process.env.HOME=config.native.home;}
+  await assertNativeUvcsRegistration(config,{signal:cancellation.signal});
+  checkCancellation();
   await cleanEndpoint(endpoint);
   checkCancellation();
   runtime=await createRuntime(config,{watch:false,superviseMs:5000,signal:cancellation.signal});

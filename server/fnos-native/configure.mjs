@@ -1,9 +1,10 @@
+import {trustedIdentity,metadataFingerprint,assertNativeUvcsPrepared,markNativeUvcsPending,prepareNativeUvcs,nativeCm,resolveNativeCmPath} from './uvcs-registration.mjs';
+import {resolveStoredFile} from '../../shared/stored-file.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {spawnSync} from 'node:child_process';
 import {developmentConfig,validateConfig,moduleIds,databases} from '../config.mjs';
 import {createSourceServices} from '../services.mjs';
 import {DATA_VERSION_POLICY,embeddedBusinessFiles,quoteIdentifier as quote} from '../../shared/data-version-policy.mjs';
@@ -41,11 +42,13 @@ export async function backupNative(sourceRoot,target){
  sourceRoot=physicalPath(sourceRoot);target=physicalPath(target);
  if(within(target,sourceRoot)||within(sourceRoot,target))throw Error('备份不能位于源目录内部或覆盖源目录');
  if(fs.existsSync(target))throw Error('备份目标已存在');complete(sourceRoot);assertStopped(sourceRoot);
+ const sourceConfig=JSON.parse(fs.readFileSync(configFileAt(sourceRoot),'utf8'));
+ const workspaceIdentity=sourceConfig.dataVersion?.enabled?assertNativeUvcsPrepared(sourceConfig).identity:undefined;
  const before=tree(sourceRoot),stage=target+'.staging-'+randomUUID();
  try{
   fs.cpSync(sourceRoot,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});
   assertStopped(sourceRoot);if(JSON.stringify(before)!==JSON.stringify(tree(sourceRoot)))throw Error('停写备份过程中源目录变化');
-  integrity(stage);await sealStoppedSource(stage);fs.renameSync(stage,target);
+  integrity(stage);await sealStoppedSource(stage,{workspaceIdentity});fs.renameSync(stage,target);
   return {ok:true,target,files:before.length};
  }finally{if(fs.existsSync(stage))fs.rmSync(stage,{recursive:true,force:true});}
 }
@@ -90,14 +93,20 @@ function integrity(root){for(const entry of tree(root).filter(e=>e.path.endsWith
  const db=new DatabaseSync(path.join(root,entry.path),{readOnly:true});
  try{if(db.prepare('PRAGMA integrity_check').all().some(row=>Object.values(row)[0]!=='ok'))throw Error('账本完整性校验失败：'+entry.path);}finally{db.close();}
 }}
-export async function sealStoppedSource(sourceRoot){
+export async function sealStoppedSource(sourceRoot,{workspaceIdentity}={}){
  sourceRoot=physicalPath(sourceRoot);complete(sourceRoot);assertStopped(sourceRoot);
+ const sourceConfig=JSON.parse(fs.readFileSync(configFileAt(sourceRoot),'utf8')),rebased=rebaseConfig(sourceConfig,sourceRoot,sourceConfig.releaseRoot).config;
+ let uvcs;
+ if(sourceConfig.dataVersion?.enabled){
+  const identity=trustedIdentity(workspaceIdentity||assertNativeUvcsPrepared(sourceConfig)?.identity,sourceConfig.dataVersion.repository);
+  uvcs={identity,metadataSha256:metadataFingerprint(rebased.dataVersion.workspace)};
+ }
  const files=tree(sourceRoot),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'erp-seal-'));
  try{
   // SQLite WAL recovery/checking occurs exclusively on a disposable copy.
   fs.cpSync(sourceRoot,temporary,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});integrity(temporary);
   assertStopped(sourceRoot);if(JSON.stringify(files)!==JSON.stringify(tree(sourceRoot)))throw Error('源副本在校验时变化');
-  atomicJson(path.join(sourceRoot,'migration-manifest.json'),{schemaVersion:1,stopped:true,files});
+  atomicJson(path.join(sourceRoot,'migration-manifest.json'),{schemaVersion:1,stopped:true,files,...(uvcs?{uvcs}:{})});
  }finally{fs.rmSync(temporary,{recursive:true,force:true});}
  return path.join(sourceRoot,'migration-manifest.json');
 }
@@ -133,10 +142,7 @@ function validateReferences(root){
   const dir=path.join(root,'data',id),db=new DatabaseSync(path.join(dir,databases[id]),{readOnly:true});
   const check=(value,label,expected={})=>{
    if(value===null||value===undefined||value==='')return;
-   if(typeof value!=='string'||path.posix.isAbsolute(value)||path.win32.isAbsolute(value))throw Error(id+' '+label+' 原件引用使用不支持的绝对路径，必须先核对旧根映射');
-   if(value.split(/[\\/]/).some(part=>part==='..')||(path.sep==='/'&&value.includes('\\')))throw Error(id+' '+label+' 原件引用路径无效');
-   const file=physicalPath(path.resolve(dir,value));
-   if(!within(file,dir)||file===dir||!fs.existsSync(file)||!fs.statSync(file).isFile())throw Error(id+' '+label+' 原件引用缺失或不在数据目录内');
+   let file;try{file=resolveStoredFile(dir,value).file;}catch{throw Error(id+' '+label+' 原件引用路径无效或文件缺失');}
    if(expected.sha256&&digest(file)!==expected.sha256||expected.bytes!==undefined&&fs.statSync(file).size!==expected.bytes)throw Error(id+' '+label+' 原件引用校验失败');
   };
   try{
@@ -148,12 +154,12 @@ function validateReferences(root){
   }finally{db.close();}
  }
 }
-function checkUvcs(c){
+async function checkUvcs(c){
  if(!c.dataVersion?.enabled)return;
  if(!fs.existsSync(c.native.home))throw Error('原 UVCS HOME 缺失，不允许静默关闭托管');
  if(!fs.existsSync(path.join(c.dataVersion.dir,'queue.sqlite'))||!fs.existsSync(c.dataVersion.workspace)||!fs.statSync(c.dataVersion.workspace).isDirectory())throw Error('原 UVCS 队列或 workspace 缺失，不允许创建新队列');
- const result=spawnSync(c.dataVersion.cmPath,['version'],{env:{...process.env,HOME:c.native.home},encoding:'utf8',timeout:10000,windowsHide:true});
- if(result.error||result.status!==0)throw Error('原生 UVCS cm 无法运行，迁移已中止');
+ c.dataVersion.cmPath=resolveNativeCmPath(c.dataVersion.cmPath,{allowSymlink:true});
+ await nativeCm(c,{timeoutMs:10000}).version();
 }
 export async function configureNative(o={}){
  if(!['fresh','migrate','existing'].includes(o.mode))throw Error('必须显式指定 mode fresh、migrate 或 existing 模式');
@@ -186,8 +192,8 @@ export async function configureNative(o={}){
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
     if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
     if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
-    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
-    c=validateConfig(c);checkUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
+    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
+    c=validateConfig(c);await checkUvcs(c);await prepareNativeUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
    }finally{ownership.close();}
   });
  }
@@ -205,19 +211,23 @@ export async function configureNative(o={}){
    // No gateway: never create development actors, sessions or gateway identity.
    const services=await createSourceServices(dev);try{for(const id of moduleIds)await services.ensure(id);}finally{await services.stopOwned();}
   }else{
-   const source=physicalPath(o.sourceRoot);if(within(dataRoot,source)||within(source,dataRoot))throw Error('迁移目标不能覆盖源副本');verifySource(source);
+   const source=physicalPath(o.sourceRoot);if(within(dataRoot,source)||within(source,dataRoot))throw Error('迁移目标不能覆盖源副本');const manifest=verifySource(source);
    fs.cpSync(source,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});verifySource(source);
    const old=JSON.parse(fs.readFileSync(configFileAt(stage),'utf8')),rebased=rebaseConfig(old,dataRoot,releaseRoot);c=rebased.config;
+   if(c.dataVersion?.enabled){c.native.uvcsIdentity=trustedIdentity(manifest.uvcs?.identity,c.dataVersion.repository);c.native.uvcsSourceMetadataHash=manifest.uvcs?.metadataSha256;if(metadataFingerprint(path.join(stage,path.relative(dataRoot,c.dataVersion.workspace)))!==c.native.uvcsSourceMetadataHash)throw Error('UVCS_METADATA_CHANGED');markNativeUvcsPending(c,path.join(stage,'state'));}
    if(!c.fnos?.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
    c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
-   if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
+   if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
    validateReferences(stage);
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));
   }
   if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
   fs.mkdirSync(path.join(stage,'socket'),{recursive:true,mode:0o700});integrity(stage);
-  validateConfig(remap(c,[[dataRoot,stage]]));if(c.dataVersion?.enabled)checkUvcs(remap(c,[[dataRoot,stage]]));
-  atomicJson(path.join(stage,'config','web.json'),c);fs.renameSync(stage,dataRoot);return targetFile;
+  validateConfig(remap(c,[[dataRoot,stage]]));if(c.dataVersion?.enabled){c.dataVersion.cmPath=resolveNativeCmPath(c.dataVersion.cmPath,{allowSymlink:true});await checkUvcs(remap(c,[[dataRoot,stage]]));}
+  atomicJson(path.join(stage,'config','web.json'),c);fs.renameSync(stage,dataRoot);
+  // Registration must see the published physical path, never its staging name.
+  // Failure intentionally retains the complete ledger and pending marker.
+  await prepareNativeUvcs(c);return targetFile;
  }finally{if(fs.existsSync(stage))fs.rmSync(stage,{recursive:true,force:true});}
  });
 }
