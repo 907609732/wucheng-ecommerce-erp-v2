@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/diag_env"
+stop_diag

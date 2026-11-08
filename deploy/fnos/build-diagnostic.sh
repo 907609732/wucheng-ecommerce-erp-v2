@@ -48,4 +48,10 @@ cp -a "$work/diag-volume/@wuchengerpdiag-data/$run/evidence" "$out/diagnostic-ca
 if pgrep -u erpdiag >/dev/null; then ps -fu erpdiag; echo 'Diagnostic cancellation leaked processes.' >&2; exit 1; fi
 # No services are claimed running after this install-time one-shot completes.
 "$work/downloads/fnpack" build --directory "$diag"
-sha256sum "$out/wuchengerpdiag.fpk" >> "$out/SHA256SUMS.txt"
+[[ -s "$out/wuchengerpdiag.fpk" ]] || { echo 'Official diagnostic FPK was not produced.' >&2; exit 1; }
+mkdir -p "$work/unpacked-diag/app"
+tar -xf "$out/wuchengerpdiag.fpk" -C "$work/unpacked-diag"
+tar -xzf "$work/unpacked-diag/app.tgz" -C "$work/unpacked-diag/app"
+(cd "$diag"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/DIAGNOSTIC-PAYLOAD-SHA256SUMS.txt")
+(cd "$work/unpacked-diag"; sha256sum --check --strict "$out/DIAGNOSTIC-PAYLOAD-SHA256SUMS.txt" > "$out/diagnostic-packed-payload-checks.log")
+(cd "$out"; sha256sum wuchengerpdiag.fpk >> SHA256SUMS.txt)
