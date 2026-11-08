@@ -10,7 +10,7 @@ import {stagePdd,pddPreview,commitPdd,pddFundsReport,pddStatementYear,setAttribu
 import {pddCoverage} from '../lib/pdd-services.mjs';
 import {exportWorkbook,exportPddMovements} from '../lib/export.mjs';
 import {monthData,report} from '../lib/report.mjs';
-import {closePreview,lockMonth} from '../lib/close.mjs';
+import {closePreview,lockMonth as realLockMonth} from '../lib/close.mjs';
 import {createApp,createSessionFetch} from './helpers.mjs';
 import {makeBackup,restoreBackup} from '../lib/backup.mjs';
 
@@ -80,3 +80,5 @@ test('empty operations trend shortcut keeps totals and does not skip real sales 
  const s=setup(t);const ordinary=report(s,{period:'2025-09',shop:SHOP}),fast=report(s,{period:'2025-09',shop:SHOP,empty_trend:'skip'});assert.deepEqual(fast.totals,ordinary.totals);assert.deepEqual(fast.reconciliation,ordinary.reconciliation);assert.deepEqual(fast.trend,[]);
  s.run('INSERT INTO operations(id,shop_id,start,end,currency,sales,definition,compatible,source) VALUES(?,?,?,?,?,?,?,?,?)','ops-fast-test',SHOP,'2025-09-01','2025-09-30','CNY',2500,'支付日期',0,'test');const sales=report(s,{period:'2025-09',shop:SHOP,empty_trend:'skip'});assert.equal(sales.totals.sales,2500);assert.equal(sales.trend.length,12);
 });
+
+async function lockMonth(store,input,options){if(!store.monthAdmin.configured())await store.monthAdmin.setPassword({password:"test-month-password",confirmation:"test-month-password"});return realLockMonth(store,input,options);}

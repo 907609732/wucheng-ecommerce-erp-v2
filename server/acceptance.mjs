@@ -38,6 +38,8 @@ export async function acceptSource(root, { dataRoot, keepData = false } = {}) {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.cpSync(path.join(dataRoot, id), target, { recursive: true });
     }
+  if (dataRoot && fs.existsSync(path.join(dataRoot, 'month-admin')))
+    fs.cpSync(path.join(dataRoot, 'month-admin'), path.join(stateDir, 'month-admin'), {recursive:true});
   const start = performance.now(),
     runtime = await createWebRuntime(config, { watch: false });
   const result = {
@@ -132,6 +134,8 @@ export async function acceptSource(root, { dataRoot, keepData = false } = {}) {
     return result;
   } finally {
     await runtime.stop();
+    if (keepData && fs.existsSync(path.join(stateDir, 'month-admin')))
+      fs.cpSync(path.join(stateDir, 'month-admin'), path.join(stateDir, 'data', 'month-admin'), {recursive:true});
     if (!keepData) fs.rmSync(stateDir, { recursive: true, force: true });
   }
 }

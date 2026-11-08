@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const hash=value=>createHash('sha256').update(JSON.stringify(value,(key,item)=>/^(?:password|currentPassword|legacyPassword|confirmation)$/i.test(key)?'[redacted]':item)).digest('hex');
 const keyValid=key=>typeof key==='string'&&/^[A-Za-z0-9._:-]{8,160}$/.test(key);
 const formal=/^\/api\/(?:orders(?:\/|$)|month-confirmations(?:\/|$)|tasks$|task-board\/action$|supplier-management(?:\/|$)|addresses(?:\/|$)|import\/[^/]+\/commit$)/;
 export function createManualReceipts(store){

@@ -11,10 +11,13 @@ npm.cmd test
 
 开发入口：http://127.0.0.1:28430/ 。默认使用 `.codex-artifacts/web-dev/data` 隔离账本，不自动连接正式数据。前端修改后刷新，模块后端修改后在空闲时自动重启。正式服务使用独立验收版本、显式数据配置和 Tailscale HTTPS。
 
+日常修改先直接运行源码开发版，用户确认后再准备程序包或正式候选版本，不因每次页面修改自动打包、编译或切换正式入口。已有正式服务占用默认端口时，使用 `npm.cmd run web:dev -- --config <开发配置路径>` 指定另一组端口及工作区外的隔离数据目录；该配置必须为 `development`，开发命令拒绝正式数据配置。
+
 - [开发说明](docs/development.md)
 - [架构](docs/architecture.md)
 - [运行、备份、更新与回退](docs/browser-service.md)
 - [验收规则](docs/verification.md)
+- [正式数据版本托管](docs/data-version-operations.md)
 - [本次迁移状态](docs/browser-only-migration.md)
 
 模块源码位于 `apps/purchase`、`apps/sales`、`apps/overview`；宿主与网关位于 `server/`；共享协议和加载资源位于 `shared/`。正式账本、登录授权、附件和备份不提交源码管理。旧版本源码从 Git 历史追溯。

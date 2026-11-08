@@ -52,6 +52,7 @@ function validateFiles(files=[]) {
 
 function attachments(s,recordId){return s.all('SELECT * FROM freight_attachments WHERE record_id=? ORDER BY created_at,id',recordId);}
 function decorate(s,row,files=[],locked=false) {
+  locked=locked||!!s.get("SELECT 1 FROM reconciliation_locks WHERE kind='freight' AND month=? AND channel=? AND shop_id IS ?",row.month,row.channel,row.shop_id);
   return {...row,shop:row.shop_id?s.shops().find(x=>x.id===row.shop_id)?.name||row.shop_id:'多店共用',platform:row.shop_id?s.shops().find(x=>x.id===row.shop_id)?.platform||'':'共用',channel_label:FREIGHT_CHANNELS[row.channel],mode_label:FREIGHT_MODES[row.entry_mode],locked,attachments:files.filter(a=>a.record_id===row.id&&!a.removed_at).map(publicAttachment),attachment_history:files.filter(a=>a.record_id===row.id&&a.removed_at).map(publicAttachment)};
 }
 const publicAttachment=({original_path,...a})=>({...a,url:'/api/freight/attachments/'+encodeURIComponent(a.id)});

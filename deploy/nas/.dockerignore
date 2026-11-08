@@ -1,0 +1,8 @@
+**/node_modules
+**/.git
+**/.codex-artifacts
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+**/.env
+**/*.key

@@ -19,6 +19,18 @@ export function safeName(name){return path.win32.basename(String(name)).replace(
 export function resolveArchive(dir,rel){if(!DOWNLOAD_PATH.test(rel))throw fail('下载原件路径无效');const root=path.resolve(dir),target=path.resolve(root,rel);if(!target.startsWith(root+path.sep))throw fail('下载原件越界');return target;}
 const cell=v=>v?.text??v?.result??(v?.richText?v.richText.map(t=>t.text).join(''):v??'');
 const norm=v=>String(cell(v)).replace(/[\s（）()]/g,'');
+// 菜鸟"下载"按钮给出的是 pre-signed OSS 地址，浏览器弹窗会直接变成下载而不抛
+// Playwright 事件；服务端按同一地址取回原件，只允许平台自己的文件域名。
+const SIGNED_HOSTS=/(^|\.)(aliyuncs\.com|cainiao\.com|alicdn\.com|taobao\.com)$/;
+export async function saveSignedDownload(url,target){
+ let parsed;try{parsed=new URL(String(url));}catch{throw fail('平台返回的下载地址无效');}
+ if(parsed.protocol!=='https:'||!SIGNED_HOSTS.test(parsed.hostname))throw fail('平台返回了非预期的下载地址，已停止下载');
+ const response=await fetch(parsed,{signal:AbortSignal.timeout(180000)});
+ if(!response.ok)throw fail('下载文件失败：平台文件服务返回 '+response.status);
+ const declared=Number(response.headers.get('content-length')||0);if(declared>MAX_BYTES)throw fail('下载文件超过 300 MB');
+ const buffer=Buffer.from(await response.arrayBuffer());if(!buffer.length||buffer.length>MAX_BYTES)throw fail('下载文件为空或超过 300 MB');
+ fs.writeFileSync(target+'.part',buffer,{flag:'w'});fs.renameSync(target+'.part',target);return buffer.length;
+}
 export async function checkedZip(buffer){
  // Inspect advertised expansion sizes before asking JSZip to inflate any member.
  const zip=await JSZip.loadAsync(buffer),entries=Object.values(zip.files).filter(f=>!f.dir);let bytes=0;

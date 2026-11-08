@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createWorkbenchGateway} from '../server/gateway/gateway.mjs';
+import {developmentConfig, validateConfig} from '../server/config.mjs';
+
+test('data-version routes require a session, guard retries with CSRF, and do not expose local paths', async t => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'erp-version-routes-'));
+  let retryCount=0;
+  const event={id:'version-1',module:'purchase',summary:'采购：新增1条',status:'pending',snapshot:{path:'C:/private/snapshot.json'},eventDir:'C:/private',actor:{label:'成员'},counts:{insert:1,update:0,delete:0}};
+  const worker={list:()=>({items:[event],total:1}),detail:id=>id==='version-1'?event:null,summary:()=>({enabled:true,pending:1,failed:0,submitted:0}),retry:()=>{retryCount++;return {ok:true};}};
+  const {registerDataVersionRoutes}=await import('../server/data-version/routes.mjs');
+  const gateway=await createWorkbenchGateway({services:{config:()=>({}),capabilities:async()=>null},storeDir:dir,publicOrigin:'http://127.0.0.1:28430',localDevelopment:true,registerRoutes:(app,context)=>registerDataVersionRoutes(app,context,worker)});
+  t.after(async()=>{await gateway.stop();fs.rmSync(dir,{recursive:true,force:true});});
+  const base='/api/workbench/v1/data-versions',host={host:'127.0.0.1:28430'};
+  assert.equal((await gateway.app.inject({url:base,headers:host})).statusCode,401);
+  const session=await gateway.app.inject({url:'/api/workbench/v1/session',headers:host});
+  const headers={...host,cookie:session.headers['set-cookie'].split(';')[0]};
+  const list=await gateway.app.inject({url:base,headers});
+  assert.equal(list.statusCode,200,list.body);
+  assert.equal(list.json().total,1);
+  assert(!list.body.includes('private'));
+  assert.equal(list.headers['cache-control'],'no-store');
+  assert.equal((await gateway.app.inject({url:base+'/missing',headers})).statusCode,404);
+  assert.equal((await gateway.app.inject({url:base+'/version-1/retry',method:'POST',headers})).statusCode,403);
+  assert.equal(retryCount,0);
+  const retried=await gateway.app.inject({url:base+'/version-1/retry',method:'POST',headers:{...headers,origin:'http://127.0.0.1:28430','x-workbench-csrf':session.json().csrfToken}});
+  assert.equal(retried.statusCode,200,retried.body);
+  assert.equal(retryCount,1);
+  assert.equal((await gateway.app.inject({url:base+'?limit=999999',headers})).statusCode,400);
+  assert.equal((await gateway.app.inject({url:base+'?module=warehouse',headers})).statusCode,400);
+  assert.equal((await gateway.app.inject({url:base+'?from=2026-11-03T16%3A00%3A00.000Z&to=2026-11-04T15%3A59%3A59.999Z',headers})).statusCode,200);
+  assert.equal((await gateway.app.inject({url:base+'?from=2026-99-99',headers})).statusCode,400);
+  assert.equal((await gateway.app.inject({url:base+'/summary',headers})).json().pending,1);
+});
+
+test('data-version config is opt-in and isolates development paths',()=>{
+  const dir=path.join(os.tmpdir(),'erp-version-config');
+  const config=developmentConfig({stateDir:dir});
+  assert.equal(config.dataVersion,undefined);
+  const value={enabled:true,dir:path.join(dir,'versions'),workspace:path.join(dir,'versions','workspace'),repository:'synthetic@localhost:8087',cmPath:path.resolve('cm.exe'),uploadMode:'user-agent'};
+  assert.equal(validateConfig({...config,dataVersion:value}).dataVersion.uploadMode,'user-agent');
+  assert.throws(()=>validateConfig({...config,dataVersion:{...value,dir:config.modules.purchase.dataDir}}),/版本|隔离|数据/);
+  assert.throws(()=>validateConfig({...config,dataVersion:{...value,dir:path.resolve('E:/WuchengERP/formal-data-versions')}}),/隔离/);
+  assert.throws(()=>validateConfig({...config,dataVersion:{...value,workspace:path.resolve('E:/WuchengERP/formal-workspace')}}),/隔离|工作区/);
+  assert.throws(()=>validateConfig({...config,dataVersion:{...value,uploadMode:'unexpected'}}),/版本/);
+  assert.throws(()=>validateConfig({...config,dataVersion:{...value,localHistoryCount:0}}),/版本/);
+});

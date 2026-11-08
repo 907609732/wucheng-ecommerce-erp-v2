@@ -61,7 +61,8 @@ export function createSalesAgentActions({store:s,personnel,cainiao,domainPeople=
   if(name==='freight-create'||name==='freight-update')return saveFreight(t,{...i,request_id:'agent-'+hash(c.idempotencyKey||id()).slice(0,64)},(i.files||[]).map(f=>file(f)),name==='freight-update'?i.id:null);
   if(name==='freight-void')return voidFreight(t,i.id,{...i,request_id:'agent-'+hash(c.idempotencyKey||id()).slice(0,64)});
   if(name==='month-lock')return lockMonth(t,{month:i.month,revision:i.revision,confirmation:'锁定 '+i.month},{skipBackup:true});
-  if(name==='month-unlock')return unlockMonth(t,{month:i.month,reason:i.reason,confirmation:'解锁 '+i.month},{skipBackup:true});
+  // Passwords must never enter persisted agent preparation / review payloads.
+  if(name==='month-unlock')throw fail('历史月份解锁须在页面输入统一管理密码和原因',403,'MONTH_UNLOCK_UI_REQUIRED');
   if(name==='rates-refresh'){const data=monthData(t,month(i.month)),dates=[...data.operations.filter(x=>x.currency!=='CNY').map(x=>x.end),...data.ledger.filter(x=>x.date.startsWith(i.month)&&x.currency!=='CNY').map(x=>x.date)];return fetchRates(t,dates);}
   if(name==='staff-handoff'){const person=(t===s?domainPeople:createSalesDomainPeople(t)).requireMapping(c.actor),result=p.handoff(q,i);t.audit('staff.handoff.identity',i.month,{globalActorId:c.actor.id,domainPersonId:person.domain_person_id,displayName:person.name});return {...result,globalActorId:c.actor.id,domainPersonId:person.domain_person_id};}
   if(name==='backup')return c.backup||{preview:'创建一致性备份'};
@@ -70,7 +71,7 @@ export function createSalesAgentActions({store:s,personnel,cainiao,domainPeople=
  }
  async function preview(name,input,c){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-preview-'));let clone;
-  try{await backup(s.db,path.join(dir,'sales.sqlite'));for(const name of ['originals','reports','backups'])if(fs.existsSync(path.join(s.dir,name)))fs.cpSync(path.join(s.dir,name),path.join(dir,name),{recursive:true});clone=openStore(dir);const result=await perform(clone,name,input,{...c,idempotencyKey:'preview-'+id()});const rates=name==='rates-refresh'?clone.all('SELECT * FROM rates ORDER BY date,currency'):null;return {result,rates};}
+  try{await backup(s.db,path.join(dir,'sales.sqlite'));for(const name of ['originals','reports','backups'])if(fs.existsSync(path.join(s.dir,name)))fs.cpSync(path.join(s.dir,name),path.join(dir,name),{recursive:true});clone=openStore(dir);clone.monthAdmin=s.monthAdmin;const result=await perform(clone,name,input,{...c,idempotencyKey:'preview-'+id()});const rates=name==='rates-refresh'?clone.all('SELECT * FROM rates ORDER BY date,currency'):null;return {result,rates};}
   finally{clone?.close();if(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep+'sales-agent-preview-'))fs.rmSync(dir,{recursive:true,force:true});}
  }
  return {

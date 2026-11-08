@@ -16,7 +16,7 @@ test('delegated gateway identity remains signed, scoped and bound to UI confirma
  const capabilities=await(await fetch(base+'/api/integration/v1/capabilities',{headers:{Authorization:'Bearer '+bearer}})).json();assert.match(capabilities.dataSetId,/^[a-f0-9-]{36}$/);assert.match(capabilities.revision,/^\d+$/);assert.equal((await request('/api/integration/v1/capabilities')).status,403);
  const bootstrap=await(await request('/api/bootstrap')).json();assert.equal(bootstrap.token,undefined);assert.ok((await(await fetch(base+'/api/bootstrap')).json()).token);
  const html=await(await request('/')).text();assert.match(html,/\/apps\/purchase\/workbench-base.js/);assert.match(html,/\/apps\/purchase\/app.js/);
- const manifest=await(await request('/api/integration/v1/workbench/operations')).json();assert.ok(manifest.operations.some(x=>x.path==='/api/admin/password'&&!x.remote));assert.ok(manifest.operations.some(x=>x.path==='/api/orders'&&x.remote&&x.method==='POST'));
+ const manifest=await(await request('/api/integration/v1/workbench/operations')).json();assert.ok(manifest.operations.some(x=>x.path==='/api/month-admin/password'&&x.remote&&x.uiOnly));assert.ok(manifest.operations.some(x=>x.path==='/api/orders'&&x.remote&&x.method==='POST'));
  assert.equal((await request('/api/backup','POST',{})).status,403);
  const data={platform:'手工',account:'test',orderNo:'123456789012345678901',date:'2026-10-01',supplier:'test',status:'已完成',amountCents:100,refundCents:0,items:[{title:'test',qty:1,unitPriceCents:100}]};
  assert.equal((await request('/api/orders','POST',{...data,orderNo:'viewer-member-order'},{role:'viewer'})).status,200);
@@ -67,11 +67,13 @@ test('managed local business pages use verified Windows UI identity, reviewed mo
  const preview=(await call('/api/month-confirmations/preview?month=2020-01&platform='+encodeURIComponent('微信'))).body,scope={month:'2020-01',platform:'微信',revision:preview.revision};
  assert.equal((await call('/api/month-confirmations',{body:scope})).status,400);
  assert.equal((await call('/api/month-confirmations',{body:{...scope,ack:true},patch:{channel:'mcp',localDesktop:false}})).status,403);
- const confirmed=await call('/api/month-confirmations',{body:{...scope,ack:true}});assert.equal(confirmed.status,200);assert.equal(store.monthLocks.configured(),false);
+ assert.equal((await call('/api/month-confirmations',{body:{...scope,ack:true}})).body.code,'ADMIN_NOT_CONFIGURED');
+ assert.equal((await call('/api/month-admin/password',{body:{password:'unified-password',confirmation:'unified-password'}})).status,200);
+ const confirmed=await call('/api/month-confirmations',{body:{...scope,ack:true}});assert.equal(confirmed.status,200);assert.equal(store.monthLocks.configured(),true);
  assert.throws(()=>store.insert({...order,orderNo:'locked'}),e=>e.code==='MONTH_LOCKED');
  const cancel={month:'2020-01',platform:'微信',version:confirmed.body.version,ack:true};
  assert.equal((await call('/api/month-confirmations/cancel',{body:cancel})).status,400);
- assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,version:'stale',reason:'补录依据'}})).status,409);
- assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,reason:'补录依据'}})).status,200);
+ assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,version:'stale',reason:'补录依据',password:'unified-password'}})).status,409);
+ assert.equal((await call('/api/month-confirmations/cancel',{body:{...cancel,reason:'补录依据',password:'unified-password'}})).status,200);
  const history=store.monthLocks.history('2020-01','微信');assert.equal(history.at(-1).details.actorId,actorId);assert.equal(history.at(-1).details.authorization,'workbench-ui-review');assert.equal(store.monthLocks.confirmations().length,0);
 });

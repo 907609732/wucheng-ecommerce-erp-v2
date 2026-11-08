@@ -26,10 +26,18 @@ test("backup restores all three databases and attachments without changing sourc
       modules[id] = { dataDir };
     }
     const output = path.join(dir, "backup");
-    await snapshotData({ modules }, output);
+    const stateDir = path.join(dir, "state");
+    fs.mkdirSync(path.join(stateDir, "month-admin"), { recursive: true });
+    const credential = new DatabaseSync(path.join(stateDir, "month-admin", "month-admin.sqlite"));
+    credential.exec("PRAGMA journal_mode=WAL; CREATE TABLE credentials(value TEXT); INSERT INTO credentials VALUES('hashed-password-record')");
+    await snapshotData({ modules, stateDir }, output);
+    credential.close();
     assert.equal(verifySnapshot(output).ok, true);
     const restored = path.join(dir, "restored");
     restoreSnapshot(output, restored);
+    const restoredCredential = new DatabaseSync(path.join(restored, "month-admin", "month-admin.sqlite"), { readOnly: true });
+    assert.equal(restoredCredential.prepare("SELECT value FROM credentials").get().value, "hashed-password-record");
+    restoredCredential.close();
     assert.equal(
       fs.readFileSync(
         path.join(restored, "sales", "originals", "bill.txt"),

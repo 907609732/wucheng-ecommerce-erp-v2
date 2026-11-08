@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import {id,now,hash,fail,date,beijing} from './util.mjs';
 import {CainiaoBrowser,humanError} from './agent-cainiao-browser.mjs';
-import {REPORTS,monthRange,monthDates,chinaMonth,archiveFile,inspectBill,reconcile,resolveArchive} from './agent-cainiao-files.mjs';
+import {REPORTS,monthRange,monthDates,chinaMonth,archiveFile,inspectBill,reconcile,resolveArchive,saveSignedDownload} from './agent-cainiao-files.mjs';
 export function initCainiao(s){s.db.exec(`
  CREATE TABLE IF NOT EXISTS sales_cainiao_jobs(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS sales_cainiao_files(id TEXT PRIMARY KEY,job_id TEXT NOT NULL,account_key TEXT NOT NULL,period TEXT NOT NULL,report TEXT NOT NULL,path TEXT NOT NULL UNIQUE,filename TEXT NOT NULL,sha256 TEXT NOT NULL,bytes INTEGER NOT NULL,payload TEXT NOT NULL);
@@ -85,7 +85,10 @@ export class SalesCainiaoDownloads{
      if(!item.remoteTask){job.status='paused';job.message=item.error;this.save(job);return;}
      if(item.remoteTask.status!=='已完成'){this.save(job);continue;}
      this.check(job);item.status='downloading';item.target=path.join(this.browser.dir,id()+'.part');this.save(job);
-     const file=await this.browser.run('download',{account:job.account,task:item.remoteTask,target:item.target});item.filename=file.filename;item.downloadReady=true;this.save(job);
+     const file=await this.browser.run('download',{account:job.account,task:item.remoteTask,target:item.target});item.filename=file.filename;
+     // 浏览器只负责拿到签名地址；原件由服务端直接取回，避免依赖 download 事件。
+     if(file.url)await saveSignedDownload(file.url,item.target);
+     item.downloadReady=true;this.save(job);
     }
     // Keep successful downloads even when cancellation arrived while the browser was saving.
     let inspection,verification;try{inspection=await inspectBill(fs.readFileSync(item.target),item.filename);verification=reconcile(item.type,inspection,item.expected);}catch(error){inspection={readable:false,tables:[],error:String(error.message)};verification={verified:false,reason:String(error.message)};}

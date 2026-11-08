@@ -1,0 +1,17 @@
+FROM public.ecr.aws/docker/library/node:24-bookworm-slim
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates wget gnupg; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    wget -qO - https://uvcs.unity3d.com/linux/keys/public | gpg --dearmor -o /etc/apt/keyrings/uvcs.gpg; \
+    echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/uvcs.gpg] https://uvcs.unity3d.com/linux/repos/deb stable main' > /etc/apt/sources.list.d/uvcs.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends plasticscm-client-core; \
+    command -v cm; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv/erp
+COPY . .
+ENV NODE_ENV=production
+CMD ["node", "server/cli.mjs", "start", "--config", "/var/lib/wucheng-erp/config.json"]

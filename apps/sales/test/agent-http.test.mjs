@@ -5,6 +5,7 @@ import{createSalesAgentAdapter,salesAgentCapabilities}from'../lib/agent-adapter.
 async function listenForFetch(app){for(let attempt=0;attempt<10;attempt++){const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));try{await fetch('http://127.0.0.1:'+server.address().port+'/');return server;}catch(error){await new Promise(r=>server.close(r));if(error.cause?.message!=='bad port')throw error;}}throw Error('No Fetch-compatible test port');}
 async function setup(t){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-agent-http-'));let app=createApp({dataDir:dir,port:0,demo:true}),server=await listenForFetch(app.app);
+ await app.store.monthAdmin.setPassword({password:'test-month-password',confirmation:'test-month-password'});
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim();
  const call=async(route,{method='GET',body,actor='boss',role='admin',headers={}}={})=>{const url='/api/integration/v1/agent/'+route,at=Date.now();return fetch('http://127.0.0.1:'+server.address().port+url,{method,headers:{...signWorkbenchActor({v:1,id:actor,login:actor,role,channel:'mcp',modules:['sales'],module:'sales',canRunTasks:true,sessionId:'test-session',requestId:randomUUID(),issuedAt:at,expiresAt:at+60000,method,path:url},key),'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});};
  const prepare=async(capabilityId,input,options={})=>{const binding=await(await call('binding',options)).json(),response=await call('prepare',{...options,method:'POST',body:{taskId:'task-sales',capabilityId,input}});assert.equal(response.status,200,await response.clone().text());return {binding,capabilityId,input,...await response.json()};};
@@ -69,7 +70,7 @@ test('reviewed shop and ledger lifecycle, coverage, month unlock and restore cop
  const input={shop_id:'offline',date:'2026-04-01',kind:'sale',amount:'100',currency:'CNY',external_id:'LIFECYCLE',source:'合成业务'};
  const record=await book('ledger-create',input);await book('ledger-update',{id:record.id,date:input.date,currency:'CNY',amount:'120',reason:'修正合成金额'});await book('ledger-delete',{id:record.id,reason:'删除合成测试'});
  await book('coverage',{shop_id:'offline',month:'2026-04',dataset:'operations',status:'full',evidence:'合成完整月核对'});
- const q=await f.call('query?'+new URLSearchParams({capabilityId:'sales.close-preview',input:JSON.stringify({month:'2026-04'})}));const close=await q.json();await book('month-lock',{month:'2026-04',revision:close.revision});await book('month-unlock',{month:'2026-04',reason:'合成测试恢复可编辑'});
+ const q=await f.call('query?'+new URLSearchParams({capabilityId:'sales.close-preview',input:JSON.stringify({month:'2026-04'})}));const close=await q.json();await book('month-lock',{month:'2026-04',revision:close.revision});const denied=await f.call('prepare',{method:'POST',body:{taskId:'task-sales',capabilityId:'sales.month-unlock',input:{month:'2026-04',reason:'合成测试恢复可编辑'}}});assert.equal(denied.status,403);assert.equal((await denied.json()).code,'MONTH_UNLOCK_UI_REQUIRED');
  const backup=await f.prepare('sales.backup',{}),name=backup.blocks[1].rows[0].name;await book('restore-copy',{name});assert.ok(fs.existsSync(path.join(f.dir,'recovered',name,'sales.sqlite')));
 });
 

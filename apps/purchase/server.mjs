@@ -26,6 +26,7 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {} from 'node:child_process';
 import archiver from 'archiver';
+import {DatabaseSync,backup as backupSqlite} from 'node:sqlite';
 import {readTable,normalizeTable,validateOrder,fields} from './lib/importer.mjs';
 import {openStore,summarize} from './lib/store.mjs';
 
@@ -116,7 +117,7 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  app.post('/api/task-board/action',(req,res)=>res.json(taskBoard.act(req,req.body)));
  // Task submission and monthly financial confirmation are separate responsibilities.
  app.use((req,res,next)=>{
-  if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/tasks(?:\/|$)/.test(req.path)||/^\/api\/month-confirmations(?:\/|$)/.test(req.path)||req.path==='/api/admin/password')){
+  if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/tasks(?:\/|$)/.test(req.path)||/^\/api\/month-confirmations(?:\/|$)/.test(req.path)||req.path==='/api/month-admin/password')){
    const identity=personnel.current(req);
    if(identity.readOnly||identity.role==='employee'||!identity.selected&&String(req.headers.cookie||'').split(';').some(part=>part.trim().startsWith('purchase_personnel=')))return res.status(403).json({error:'请由老板验收或处理月度确认；员工请在自己的任务中提交资料',code:'PURCHASE_BOSS_REQUIRED'});
   }
@@ -129,9 +130,10 @@ export function createApp({dataDir=process.env.PURCHASE_DATA_DIR||path.join(root
  app.get('/api/month-confirmations/history',(req,res)=>res.json(store.monthLocks.history(req.query.month,req.query.platform)));
  app.post('/api/month-confirmations',(req,res)=>res.json(agentManaged?store.monthLocks.confirmWithReview(req.body,uiReview(req)):store.monthLocks.confirm(req.body)));
  app.post('/api/month-confirmations/confirm-batch',(req,res)=>res.json(agentManaged?store.monthLocks.confirmBatchWithReview(req.body.confirmations,uiReview(req)):store.monthLocks.confirmBatch(req.body)));
- app.post('/api/month-confirmations/cancel',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelWithReview(req.body,uiReview(req)):await store.monthLocks.cancel(req.body)));
- app.post('/api/month-confirmations/cancel-batch',async(req,res)=>res.json(agentManaged?store.monthLocks.cancelBatchWithReview(req.body.confirmations,uiReview(req)):await store.monthLocks.cancelBatch(req.body)));
- app.post('/api/admin/password',async(req,res)=>{if(agentManaged)return res.status(410).json({error:'工作台月结使用真实登录和复核，不再设置独立管理员密码',code:'FEATURE_REMOVED'});res.json(await store.monthLocks.setPassword(req.body));});
+ app.post('/api/month-confirmations/cancel',async(req,res)=>res.json(agentManaged?await store.monthLocks.cancelWithReview(req.body,uiReview(req)):await store.monthLocks.cancel(req.body)));
+ app.post('/api/month-confirmations/cancel-batch',async(req,res)=>res.json(agentManaged?await store.monthLocks.cancelBatchWithReview(req.body.confirmations,uiReview(req),{password:req.body.password,reason:req.body.reason}):await store.monthLocks.cancelBatch(req.body)));
+ app.get('/api/month-admin/status',(req,res)=>res.json(store.monthLocks.adminStatus()));
+ app.post('/api/month-admin/password',async(req,res)=>res.json(await store.monthLocks.setPassword(req.body)));
  app.get('/api/dashboard',(req,res)=>res.json(summarize(store.list(),req.query.year||new Date().getFullYear(),req.query.basis||'paid',req.query.platform||'全部',req.query.category||'',req.query.month||'')));
  app.post('/api/import/preview',upload.single('file'),async(req,res)=>{
   if(!req.file)throw Error('请选择表格');if(previews.size>=15)previews.delete(previews.keys().next().value);
@@ -252,7 +254,12 @@ app.delete('/api/addresses/:id',(req,res)=>res.json(addresses.remove(req.params.
  app.get('/api/template',(req,res)=>{res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent('采购导入模板.csv'));res.type('text/csv').send(csv([['采购平台','采购账号','订单编号','下单日期','付款日期','供应商','商品名称','规格型号','数量','单位','单价','实付金额','已退款金额','运费','订单状态','收货人姓名','收货地址','联系手机','物流公司','运单号','备注']]));});
  app.post('/api/backup',async(req,res)=>{
   const stamp=new Date().toISOString().replace(/[:.]/g,'-'),filename=`purchase-backup-${stamp}.zip`,dbPath=path.join(dataDir,'backups',stamp+'.sqlite'),zipPath=path.join(dataDir,'backups',filename);await store.backup(dbPath);
-  await new Promise((resolve,reject)=>{const out=fs.createWriteStream(zipPath),archive=archiver('zip',{zlib:{level:6}});out.on('close',resolve);out.on('error',reject);archive.on('error',reject);archive.pipe(out);archive.file(dbPath,{name:'purchases.sqlite'});archive.directory(path.join(dataDir,'originals'),'originals');archive.directory(path.join(dataDir,'attachments'),'attachments');for(const name of fs.readdirSync(path.join(dataDir,'images')).filter(n=>/^[a-f0-9]{64}(?:\.thumb)?\.(jpg|png|webp|gif|avif)$/.test(n)))archive.file(path.join(dataDir,'images',name),{name:'images/'+name});archive.append(JSON.stringify({version:1,createdAt:new Date().toISOString(),orders:store.list().length},null,2),{name:'manifest.json'});archive.finalize();});fs.unlinkSync(dbPath);res.json({filename,url:'/api/backup/'+filename});
+  const adminPath=path.join(process.env.LINGTU_MONTH_ADMIN_DIR||dataDir,'month-admin.sqlite'),adminSnapshot=path.join(dataDir,'backups',stamp+'-month-admin.sqlite');
+  try{
+   if(fs.existsSync(adminPath)){const adminDb=new DatabaseSync(adminPath,{readOnly:true});try{await backupSqlite(adminDb,adminSnapshot);}finally{adminDb.close();}}
+
+  await new Promise((resolve,reject)=>{const out=fs.createWriteStream(zipPath),archive=archiver('zip',{zlib:{level:6}});out.on('close',resolve);out.on('error',reject);archive.on('error',reject);archive.pipe(out);archive.file(dbPath,{name:'purchases.sqlite'});if(fs.existsSync(adminSnapshot))archive.file(adminSnapshot,{name:'month-admin.sqlite'});archive.directory(path.join(dataDir,'originals'),'originals');archive.directory(path.join(dataDir,'attachments'),'attachments');for(const name of fs.readdirSync(path.join(dataDir,'images')).filter(n=>/^[a-f0-9]{64}(?:\.thumb)?\.(jpg|png|webp|gif|avif)$/.test(n)))archive.file(path.join(dataDir,'images',name),{name:'images/'+name});archive.append(JSON.stringify({version:1,createdAt:new Date().toISOString(),orders:store.list().length},null,2),{name:'manifest.json'});archive.finalize();});res.json({filename,url:'/api/backup/'+filename});
+  }finally{for(const temporary of [dbPath,adminSnapshot])fs.rmSync(temporary,{force:true});}
  });
  app.get('/api/backup/:file',(req,res)=>{if(!/^purchase-backup-[\dTZ-]+\.zip$/.test(req.params.file))throw Error('无效备份文件');res.download(path.join(dataDir,'backups',req.params.file));});
  app.get('/vendor/address-parse.js',(req,res)=>res.sendFile('bundle.js',{root:path.join(root,'node_modules/address-parse/dist')}));

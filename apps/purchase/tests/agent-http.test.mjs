@@ -33,8 +33,8 @@ test('real HTTP business mutation requires signed actor and central proof, recor
  await store.monthLocks.setPassword({password:'synthetic-password',confirmation:'synthetic-password'});
  const preview=store.monthLocks.preview('2020-01','淘宝');await reviewed('month.confirm',{month:'2020-01',platform:'淘宝',revision:preview.revision});
  const locked=await request('/prepare',{capabilityId:'order.update',input:{...sourceOrder,id:updated.id,updatedAt:store.get(updated.id).updatedAt},taskId:'task'});assert.equal(locked.status,423);
- const confirmation=store.monthLocks.confirmations()[0];await reviewed('month.cancel',{month:'2020-01',platform:'淘宝',version:confirmation.version});assert.equal(store.monthLocks.confirmations().length,0);
- assert.ok(store.monthLocks.history('2020-01','淘宝').some(e=>e.action==='cancel'&&e.details.authorization==='agent-central-review'));
+ const confirmation=store.monthLocks.confirmations()[0];const deniedUnlock=await request('/prepare',{capabilityId:'month.cancel',input:{month:'2020-01',platform:'淘宝',version:confirmation.version},taskId:'task'});assert.equal(deniedUnlock.status,403);assert.equal(store.monthLocks.confirmations().length,1);
+ await store.monthLocks.cancel({...confirmation,password:'synthetic-password',reason:'真实界面补录更正'});assert.equal(store.monthLocks.confirmations().length,0);
  assert.ok(store.history(created.id).length>=3);
  const automatic=async(capabilityId,input)=>{const r=await request('/prepare',{capabilityId,input,taskId:'task',idempotencyKey:randomUUID()});assert.equal(r.status,200,await r.clone().text());const result=await r.json();assert.equal(result.requiresReview,false);assert.equal(result.commitData,undefined);return result.data;};
  const raw=Buffer.from('订单编号,下单日期,供应商,商品名称,实付金额\nAGENTHTTP001,2020-02-05,测试供应商,螺丝,234.56\n');

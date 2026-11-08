@@ -83,3 +83,6 @@
  .reconciliation-year>summary{padding:18px}.reconciliation-year>summary small{display:none}
  .page-actions{flex-wrap:wrap}
 }
+
+.freight-dashboard [hidden]{display:none!important}
+.shop-picker-card > .button{width:auto}

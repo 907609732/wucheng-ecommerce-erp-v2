@@ -132,7 +132,7 @@
       "method": "POST",
       "path": "/api/cainiao/connection",
       "kind": "write",
-      "remote": false,
+      "remote": true,
       "uiOnly": true,
       "operationId": "overview:POST:/api/cainiao/connection"
     },
@@ -702,6 +702,24 @@
       "remote": true,
       "uiOnly": false,
       "operationId": "overview:GET:/workbench-base.js"
+    },
+    {
+      "module": "overview",
+      "method": "POST",
+      "path": "/api/payroll/sheet",
+      "kind": "write",
+      "remote": true,
+      "uiOnly": true,
+      "operationId": "overview:POST:/api/payroll/sheet"
+    },
+    {
+      "module": "overview",
+      "method": "GET",
+      "path": "/api/payments/:id/evidence/:evidenceId",
+      "kind": "download",
+      "remote": true,
+      "uiOnly": false,
+      "operationId": "overview:GET:/api/payments/:id/evidence/:evidenceId"
     }
   ]
 }

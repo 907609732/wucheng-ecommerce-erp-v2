@@ -7,22 +7,42 @@ import { validateConfig, moduleIds } from "./config.mjs";
 import { createSourceServices } from "./services.mjs";
 import { controlEndpoint } from "./control.mjs";
 import { verifyServices } from "./readiness.mjs";
+import { createDataVersionWorker } from "./data-version/worker.mjs";
+import { registerDataVersionRoutes } from "./data-version/routes.mjs";
+import { createLogger } from "./log.mjs";
 const publicDir = path.join(import.meta.dirname, "public");
 const assetVersion = () =>
   createHash("sha256")
     .update(fs.readFileSync(path.join(publicDir, "shell.js")))
     .update(fs.readFileSync(path.join(publicDir, "shell.css")))
     .update(fs.readFileSync(path.join(publicDir, "tokens.css")))
+    .update(fs.readFileSync(path.join(publicDir, "data-versions.js")))
+    .update(fs.readFileSync(path.join(publicDir, "data-versions.css")))
     .digest("hex")
     .slice(0, 16);
 export async function createWebRuntime(
   input,
-  { watch = input.mode === "development", superviseMs = 3000 } = {},
+  {
+    watch = input.mode === "development",
+    superviseMs = 3000,
+    providedLogger = null,
+    logLevel,
+    logFile,
+  } = {},
 ) {
   const config = validateConfig(input);
+  const logger =
+    providedLogger ||
+    createLogger({
+      level: logLevel || process.env.ERP_LOG_LEVEL || "info",
+      file: logFile || path.join(config.stateDir, "logs", "web.log"),
+      scope: "host",
+    });
   let gateway,
     services,
     timer,
+    versionTimer,
+    dataVersions,
     stopped = false,
     supervising = false;
   const watchers = [],
@@ -38,16 +58,35 @@ export async function createWebRuntime(
     lock.listen(endpoint, resolve);
   });
   try {
-    services = await createSourceServices(config);
+    logger.info("网页服务配置", {
+      mode: config.mode,
+      origin: config.publicOrigin,
+      port: config.port,
+      stateDir: config.stateDir,
+      releaseRoot: config.releaseRoot || path.resolve(import.meta.dirname, ".."),
+      node: process.version,
+      pid: process.pid,
+    });
+    for (const id of moduleIds)
+      logger.info("模块配置", {
+        module: id,
+        port: config.modules[id].port,
+        dataDir: config.modules[id].dataDir,
+        root: config.modules[id].root,
+      });
+    dataVersions = createDataVersionWorker({config});
+    services = await createSourceServices(config, { logger });
     gateway = await createWorkbenchGateway({
       services,
+      logger,
       storeDir: path.join(config.stateDir, "gateway"),
       publicOrigin: config.publicOrigin,
       port: config.port,
       moduleIds,
       cacheStaticAssets: config.mode === "production",
       localDevelopment: config.mode === "development",
-      registerRoutes: async (app) => {
+      registerRoutes: async (app, context) => {
+        registerDataVersionRoutes(app, context, dataVersions);
         app.addHook("onRequest", async (req, reply) => {
           if (!["GET", "HEAD"].includes(req.method)) {
             if (services.webStatus().draining)
@@ -98,6 +137,9 @@ export async function createWebRuntime(
           ["shell.js", "text/javascript"],
           ["shell.css", "text/css"],
           ["tokens.css", "text/css"],
+          ["data-versions.html", "text/html"],
+          ["data-versions.js", "text/javascript"],
+          ["data-versions.css", "text/css"],
         ])
           app.get("/web/" + name, async (q, r) => {
             const bytes = fs.readFileSync(path.join(publicDir, name)),
@@ -119,6 +161,8 @@ export async function createWebRuntime(
       },
     });
   } catch (e) {
+    logger.error("网页服务启动失败：" + e.message, { code: e.code });
+    await dataVersions?.close();
     await services?.stopOwned().catch(() => {});
     await new Promise((r) => lock.close(r));
     throw e;
@@ -128,9 +172,12 @@ export async function createWebRuntime(
     config,
     services,
     gateway,
+    dataVersions,
+    logger,
     async quiesce() {
       if (quiescing) return quiescing;
       quiescing = (async () => {
+        logger.info("维护窗口：暂停受理新的写入请求");
         services.drain();
         const deadline = Date.now() + 60000;
         while (supervising) await new Promise((r) => setTimeout(r, 50));
@@ -146,16 +193,22 @@ export async function createWebRuntime(
           await new Promise((r) => setTimeout(r, 250));
         }
         await services.stopOwned();
+        logger.info("维护窗口：全部模块已停止");
         return { ok: true };
       })().catch((e) => {
         quiescing = null;
         services.resume();
+        logger.error("维护窗口失败：" + e.message);
         throw e;
       });
       return quiescing;
     },
     async start() {
       await gateway.start();
+      logger.info("网页服务已启动", {
+        url: config.publicOrigin,
+        pid: process.pid,
+      });
       fs.writeFileSync(
         path.join(config.stateDir, "web-control.json"),
         JSON.stringify({ token }),
@@ -181,12 +234,24 @@ export async function createWebRuntime(
           }
           await services.supervise();
         } catch (e) {
-          console.error("网页服务恢复失败：" + e.message);
+          logger.error("网页服务恢复失败：" + e.message);
         } finally {
           supervising = false;
         }
       }, superviseMs);
       timer.unref();
+      if(config.dataVersion?.enabled && config.dataVersion.uploadMode!=='user-agent'){
+        let lastVersionError = 0;
+        const upload=()=>dataVersions.tick().catch(e=>{
+          // Retried every five seconds; keep the console readable by logging once a minute.
+          if(Date.now()-lastVersionError<60000)return;
+          lastVersionError=Date.now();
+          logger.error('数据版本上传暂不可用，将自动重试：'+e.message);
+        });
+        versionTimer=setInterval(upload,5000);
+        versionTimer.unref();
+        void upload();
+      }
       if (watch)
         for (const id of moduleIds) {
           const root = config.modules[id].root;
@@ -208,14 +273,19 @@ export async function createWebRuntime(
     },
     async stop() {
       if (stopped) return;
+      logger.info("网页服务正在停止");
       clearInterval(timer);
+      clearInterval(versionTimer);
       for (const w of watchers) w.close();
       await runtime.quiesce();
       await gateway.stop();
+      await dataVersions.close();
       stopped = true;
       for (const name of ["web-runtime.json", "web-control.json"])
         fs.rmSync(path.join(config.stateDir, name), { force: true });
       await new Promise((r) => lock.close(r));
+      logger.info("网页服务已停止");
+      logger.close();
     },
   };
   lock.on("connection", (socket) => {

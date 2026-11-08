@@ -8,7 +8,7 @@ export function monthData(s,m,{live=false}={}) {
   const lock=s.get('SELECT * FROM month_locks WHERE month=?',month(m));
   if(lock&&!live)return {...JSON.parse(lock.snapshot),locked:true,locked_at:lock.locked_at};
   const [start,end]=bounds(m);
-  return {month:m,locked:false,shops:s.shops(),operations:s.all('SELECT * FROM active_operations WHERE start<=? AND end>=? ORDER BY start,end',end,start),ledger:s.all('SELECT * FROM active_ledger WHERE date<=? ORDER BY date,id',end),matches:s.all('SELECT * FROM matches WHERE left_id IN (SELECT id FROM active_ledger) AND right_id IN (SELECT id FROM active_ledger)'),coverage:s.all('SELECT * FROM coverage WHERE month=?',m),rates:s.all('SELECT * FROM rates WHERE date<=?',end),freight:s.all('SELECT * FROM freight_records WHERE month=? ORDER BY id',m),freight_attachments:s.all('SELECT a.* FROM freight_attachments a JOIN freight_records f ON f.id=a.record_id WHERE f.month=? ORDER BY a.id',m)};
+  return {month:m,locked:false,scopedSnapshots:s.all("SELECT shop_id,snapshot FROM reconciliation_locks WHERE kind='sales' AND month=?",m).map(x=>({shop_id:x.shop_id,...JSON.parse(x.snapshot)})),shops:s.shops(),operations:s.all('SELECT * FROM active_operations WHERE start<=? AND end>=? ORDER BY start,end',end,start),ledger:s.all('SELECT * FROM active_ledger WHERE date<=? ORDER BY date,id',end),matches:s.all('SELECT * FROM matches WHERE left_id IN (SELECT id FROM active_ledger) AND right_id IN (SELECT id FROM active_ledger)'),coverage:s.all('SELECT * FROM coverage WHERE month=?',m),rates:s.all('SELECT * FROM rates WHERE date<=?',end),freight:s.all('SELECT * FROM freight_records WHERE month=? ORDER BY id',m),freight_attachments:s.all('SELECT a.* FROM freight_attachments a JOIN freight_records f ON f.id=a.record_id WHERE f.month=? ORDER BY a.id',m)};
 }
 function coverage(data,shop,dataset) {return data.coverage.find(r=>r.shop_id===shop&&r.dataset===dataset)?.status||'missing';}
 function rateAt(data,currency,date) {return currency==='CNY'?100000000:data.rates.find(r=>r.currency===currency&&r.date===date)?.rate??null;}
@@ -26,6 +26,8 @@ export function summarizeMonth(data,shopId='all',day=null) {
   const shops=(data.shops||SHOPS).filter(s=>shopId==='all'||s.id===shopId);
   const operationRows=[],reconRows=[];
   for(const shop of shops) {
+    const frozen=data.scopedSnapshots?.find(x=>x.shop_id===shop.id);
+    if(frozen?.salesData){const saved=summarizeMonth(frozen.salesData,shop.id,day);operationRows.push(...saved.operations);reconRows.push(...saved.reconciliation);continue;}
     const ledger=data.ledger.filter(r=>r.shop_id===shop.id),period=ledger.filter(r=>r.date>=start&&r.date<=end);
     const ops=data.operations.filter(r=>r.shop_id===shop.id);
     const currencies=[...new Set([...ops.map(r=>r.currency),...period.map(r=>r.currency)])];if(!currencies.length)currencies.push(shop.id==='ozon'?'RUB':'CNY');

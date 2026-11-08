@@ -24,7 +24,7 @@ test('年度汇总与月度相加一致；跨年账单、跨月付款和退款�
   pay(f,b,4000,'2026-09-30');pay(f,b,5000,'2026-10-10');pay(f,b,2000,'2026-10-15','refund');
   pay(f,b,1000,'2027-01-02');
   const r=dashboard(f.s,f.sources(),{grain:'year',period:'2026',today});
-  assert.equal(r.trend.length,12);assert.equal(r.totals.freight,-7000);assert.equal(r.pendingCents,3000);
+  assert.equal(r.trend.length,12);assert.equal(r.totals.freight,-7000);assert.equal(r.pendingCents,0);assert.equal(report(f.s,f.sources(),'2026-12').pendingCents,3000);
   assert.equal(r.difference,30500);assert.equal(r.trend[8].difference,33500);assert.equal(r.trend[9].difference,-3000);
   assert.equal(r.trend[0].difference,null);assert.equal(r.trend[11].status,'future');
   assert.equal(r.difference,r.trend.reduce((n,x)=>n+(x.difference??0),0));

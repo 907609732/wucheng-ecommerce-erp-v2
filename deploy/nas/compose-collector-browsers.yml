@@ -1,0 +1,31 @@
+services:
+  sales-browser:
+    image: jlesage/chromium:v26.10.1
+    environment:
+      CHROMIUM_REMOTE_DEBUGGING: "1"
+      ENABLE_CJK_FONT: "1"
+      WEB_TERMINAL: "0"
+      WEB_FILE_MANAGER: "0"
+      VNC_LISTENING_PORT: "-1"
+    ports:
+      - "127.0.0.1:19222:9222"
+      - "127.0.0.1:15822:5800"
+    volumes:
+      - ./sales-browser:/config
+    shm_size: 1gb
+    restart: unless-stopped
+  overview-browser:
+    image: jlesage/chromium:v26.10.1
+    environment:
+      CHROMIUM_REMOTE_DEBUGGING: "1"
+      ENABLE_CJK_FONT: "1"
+      WEB_TERMINAL: "0"
+      WEB_FILE_MANAGER: "0"
+      VNC_LISTENING_PORT: "-1"
+    ports:
+      - "127.0.0.1:19223:9222"
+      - "127.0.0.1:15823:5800"
+    volumes:
+      - ./overview-browser:/config
+    shm_size: 1gb
+    restart: unless-stopped

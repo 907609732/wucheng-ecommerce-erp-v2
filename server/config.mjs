@@ -103,6 +103,20 @@ export function validateConfig(value) {
       ))
   )
     throw Error("正式服务必须绑定独立版本目录 releaseRoot");
+  if (c.dataVersion !== undefined) {
+    const v=c.dataVersion;
+    if(!v||typeof v!=='object'||typeof v.enabled!=='boolean')throw Error('数据版本配置无效');
+    if(v.enabled){
+      const within=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
+      if(!absolute(v.dir)||!absolute(v.workspace)||!absolute(v.cmPath)||typeof v.repository!=='string'||!v.repository.includes('@')||/[\r\n]/.test(v.repository))throw Error('数据版本需要完整的独立路径与仓库规格');
+      v.uploadMode??='host';
+      if(!['host','user-agent'].includes(v.uploadMode))throw Error('数据版本上传模式无效');
+      if(v.localHistoryCount!==undefined&&(!Number.isInteger(v.localHistoryCount)||v.localHistoryCount<1||v.localHistoryCount>1000))throw Error('数据版本本地保留数量必须为1至1000');
+      if(c.mode==='development'&&!within(v.dir,c.stateDir))throw Error('开发数据版本必须位于隔离目录');
+      if(!within(v.workspace,v.dir)||path.resolve(v.workspace)===path.resolve(v.dir))throw Error('数据版本工作区必须位于独立版本目录内');
+      if(moduleIds.some(id=>within(v.dir,c.modules[id].dataDir)||within(c.modules[id].dataDir,v.dir)))throw Error('数据版本目录不能包含或位于正式数据目录');
+    }
+  }
   return c;
 }
 export function loadConfig(file) {

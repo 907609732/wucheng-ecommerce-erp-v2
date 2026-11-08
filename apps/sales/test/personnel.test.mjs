@@ -8,7 +8,7 @@ import {createApp} from '../server.mjs';
 import {createSessionFetch} from './helpers.mjs';
 import {signWorkbenchActor} from '../lib/workbench-actor.mjs';
 import {addLedger,setCoverage,createMatch} from '../lib/ledger.mjs';
-import {closePreview,lockMonth} from '../lib/close.mjs';
+import {closePreview,lockMonth as realLockMonth} from '../lib/close.mjs';
 
 async function fixture(t,port){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sales-personnel-')),{app,store}=createApp({dataDir:dir,port,demo:true});
@@ -157,3 +157,5 @@ test('real multipart preserves official Chinese Taobao filenames and still rejec
  assert.equal((await employee(f.base+`/api/taobao/import/${preview.id}/commit`,f.json({revision:preview.revision}))).status,200);
  const invalid=await upload('重新命名_202609.csv');assert.equal(invalid.status,400);assert.match((await invalid.json()).error,/官方单月文件名/);
 });
+
+async function lockMonth(store,input,options){if(!store.monthAdmin.configured())await store.monthAdmin.setPassword({password:"test-month-password",confirmation:"test-month-password"});return realLockMonth(store,input,options);}
