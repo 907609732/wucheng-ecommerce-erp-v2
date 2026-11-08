@@ -25,7 +25,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/fnos-output" "$RUNNER_TEMP/fnos-work"
           # Privilege belongs only to this ephemeral test container. The FPK
           # neither uses Docker nor grants Linux capabilities to its package user.
-          docker run --rm --privileged --security-opt apparmor=unconfined \
+          docker run --rm --init --privileged --security-opt apparmor=unconfined \
             -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_WORK_ROOT=/build \
             -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \

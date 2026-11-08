@@ -10,9 +10,10 @@ if(pkg.version!=='1.3.4')throw Error('Review libvips corresponding-source inputs
 const records=[];
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function download(url,name,expected){
- const file=path.join(dest,name);if(fs.existsSync(file))return file;
- const response=await fetch(url,{signal:AbortSignal.timeout(120000)});if(!response.ok)throw Error('Source download '+response.status+' '+url);
- const bytes=Buffer.from(await response.arrayBuffer()),digest=sha(bytes);if(expected&&digest!==expected)throw Error('Source checksum mismatch '+name);
+ const file=path.join(dest,name);let bytes;
+ if(fs.existsSync(file))bytes=fs.readFileSync(file);
+ else{const response=await fetch(url,{signal:AbortSignal.timeout(120000)});if(!response.ok)throw Error('Source download '+response.status+' '+url);bytes=Buffer.from(await response.arrayBuffer());}
+ const digest=sha(bytes);if(expected&&digest!==expected)throw Error('Source checksum mismatch '+name);
  fs.writeFileSync(file,bytes);records.push({file:name,url,sha256:digest,bytes:bytes.length,verification:expected?'pinned SHA256':'HTTPS upstream source; calculated SHA256 (not detached signature)'});return file;
 }
 const recipe=await download('https://codeload.github.com/lovell/sharp-libvips/tar.gz/refs/tags/v1.3.4','sharp-libvips-v1.3.4.tar.gz','a8e96acb479c9bc1a5b7950f8f25aa6c8e1ef3a19755b45cf2f00d506aeaccc0');
@@ -20,16 +21,20 @@ const readRecipe=p=>execFileSync('tar',['-xOf',recipe,'sharp-libvips-1.3.4/'+p],
 const versions=Object.fromEntries(readRecipe('versions.properties').trim().split('\n').map(l=>l.split('=')));
 const script=readRecipe('build/posix.sh');fs.writeFileSync(path.join(dest,'posix.sh'),script);fs.writeFileSync(path.join(dest,'versions.properties'),readRecipe('versions.properties'));
 const urls=[...script.matchAll(/^\s*\$CURL\s+(https:.+?)\s+\|/gm)].map(m=>{
- let u=m[1].replace(/\$\(without_patch \$([A-Z_]+)\)/g,(_,v)=>versions[v].split('.').slice(0,2).join('.'))
- .replace(/\$\(without_prerelease \$([A-Z_]+)\)/g,(_,v)=>versions[v].split('-')[0])
- .replace(/\$\{([A-Z_]+)\/\/\.\/([^}]+)\}/g,(_,v,s)=>versions[v].replaceAll('.',s))
- .replace(/\$\{([A-Z_]+)\}/g,(_,v)=>versions[v]);
+ let u=m[1].replace(/\$\(without_patch \$([A-Z0-9_]+)\)/g,(_,v)=>versions[v].split('.').slice(0,2).join('.'))
+ .replace(/\$\(without_prerelease \$([A-Z0-9_]+)\)/g,(_,v)=>versions[v].split('-')[0])
+ .replace(/\$\{([A-Z0-9_]+)\/\/\.\/([^}]+)\}/g,(_,v,s)=>versions[v].replaceAll('.',s))
+ .replace(/\$\{([A-Z0-9_]+)\}/g,(_,v)=>versions[v]);
  if(u.includes('$')||!u.startsWith('https://'))throw Error('Unreviewed upstream source URL '+u);return u;
 });
 if(urls.length<30)throw Error('Incomplete upstream libvips source recipe');
 let rsvg;
 for(const [i,url] of urls.entries()){
- const name=String(i+1).padStart(2,'0')+'-'+new URL(url).pathname.split('/').at(-1),file=await download(url,name);
+ const name=String(i+1).padStart(2,'0')+'-'+new URL(url).pathname.split('/').at(-1);
+ // freedesktop's GitLab rejects automated downloads (HTTP 406). This is the
+ // project's official GitHub mirror, same exact tag, not an unrelated tarball.
+ const mirror=url.includes('gitlab.freedesktop.org/fontconfig/fontconfig/')?'https://codeload.github.com/fontconfig/fontconfig/tar.gz/refs/tags/2.18.3':url;
+ const file=await download(mirror,name);if(mirror!==url)records.at(-1).upstreamRecipeURL=url;
  if(/\.tar\.(?:gz|xz)$/.test(name))execFileSync('tar',['-tf',file],{stdio:'ignore'});
  if(url.includes('/librsvg-'))rsvg=file;
 }

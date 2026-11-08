@@ -16,6 +16,5 @@ function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){
 walk(path.join(stage,'app/erp'));
 const inputs=Object.fromEntries(fs.readFileSync(path.join(import.meta.dirname,'native-inputs.env'),'utf8').split('\n').filter(l=>l&&!l.startsWith('#')).map(l=>l.split('=')));
 const manifest={schemaVersion:1,version:'0.15.0',platform:'linux/amd64',hostLibc:'glibc 2.36 (not bundled)',commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),inputs,nodeLicense:'runtime/node/LICENSE',novncLicense:'runtime/novnc/LICENSE.txt',novncHTMLSHA256:sha(path.join(runtime,'novnc/vnc.html')),debian:JSON.parse(fs.readFileSync(path.join(work,'debian-packages.json'),'utf8')),npm,sourceCompanion:'wuchengerp-0.15.0-corresponding-source.tar.zst',xvfbBuild:{source:'Debian patched xorg-server',xkbBinDir:'/var/apps/wuchengerp/target/runtime/sysroot/usr/bin',xkbDir:'/var/apps/wuchengerp/target/runtime/sysroot/usr/share/X11/xkb'}};
-fs.writeFileSync(path.join(stage,'app/THIRD-PARTY.json'),JSON.stringify(manifest,null,2)+'\n');
 manifest.sharpLibvips=JSON.parse(fs.readFileSync(path.join(work,'sharp-source-inputs.json'),'utf8'));
 fs.writeFileSync(path.join(stage,'app/THIRD-PARTY.json'),JSON.stringify(manifest,null,2)+'\n');

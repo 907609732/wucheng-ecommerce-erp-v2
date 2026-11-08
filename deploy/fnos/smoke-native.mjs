@@ -31,11 +31,12 @@ const fixture=http.createServer((req,res)=>{
  res.setHeader('content-type','text/html; charset=utf-8');res.end('<!doctype html><html><head><title>Native acceptance</title></head><body><h1>五成 ERP 原生验收</h1><label>Acceptance input <input aria-label="Acceptance input"></label><a href="/download" download>Download fixture</a><p id="status">Synthetic local fixture</p></body></html>');
 });
 await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+fixture.address().port;
-let configFile,client,transport,browser,viewerBrowser;
+let configFile,client,transport,browser,viewerBrowser,initializingServices;
 let interrupting=false;
 async function interrupt(){
  if(interrupting)return;interrupting=true;report.error='Acceptance cancelled by signal';report.ok=false;
  const hard=setTimeout(()=>process.exit(124),40000);
+ await initializingServices?.stopOwned().catch(()=>{});
  await stopClients().catch(()=>{});
  if(configFile)await nativeLifecycle('stop',configFile).catch(e=>{report.cleanupError=e.message;});
  fixture.closeAllConnections();await new Promise(r=>fixture.close(r));
@@ -63,7 +64,7 @@ try{
   const c=developmentConfig({root:release,stateDir:state,port:29430});
   for(const [id,m] of Object.entries(c.modules)){m.dataDir=path.join(data,'data',id);}
   const {createSourceServices}=await import(pathToFileURL(path.join(release,'server/services.mjs')));
-  const services=await createSourceServices(c);try{for(const id of Object.keys(c.modules))await services.ensure(id);}finally{await services.stopOwned();}
+  const services=initializingServices=await createSourceServices(c);try{for(const id of Object.keys(c.modules)){assert(!interrupting,'acceptance cancelled');await services.ensure(id);}}finally{await services.stopOwned();initializingServices=null;}
   c.mode='production';c.releaseRoot=release;c.tcpEnabled=true;c.fnos={enabled:false};c.publicOrigin='https://native-acceptance.example.com';c.dataVersion={enabled:false};
   c.native={dataRoot:data,home:path.join(data,'uvcs-home'),nodePath:process.execPath,requireBrowsers:true,browser:browserConfig};fs.mkdirSync(c.native.home,{mode:0o700});
   fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
@@ -92,7 +93,7 @@ try{
  browser=await chromium.connectOverCDP('http://127.0.0.1:'+(19222+offset));
  const page=browser.contexts()[0].pages().find(p=>p.url()===url+'/');assert(page);
  await page.screenshot({path:path.join(evidence,'synthetic-browser.png')});
- const bounds=await page.locator('input').evaluate(e=>{const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,top:window.outerHeight-window.innerHeight};});
+ const bounds=await page.locator('input').evaluate(e=>{const r=e.getBoundingClientRect();return {x:window.screenX+r.x+r.width/2,y:window.screenY+r.y+r.height/2,top:window.outerHeight-window.innerHeight};});
  viewerBrowser=await chromium.connectOverCDP('http://127.0.0.1:'+(19223+offset));const viewer=await viewerBrowser.contexts()[0].newPage();await viewer.goto(url);
  await viewer.evaluate(async vnc=>{document.body.innerHTML='<div id="screen" style="width:1440px;height:900px"></div>';document.body.style.margin='0';const {default:RFB}=await import('/novnc/core/rfb.js');window.rfb=new RFB(document.querySelector('#screen'),'ws://127.0.0.1:'+vnc+'/websockify',{shared:true});window.rfb.scaleViewport=false;await new Promise((resolve,reject)=>{window.rfb.addEventListener('connect',resolve,{once:true});window.rfb.addEventListener('disconnect',()=>reject(Error('RFB disconnected')),{once:true});setTimeout(()=>reject(Error('RFB timeout')),10000);});},19322+offset);
  const canvas=viewer.locator('canvas');await canvas.waitFor();await viewer.waitForTimeout(500);
