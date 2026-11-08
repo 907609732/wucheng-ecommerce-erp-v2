@@ -26,7 +26,15 @@ concurrency:
   group: fnos-native-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  diagnostic-hook-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject package-owned symlink writes from root diagnostic hook
+        run: sudo env ERP_DIAG_BOUNDARY_CI=1 /usr/bin/python3 -I -B tests/fnos-diagnostic-boundary.py
   native:
+    needs: diagnostic-hook-boundary
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     steps:
