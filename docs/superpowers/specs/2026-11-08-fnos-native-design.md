@@ -8,11 +8,11 @@
 
 选择官方 Native FPK：内含固定版本 Node 24、Linux 生产依赖、ERP 三模块、原生采集浏览器及远程登录界面。应用中心管理启停，不再调用或依赖 Docker。先支持实测 x86_64 NAS，包 manifest 必须 platform=x86；ARM 另行验证，不能标 all。
 
-比较：继续依赖系统应用运行时会增加他人安装的前提；Docker 包不满足用户目标。采用构建阶段准备依赖、官方 fnpack 生成包的方式。复用官方 Native 示例、Debian 软件包、Playwright Chromium、noVNC 与成熟反向代理组件，不重写打包、远程桌面或浏览器协议。
+比较：继续依赖系统应用运行时会增加他人安装的前提；Docker 包不满足用户目标。采用构建阶段准备依赖、官方 fnpack 生成包的方式。复用官方 Native 示例、Debian 软件包、Chromium、现有 Playwright MCP、noVNC 与成熟反向代理组件，不重写打包、远程桌面或浏览器协议。
 
 ## 程序、数据和身份
 
-- 可替换程序位于 TRIM_APPDEST；持久账本/附件/网关身份/统一月锁密码/审计/UVCS 队列/浏览器 profile 位于独立持久数据根，安装向导提供新建和迁移两种明确模式。
+- 可替换程序位于 TRIM_APPDEST；持久账本/附件/网关身份/统一月锁密码/审计/UVCS 队列/浏览器 profile 位于独立持久数据根，安装向导提供新建和迁移两种明确模式。默认持久根为物理存储空间 `TRIM_APPDEST_VOL/@wuchengerp-data`，不置于可能随卸载删除的 var。root 只创建并严格核对这一个私有目录，运行用户拥有0700权限；卸载始终保留数据，并显示位置。
 - 迁移输入必须是已停止写入并校验完整的副本。复制进私有持久根，保留 serverId/dataSetId、原件、锁和密钥；原 Docker 数据保留为停机回退材料。迁移不能把缺失数据库当新建初始化。正式旧容器与原生服务不得同时写入。
 - 新建安装显式初始化三个空账本，之后切为 production；不放入开发身份或开放 TCP。向导收集 NAS 访问地址、授权 UID；实例身份首次生成且持久保存。新建默认 fnOS-only，TCP 身份入口禁用，publicOrigin 使用用户配置的真实 NAS HTTPS 地址；可另配 Tailscale。迁移沿用原授权、instanceId 与 Tailscale publicOrigin，并启用原 TCP 备用入口。
 - Unix 网关保持受控物理目录、当前运行用户拥有、0600 socket 和既有唯一 generation 契约。应用生命周期可用最小 root 准备目录/属主，所有长期服务降权为专用 package 用户；不赋予 Docker socket 或主机根目录访问权限。
@@ -27,7 +27,7 @@
 
 ## 原生浏览器
 
-沿用销售和经营总览两套独立 profile 与回环 CDP 端口 19222/19223。原生 Xvfb + x11vnc（Debian 安全维护包）+ 匹配锁文件的 Playwright Chromium。noVNC 复用上游组件；LibVNCServer 原生 WebSocket 经成熟代理转发，不编写 VNC 桥。
+沿用销售和经营总览两套独立 profile 与回环 CDP 端口 19222/19223。原生 Xvfb + x11vnc + Debian bookworm-security Chromium；Playwright MCP 继续使用锁文件版本，连接现有 CDP 适配器，构建验收必须证明导航、快照、输入和下载兼容。当前 Playwright 下载的是 Chrome for Testing，未核实其二进制再分发授权，因此采用 Debian 可再分发构建，并提供对应源码及许可证。noVNC 复用上游组件；LibVNCServer 原生 WebSocket 经成熟代理转发，不编写 VNC 桥。
 
 图形登录页从 ERP 已认证入口打开；静态资源、HTTP 与 WebSocket 均校验身份和会话，WebSocket 强制同源 Origin。未认证不能看到已登录浏览器。CDP/VNC/X11 均不监听公网；不允许客户端选择代理目标。保留人工扫码/验证码流程，不能声称迁移后登录态一定有效；需要时由用户重新登录。浏览器和相关服务也由应用启停，Docker 关闭后仍可用。
 

@@ -6,7 +6,7 @@
 
 **Architecture:** 官方 Native FPK 管理私有 Node、ERP、采集和原生浏览器。应用持久数据独立于 target，通过停写副本迁移，统一网关和 Tailscale 指向同一实例。
 
-**Tech Stack:** Node 24、SQLite、fnpack 1.2.3、Debian bookworm、Playwright Chromium、Xvfb/x11vnc/noVNC、Fastify 代理。
+**Tech Stack:** Node 24、SQLite、fnpack 1.2.3、Debian bookworm-security Chromium + 锁定的 Playwright MCP CDP、Xvfb/x11vnc/noVNC、Fastify 代理。
 
 **Spec:** docs/superpowers/specs/2026-11-08-fnos-native-design.md
 
@@ -57,6 +57,7 @@
 
 - [ ] Write artifact tests: no user data, required production payload, correct architecture/version, shell LF/modes, official CLI use, private Node SQLite smoke, native app lifecycle isolated fresh restart/stop.
 - [ ] Implement build and workflow with native Linux integration checks plus existing module tests. Prepare optional UVCS on current NAS from official installer if redistributing it is not licensed; package must not include credentials, current instance cannot silently disable queue.
+- [ ] Runtime build specifics: retain host glibc2.36 (exclude glibc family and loader from private LD_LIBRARY_PATH); private non-glibc closure and NSS dlopen components. Standard Debian Xvfb hardcodes xkbcomp path: build Debian source Xvfb with `--with-xkb-bin-directory=/var/apps/wuchengerp/target/runtime/sysroot/usr/bin`; keep XKB data private and pass `-xkbdir`. Use lddtree standard `--copy-to-tree`, verify actual installed flags. Task1 reserves root-owned `cmd/provision_uvcs`, selected only by `wizard_uvcs_install=1`; never root-execute replaceable target runtime scripts. Fetch official UVCS11.0.16.10616-1 amd64 deb SHA256 `b90be9da5670b8aa129b7ed3c3527192e7620c5f1f6d3f97e33f0e2733502ef6` (81720976bytes), verify before system package install; no auto dist-upgrade or unrelated package removal.
 - [ ] Push branch, execute GitHub workflow, inspect every check and artifact manifest, download FPK; commit corrections and independent whole-branch review.
 
 ### Task 4: 实机备份、隔离验收与切换
