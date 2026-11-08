@@ -61,17 +61,10 @@ bash "$helper/prepare-native-runtime.sh" "$runtime" "$work"
 cd "$repo"
 export npm_execpath="$runtime/node/lib/node_modules/npm/bin/npm-cli.js"
 node server/release.mjs "$stage/app/erp"
-node "$helper/collect-sharp-sources.mjs" "$stage" "$work"
-node "$helper/write-native-manifest.mjs" "$stage" "$work"
-node "$helper/verify-artifact.mjs" "$stage" | tee "$out/artifact-verification.json"
-cp "$stage/app/THIRD-PARTY.json" "$out/THIRD-PARTY.json"
 cp "$work/debian-packages.json" "$out/debian-packages.json"
-cp "$work/sharp-source-inputs.json" "$out/sharp-source-inputs.json"
 cp "$work/xvfb-meson-log.txt" "$out/xvfb-meson-log.txt"
 cp "$helper/native-inputs.env" "$out/INPUTS.env"
 cp -a "$work/diagnostic" "$out/diagnostic-xvfb"
-find "$stage" -type f -printf '%P\n' | LC_ALL=C sort > "$out/PAYLOAD-FILES.txt"
-(cd "$stage"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/PAYLOAD-SHA256SUMS.txt"
 # Real package-user checks. This canonical path exists only in disposable CI.
 useradd --create-home --uid 23001 erpbuild
 mkdir -p /var/apps/wuchengerp
@@ -82,6 +75,16 @@ mkdir -p "$work/fixture" "$work/smoke-evidence"; chown erpbuild:erpbuild "$work/
 runuser -u erpbuild -- env PATH="$PATH" LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/node/bin/node" "$helper/smoke-native.mjs" --app-root /var/apps/wuchengerp/target --data-root "$work/fixture/data" --evidence-dir "$work/smoke-evidence" --port-offset 1000
 strace -f -e trace=%file -o "$out/private-runtime-file-probe.log" runuser -u erpbuild -- env LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/chromium/chrome" --version
 cp -a "$work/smoke-evidence" "$out/smoke-evidence"
+# Source archives are mandatory before packaging, but expensive transfers must
+# not mask early private-runtime failures. License/owner metadata already exists.
+node "$helper/collect-native-sources.mjs" "$runtime" "$work" --download-sources
+node "$helper/collect-sharp-sources.mjs" "$stage" "$work"
+node "$helper/write-native-manifest.mjs" "$stage" "$work"
+node "$helper/verify-artifact.mjs" "$stage" | tee "$out/artifact-verification.json"
+cp "$stage/app/THIRD-PARTY.json" "$out/THIRD-PARTY.json"
+cp "$work/sharp-source-inputs.json" "$out/sharp-source-inputs.json"
+find "$stage" -type f -printf '%P\n' | LC_ALL=C sort > "$out/PAYLOAD-FILES.txt"
+(cd "$stage"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$out/PAYLOAD-SHA256SUMS.txt"
 # The smoke uses a synthetic data root outside the stage and is never packaged.
 node "$helper/verify-artifact.mjs" "$stage"
 cd "$out"
