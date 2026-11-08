@@ -3,6 +3,7 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
 import {randomBytes,randomUUID} from 'node:crypto';
+import {createRequire} from 'node:module';
 import WebSocket from 'ws';
 
 const ids=['sales','overview'];
@@ -28,20 +29,33 @@ function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});if(fs.lst
 async function available(port){
  const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen({host:'127.0.0.1',port,exclusive:true},resolve);});await new Promise(resolve=>server.close(resolve));
 }
+function validBrowserSocket(value,port){
+ try{const u=new URL(value);return u.protocol==='ws:'&&u.hostname==='127.0.0.1'&&Number(u.port)===port&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/devtools\/browser\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(u.pathname);}catch{return false;}
+}
+export async function closeNativeBrowser(config,spec,{connect,timeoutMs=2000}={}){
+ if(!validBrowserSocket(spec.browserWebSocketUrl,spec.cdpPort))throw Error('缺少本代 Chromium 唯一调试地址，拒绝按端口重新发现');
+ if(!connect){const require=createRequire(path.join(config.modules.sales.root,'package.json'));connect=(url,options)=>require('playwright-core').chromium.connectOverCDP(url,options);}
+ // The stored UUID URL cannot attach to another Chromium which later reuses
+ // this TCP port. Keep upstream defaults untouched and use its public CDP API.
+ const browser=await connect(spec.browserWebSocketUrl,{noDefaults:true,timeout:Math.min(timeoutMs,1500)});let timer;
+ try{await Promise.race([(async()=>{const session=await browser.newBrowserCDPSession();await session.send('Browser.close');})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Chromium graceful close timeout')),timeoutMs);})]);}
+ finally{clearTimeout(timer);await browser.close().catch(()=>{});}
+}
 export async function probeNativeBrowserReady(kind,spec){
  try{
   if(kind==='display')return fs.existsSync('/tmp/.X11-unix/X'+spec.display);
-  if(kind==='cdp'){const response=await fetch(spec.cdpEndpoint+'/json/version',{signal:AbortSignal.timeout(1000)});const body=await response.json();return response.ok&&typeof body.webSocketDebuggerUrl==='string';}
+  if(kind==='cdp'){const response=await fetch(spec.cdpEndpoint+'/json/version',{signal:AbortSignal.timeout(1000)});const body=await response.json();if(!response.ok||!validBrowserSocket(body.webSocketDebuggerUrl,spec.cdpPort))return false;spec.browserWebSocketUrl=body.webSocketDebuggerUrl;return true;}
   // LibVNCServer requires Origin even for trusted loopback health checks. Node's
   // built-in browser-shaped WebSocket omits it; use the existing mature client.
   return await new Promise(resolve=>{const ws=new WebSocket(spec.vncEndpoint.replace('http:','ws:')+'/websockify',['binary'],{origin:spec.vncEndpoint});const timer=setTimeout(()=>{ws.close();resolve(false);},1000);ws.onopen=()=>{clearTimeout(timer);ws.close();resolve(true);};ws.onerror=()=>{clearTimeout(timer);resolve(false);};});
  }catch{return false;}
 }
-export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=probeNativeBrowserReady,readinessTimeoutMs=20000,signal}={}){
+export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=probeNativeBrowserReady,readinessTimeoutMs=20000,signal,gracefulClose}={}){
  const browser=config.native?.browser,specs=nativeBrowserSpecs(config),children=[],states={},owned={};
  let state='stopped',failure=null,starting,stopping,runDir,controller,startSignal;
  const checkCancellation=()=>startSignal?.throwIfAborted();
  const live=child=>child.exitCode===null&&child.signalCode===null&&!child.nativeExited;
+ const closeBrowser=gracefulClose||(spawnProcess===spawn?spec=>closeNativeBrowser(config,spec):null);
  function groupMembers(child){
   if(spawnProcess!==spawn||process.platform!=='linux'||!child.nativeLong||!child.pid||!runDir)return [];
   const members=[];
@@ -59,6 +73,11 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
   const file='/proc/'+member.pid+'/stat',s=fs.readFileSync(file,'utf8'),fields=s.slice(s.lastIndexOf(')')+2).split(' ');
   if(fields[19]===member.start&&fs.statSync(file).uid===member.uid)process.kill(member.pid,signal);
  }catch{}}
+ function stillOwnedChrome(child){
+  if(!live(child)||!child.nativeBrowserSpec)return false;
+  if(spawnProcess!==spawn)return true;
+  try{return fs.realpathSync('/proc/'+child.pid+'/exe')===fs.realpathSync(browser.chromiumPath)&&groupMembers(child).some(m=>m.pid===child.pid&&m.start===child.nativeBrowserOwner?.start&&m.uid===child.nativeBrowserOwner.uid);}catch{return false;}
+ }
  function launch(file,args,env,{short=false}={}){
   checkCancellation();
   const child=spawnProcess(file,args,{env,stdio:['ignore','pipe','pipe'],windowsHide:true,detached:!short&&process.platform!=='win32'});children.push(child);
@@ -86,6 +105,13 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
   throw Error(spec.id+' 浏览器 '+kind+' readiness 就绪超时：'+(child.nativeError?.message||child.nativeOutput||'无子进程输出'));
  }
  async function stopChildren(){
+  // Ask the owned browser to flush persistent cookies/storage before killing
+  // renderer/network children or Xvfb. Only ready, still-owned leaders qualify.
+  const chromes=children.filter(stillOwnedChrome);
+  if(closeBrowser){
+   await Promise.all(chromes.map(async child=>{try{await closeBrowser(child.nativeBrowserSpec);}catch(error){logger?.warn?.('Chromium 正常关闭失败，将仅清理本代自有进程：'+error.message);}}));
+   const flushUntil=Date.now()+3000;while(chromes.some(live)&&Date.now()<flushUntil)await sleep(25);
+  }
   for(const child of [...children].reverse()){
    const members=groupMembers(child);for(const member of members)killOwnedMember(member,'SIGTERM');
    if(live(child))child.kill('SIGTERM');
@@ -132,6 +158,8 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
       const env={...baseEnv,DISPLAY:':'+s.display,XAUTHORITY:auth};await run(path.join(bin,'xauth'),['-f',auth,'add',env.DISPLAY,'.',randomBytes(16).toString('hex')],env);
       const xvfb=launch(path.join(bin,'Xvfb'),[env.DISPLAY,'-screen','0','1440x900x24','-nolisten','tcp','-auth',auth,'-noreset','-xkbdir',env.XKB_CONFIG_ROOT,'-fp',path.join(sysroot,'usr/share/fonts/X11/misc')],env);xvfb.nativeLong=true;await wait('display',s,xvfb);
       const chrome=launch(browser.chromiumPath,['--user-data-dir='+s.profile,'--remote-debugging-address=127.0.0.1','--remote-debugging-port='+s.cdpPort,'--no-first-run','--no-default-browser-check','--password-store=basic','--disable-dev-shm-usage','--window-size=1440,900','https://b.cainiao.com/cf_seller/workbench'],env);chrome.nativeLong=true;await wait('cdp',s,chrome);
+      chrome.nativeBrowserSpec={...s};
+      if(spawnProcess===spawn){chrome.nativeBrowserOwner=groupMembers(chrome).find(m=>m.pid===chrome.pid);if(!chrome.nativeBrowserOwner||!stillOwnedChrome(chrome))throw Error('无法确认本代 Chromium 进程身份');}
       const vnc=launch(path.join(bin,'x11vnc'),['-display',env.DISPLAY,'-auth',auth,'-listen','127.0.0.1','-localhost','-no6','-rfbport',String(s.vncPort),'-forever','-shared','-nopw','-noxdamage','-norc'],env);vnc.nativeLong=true;await wait('vnc',s,vnc);
       owned[s.id]=[xvfb,chrome,vnc];states[s.id]={cdpEndpoint:s.cdpEndpoint,display:s.display,login,retainedProfile,ready:true};
      }

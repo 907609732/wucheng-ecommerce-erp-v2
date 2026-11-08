@@ -133,9 +133,14 @@ try{
  await page.waitForFunction(()=>document.querySelector('input').value.includes('RFB'));await viewer.screenshot({path:path.join(evidence,'novnc-live.png')});
  report.checks.push('upstream noVNC real RFB framebuffer / pointer / keyboard via x11vnc');
  report.loadedLibraries=auditLoadedLibraries();report.checks.push('readable controlled-process maps limited to payload and host glibc');
+ const profileRoot=path.join(data,'browser-profiles/sales'),cookie=(await page.context().cookies(url)).find(c=>c.name==='native_acceptance');
+ assert.equal(cookie?.value,'retained');assert(cookie.expires>Date.now()/1000+3000,'Synthetic cookie must have a future persistent expiry');
+ report.persistenceBefore={cookieExpires:cookie.expires,cookieValue:cookie.value,storage:await page.evaluate(()=>localStorage.getItem('native_acceptance')),profileRealpath:fs.realpathSync(profileRoot),lastVersion:fs.existsSync(path.join(profileRoot,'Last Version'))?fs.readFileSync(path.join(profileRoot,'Last Version'),'utf8'):null};assert.equal(report.persistenceBefore.storage,'retained');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
+ assert(fs.existsSync(profileRoot));assert.equal(fs.readdirSync(path.dirname(profileRoot)).filter(n=>n.startsWith('sales.retained-')).length,0,'Unexpected profile archive');
  const second=await nativeLifecycle('start',configFile);assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
- ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=mcpEvaluationResult(await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'}));assert.match(retained.cookie,/native_acceptance=retained/);assert.equal(retained.storage,'retained');
+ assert.equal(second.browser.browsers.sales.retainedProfile,null);assert.equal(fs.realpathSync(profileRoot),report.persistenceBefore.profileRealpath);
+ ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=mcpEvaluationResult(await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'}));report.persistenceAfter=retained;assert.match(retained.cookie,/native_acceptance=retained/);assert.equal(retained.storage,'retained');
  report.checks.push('restart generation / ledger identity / persistent synthetic browser session');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  for(const [id,m] of Object.entries(c.modules)){const d=new DatabaseSync(path.join(m.dataDir,databases[id]),{readOnly:true});assert.equal(Object.values(d.prepare('PRAGMA integrity_check').get())[0],'ok');d.close();}

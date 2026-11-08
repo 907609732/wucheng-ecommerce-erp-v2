@@ -5,6 +5,22 @@ import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {WebSocketServer} from 'ws';
+import http from 'node:http';
+
+test('CDP readiness saves the unique loopback browser URL and refuses a different port',async t=>{
+ const {probeNativeBrowserReady}=await import('../server/fnos-native/browsers.mjs');let endpoint;
+ const server=http.createServer((req,res)=>res.end(JSON.stringify({webSocketDebuggerUrl:endpoint})));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+ const spec={cdpPort:server.address().port,cdpEndpoint:'http://127.0.0.1:'+server.address().port};endpoint='ws://127.0.0.1:'+spec.cdpPort+'/devtools/browser/01234567-89ab-cdef-0123-456789abcdef';
+ assert.equal(await probeNativeBrowserReady('cdp',spec),true);assert.equal(spec.browserWebSocketUrl,endpoint);
+ endpoint=endpoint.replace(':'+spec.cdpPort+'/',':1/');assert.equal(await probeNativeBrowserReady('cdp',{...spec}),false);
+});
+
+test('graceful close uses the saved unique browser socket and disconnects on bounded command failure',async()=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs');const endpoint='ws://127.0.0.1:19222/devtools/browser/01234567-89ab-cdef-0123-456789abcdef';let connected,command,closed=0;
+ const connect=async (url,options)=>{connected=url;assert.equal(options.noDefaults,true);return {newBrowserCDPSession:async()=>({send:async name=>{command=name;}}),close:async()=>{closed++;}};};
+ await closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{connect});assert.equal(connected,endpoint);assert.equal(command,'Browser.close');assert.equal(closed,1);
+ await assert.rejects(closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{timeoutMs:20,connect:async()=>({newBrowserCDPSession:async()=>({send:()=>new Promise(()=>{})}),close:async()=>{closed++;}})}),/timeout|超时/);assert.equal(closed,2);
+});
 
 test('native VNC readiness sends the Origin required by LibVNCServer',async t=>{
  const {probeNativeBrowserReady}=await import('../server/fnos-native/browsers.mjs');
@@ -43,6 +59,25 @@ test('native browser manager owns two private loopback profiles and stops only i
  for(const c of p.calls.filter(c=>path.basename(c.file)==='Xvfb')){assert(c.args.includes('-auth'));assert(c.args.includes('-nolisten'));assert(!c.args.includes('-ac'));}
  for(const c of p.calls.filter(c=>path.basename(c.file)==='x11vnc')){assert(c.args.includes('127.0.0.1'));assert(c.args.includes('-no6'));assert(c.args.includes('-rfbport'));for(const disabled of ['-nosel','-noprimary','-nosetprimary','-nosetclipboard'])assert(!c.args.includes(disabled),'authenticated clipboard must remain usable inside private Xvfb');}
  await manager.stop();assert.equal(manager.status().ready,false);assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});
+
+test('native stop closes owned Chromium before terminating its storage children and X display',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const config=fixture(t),p=processes(),events=[];
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true,gracefulClose:async spec=>{
+  assert(p.calls.filter(c=>path.basename(c.file)==='Xvfb').every(c=>c.child.signalCode===null),'keep X displays alive while browsers flush');
+  events.push('close:'+spec.id);const c=p.calls.find(c=>c.args.includes('--remote-debugging-port='+spec.cdpPort));c.child.exitCode=0;c.child.emit('exit',0);
+ }});t.after(()=>manager.stop());await manager.start();
+ for(const c of p.calls){const kill=c.child.kill;c.child.kill=signal=>{events.push('kill:'+path.basename(c.file));return kill(signal);};}
+ await manager.stop();assert.deepEqual(events.slice(0,2).sort(),['close:overview','close:sales']);assert.equal(manager.status().ready,false);assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});
+
+test('stop skips exited Chrome even when its old port has been claimed by a foreign service',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),config=fixture(t),p=processes(),closed=[];let requests=0;
+ const foreign=http.createServer((req,res)=>{requests++;res.end('{}');});await new Promise(r=>foreign.listen(0,'127.0.0.1',r));const port=foreign.address().port;await new Promise(r=>foreign.close(r));
+ config.native.browser.instances={sales:{cdpPort:port}};
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true,gracefulClose:async spec=>{closed.push(spec.id);const c=p.calls.find(c=>c.args.includes('--remote-debugging-port='+spec.cdpPort));c.child.exitCode=0;c.child.emit('exit',0);}});t.after(()=>manager.stop());await manager.start();
+ p.calls.find(c=>c.args.includes('--remote-debugging-port='+port)).child.kill('SIGTERM');await new Promise(r=>foreign.listen(port,'127.0.0.1',r));t.after(()=>new Promise(r=>foreign.close(r)));
+ await manager.stop();assert.deepEqual(closed,['overview']);assert.equal(requests,0);assert.equal(foreign.listening,true);
 });
 test('failed readiness cleans partial children and never reports a logged-out browser as a process failure',async t=>{
  const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const p=processes(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>false,readinessTimeoutMs:15});
