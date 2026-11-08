@@ -1,6 +1,14 @@
 name: fnOS native FPK
 run-name: Native FPK · ${{ github.ref_name }} · ${{ github.sha }}
 on:
+  push:
+    branches: [codex/fnos-native]
+    paths:
+      - .github/workflows/fnos-native.yml
+      - deploy/fnos/**
+      - tests/web-fnos-artifact.test.mjs
+      - package.json
+      - package-lock.json
   workflow_dispatch:
 permissions:
   contents: read
