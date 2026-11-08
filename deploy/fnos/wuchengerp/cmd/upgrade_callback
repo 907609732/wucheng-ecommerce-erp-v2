@@ -2,6 +2,7 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
+recover_retained
 prepare
 provision_uvcs
 if [ -f "$CONFIG" ]; then erp_mode=existing; export erp_mode; fi

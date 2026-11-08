@@ -2,7 +2,9 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
+recover_retained
 prepare
 provision_uvcs
 [ -x "$NODE" ] || fail 'ERP 缺少捆绑 Node，请安装完整 FPK。'
+if [ -f "$CONFIG" ]; then erp_mode=existing; export erp_mode; fi
 if ! as_package "$NODE" "$LIFECYCLE" configure; then fail 'ERP 初始化失败，原账本未替换；请检查停写副本和安装参数。'; fi

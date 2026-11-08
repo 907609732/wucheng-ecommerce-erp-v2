@@ -6,6 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {spawnSync} from 'node:child_process';
 import {developmentConfig,validateConfig,moduleIds,databases} from '../config.mjs';
 import {createSourceServices} from '../services.mjs';
+import {DATA_VERSION_POLICY,embeddedBusinessFiles,quoteIdentifier as quote} from '../../shared/data-version-policy.mjs';
 
 export const within=(child,parent)=>{if(process.platform==='win32'){child=child.toLowerCase();parent=parent.toLowerCase();}return child===parent||child.startsWith(parent+path.sep);};
 export function physicalPath(value){
@@ -22,7 +23,7 @@ export function atomicJson(file,value){
 }
 export async function withNativeLifecycleLock(stateDir,action,{timeoutMs=100000}={}){
  stateDir=physicalPath(stateDir);fs.mkdirSync(stateDir,{recursive:true,mode:0o700});
- const lock=new DatabaseSync(path.join(stateDir,'native-lifecycle.sqlite')),until=Date.now()+timeoutMs;
+ const lock=new DatabaseSync(physicalPath(path.join(stateDir,'native-lifecycle.sqlite'))),until=Date.now()+timeoutMs;
  try{
   while(true){try{lock.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');break;}catch(error){
    if(error.code!=='ERR_SQLITE_ERROR'||!error.message.includes('locked')||Date.now()>until)throw error;
@@ -125,16 +126,26 @@ function rebaseConfig(old,root,releaseRoot){
  for(const id of moduleIds){c.modules[id].root=path.join(releaseRoot,'apps',id);c.modules[id].dataDir=path.join(root,'data',id);}
  delete c.windowsService;c.native={...c.native,dataRoot:root,home:path.join(root,'uvcs-home'),nodePath:process.execPath};return {config:c,maps};
 }
-function remapReferences(root,maps){
- // Only documented file-reference columns change; identities/passwords/locks do not.
+function validateReferences(root){
+ // Reading the owning applications' reviewed file columns never changes business
+ // rows, triggers, locks, outbox events or historical snapshots.
  for(const id of moduleIds){
-  const db=new DatabaseSync(path.join(root,'data',id,databases[id]));const quote=s=>'"'+s.replaceAll('"','""')+'"';
-  try{db.exec('BEGIN IMMEDIATE');for(const {name} of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()){
-   const columns=db.prepare('PRAGMA table_info('+quote(name)+')').all().filter(c=>/^(?:original_path|evidence_path|file_path|attachment_path|source_path)$/.test(c.name));
-   for(const column of columns)for(const [from,to] of maps){
-    const q=quote(column.name);db.prepare('UPDATE '+quote(name)+' SET '+q+'=? || substr('+q+', ?) WHERE '+q+'=? OR substr('+q+',1,?)=?').run(to,from.length+1,from,from.length+1,from+path.sep);
-   }
-  }db.exec('COMMIT');}catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}finally{db.close();}
+  const dir=path.join(root,'data',id),db=new DatabaseSync(path.join(dir,databases[id]),{readOnly:true});
+  const check=(value,label,expected={})=>{
+   if(value===null||value===undefined||value==='')return;
+   if(typeof value!=='string'||path.posix.isAbsolute(value)||path.win32.isAbsolute(value))throw Error(id+' '+label+' 原件引用使用不支持的绝对路径，必须先核对旧根映射');
+   if(value.split(/[\\/]/).some(part=>part==='..')||(path.sep==='/'&&value.includes('\\')))throw Error(id+' '+label+' 原件引用路径无效');
+   const file=physicalPath(path.resolve(dir,value));
+   if(!within(file,dir)||file===dir||!fs.existsSync(file)||!fs.statSync(file).isFile())throw Error(id+' '+label+' 原件引用缺失或不在数据目录内');
+   if(expected.sha256&&digest(file)!==expected.sha256||expected.bytes!==undefined&&fs.statSync(file).size!==expected.bytes)throw Error(id+' '+label+' 原件引用校验失败');
+  };
+  try{
+   const tables=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r=>r.name));
+   const columns={...DATA_VERSION_POLICY[id].files,workbench_migration_evidence_files:['local_path']};
+   for(const [table,names]of Object.entries(columns))if(tables.has(table))for(const row of db.prepare('SELECT * FROM '+quote(table)).iterate())for(const name of names)check(row[name],table+'.'+name);
+   if(id==='sales'&&tables.has('platform_references'))for(const row of db.prepare('SELECT payload FROM platform_references').iterate())check(JSON.parse(row.payload).evidence_path,'platform_references.payload.evidence_path');
+   if(id==='overview'&&tables.has('payments'))for(const row of db.prepare('SELECT payload FROM payments').iterate())for(const ref of embeddedBusinessFiles(id,'payments',row))check(ref.path,'payments.payload.evidence',ref);
+  }finally{db.close();}
  }
 }
 function checkUvcs(c){
@@ -157,7 +168,8 @@ export async function configureNative(o={}){
   c=developmentConfig({root:releaseRoot,stateDir:path.join(dataRoot,'state')});
   c.publicOrigin=o.publicOrigin;c.mode='production';c.releaseRoot=releaseRoot;c.tcpEnabled=false;
   for(const id of moduleIds)c.modules[id].dataDir=path.join(dataRoot,'data',id);
-  c.fnos={enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins:o.allowedOrigins,allowedUids:o.allowedUids};
+  const allowedOrigins=Array.isArray(o.allowedOrigins)?[...new Set([...o.allowedOrigins,u.origin])]:o.allowedOrigins;
+  c.fnos={enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins,allowedUids:o.allowedUids,hostAliases:{localhost:u.origin}};
   c.native={dataRoot,home:path.join(dataRoot,'uvcs-home'),nodePath:process.execPath,...(o.browser?{browser:o.browser}:{})};
   const {validateFnos}=await import('../gateway/fnos.mjs');validateFnos(c.fnos);
   if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('NAS HTTPS 地址必须为源地址');
@@ -179,7 +191,10 @@ export async function configureNative(o={}){
    }finally{ownership.close();}
   });
  }
- const lock=dataRoot+'.configure-lock';fs.mkdirSync(path.dirname(dataRoot),{recursive:true});fs.mkdirSync(lock);
+ const lock=physicalPath(dataRoot+'.configure-state');fs.mkdirSync(lock,{recursive:true,mode:0o700});
+ const lockStat=fs.statSync(lock);
+ if(!lockStat.isDirectory()||process.platform!=='win32'&&(lockStat.uid!==process.getuid()||(lockStat.mode&0o077)))throw Error('初始化锁目录必须由当前用户私有持有');
+ return withNativeLifecycleLock(lock,async()=>{
  const stage=dataRoot+'.staging-'+randomUUID();
  try{
   if(fs.existsSync(dataRoot))throw Error('持久数据目录已存在；请显式使用 existing');fs.mkdirSync(stage,{mode:0o700});
@@ -196,12 +211,13 @@ export async function configureNative(o={}){
    if(!c.fnos?.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
    c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=physicalPath(o.cmPath);
-   remapReferences(stage,rebased.maps);
+   validateReferences(stage);
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));
   }
   if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
   fs.mkdirSync(path.join(stage,'socket'),{recursive:true,mode:0o700});integrity(stage);
   validateConfig(remap(c,[[dataRoot,stage]]));if(c.dataVersion?.enabled)checkUvcs(remap(c,[[dataRoot,stage]]));
   atomicJson(path.join(stage,'config','web.json'),c);fs.renameSync(stage,dataRoot);return targetFile;
- }finally{if(fs.existsSync(stage))fs.rmSync(stage,{recursive:true,force:true});fs.rmdirSync(lock);}
+ }finally{if(fs.existsSync(stage))fs.rmSync(stage,{recursive:true,force:true});}
+ });
 }

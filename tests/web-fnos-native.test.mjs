@@ -11,6 +11,7 @@ import {configureNative,sealStoppedSource,backupNative} from '../server/fnos-nat
 import {nativeLifecycle} from '../server/fnos-native/lifecycle.mjs';
 import {startNativeCollector,deadline} from '../server/fnos-native/supervisor.mjs';
 import {loadConfig,validateConfig,developmentConfig,databases} from '../server/config.mjs';
+import {fnosIdentity} from '../server/gateway/fnos.mjs';
 const releaseRoot=path.resolve(import.meta.dirname,'..');
 const origin='https://nas.example.com:5667';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -37,10 +38,22 @@ test('fresh creates three real production books, no dev gateway identity, and ex
  assert.deepEqual(loadConfig(file2).fnos.allowedUids,['1001']);
  assert.equal(hash(path.join(c.modules.purchase.dataDir,databases.purchase)),before);
 });
+
+test('fresh resolves the exact localhost relay without Origin to the explicitly configured primary HTTPS entry',async t=>{
+ const dir=fixture(t),data=path.join(dir,'fresh-relay'),secondary='https://secondary.example.com';
+ const c=loadConfig(await configureNative({...options(data),allowedOrigins:[secondary]}));
+ const request=patch=>{const headers={host:'localhost','x-trim-userid':'1000','x-trim-username':'NAS Member',...patch};return {headers,raw:{rawHeaders:Object.entries(headers).flat()}};};
+ const actor=fnosIdentity(request(),c.fnos);
+ assert.equal(actor.origin,origin);assert.equal(actor.secure,true);assert.equal(actor.id,'fnos:'+c.fnos.instanceId+':1000');
+ assert.deepEqual(c.fnos.hostAliases,{localhost:origin});assert.ok(c.fnos.allowedOrigins.includes(origin));assert.ok(c.fnos.allowedOrigins.includes(secondary));
+ assert.throws(()=>fnosIdentity(request({host:'untrusted.example.com',forwarded:'host=localhost;proto=https','x-forwarded-host':'localhost'}),c.fnos),{code:'INVALID_HOST'});
+ assert.throws(()=>fnosIdentity(request({origin:secondary}),c.fnos),{code:'ORIGIN_DENIED'});
+});
 test('migration requires stopped verified complete source and preserves private identities and locks without source writes',async t=>{
  const dir=fixture(t),source=path.join(dir,'old'),target=path.join(dir,'new');
  const file=await configureNative(options(source));const c=loadConfig(file);
  c.publicOrigin='https://original.example.ts.net';c.tcpEnabled=true;
+ c.fnos.hostAliases={localhost:origin};
  fs.writeFileSync(file,JSON.stringify(c));
  fs.mkdirSync(path.join(source,'state','gateway'),{recursive:true});
  fs.writeFileSync(path.join(source,'state','gateway','identity.json'),JSON.stringify({schemaVersion:1,serverId:'original-server-id',dataSetId:'original-dataset-id'}));
@@ -50,22 +63,24 @@ test('migration requires stopped verified complete source and preserves private 
  fs.mkdirSync(path.join(source,'browser-profiles','sales'),{recursive:true});
  fs.writeFileSync(path.join(source,'browser-profiles','sales','Preferences'),'PRIVATE PROFILE');
  fs.writeFileSync(path.join(source,'uvcs-home','auth.conf'),'PRIVATE UVCS');
- const ledger=new DatabaseSync(path.join(c.modules.sales.dataDir,databases.sales));
- ledger.exec('CREATE TABLE native_attachment_fixture(original_path TEXT)');
- ledger.prepare('INSERT INTO native_attachment_fixture VALUES(?)').run(path.join(c.modules.sales.dataDir,'originals','invoice.pdf'));ledger.close();
+ const ledger=new DatabaseSync(path.join(c.modules.purchase.dataDir,databases.purchase));
+ fs.writeFileSync(path.join(c.modules.purchase.dataDir,'originals','invoice.pdf'),'retained original');
+ ledger.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?,?,?)').run('migration-original','invoice.pdf',hash(path.join(c.modules.purchase.dataDir,'originals','invoice.pdf')),'originals/invoice.pdf','2026-01-01',1,0,1,'{}');ledger.close();
  await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),/校验|manifest/);
  await sealStoppedSource(source);
  const before=hash(file),admin=hash(path.join(source,'state','month-admin','secret.json'));
  const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source}));
  assert.equal(migrated.fnos.instanceId,c.fnos.instanceId);assert.equal(migrated.publicOrigin,c.publicOrigin);assert.equal(migrated.tcpEnabled,true);
  assert.deepEqual(migrated.fnos.allowedUids,c.fnos.allowedUids);
+ assert.deepEqual(migrated.fnos.hostAliases,c.fnos.hostAliases,'migration retains original explicit relay aliases');
  assert.equal(fs.readFileSync(path.join(target,'data','sales','month.lock'),'utf8'),'LOCK CONTENT');
  assert.equal(fs.readFileSync(path.join(target,'state','month-admin','secret.json'),'utf8'),'PRIVATE ADMIN');
  assert.equal(JSON.parse(fs.readFileSync(path.join(target,'state','gateway','identity.json'))).serverId,'original-server-id');
  assert.equal(fs.readFileSync(path.join(target,'uvcs-home','auth.conf'),'utf8'),'PRIVATE UVCS');
  assert.equal(fs.readFileSync(path.join(target,'browser-profiles','sales','Preferences'),'utf8'),'PRIVATE PROFILE');
- const migratedDb=new DatabaseSync(path.join(target,'data','sales',databases.sales),{readOnly:true});
- assert.equal(migratedDb.prepare('SELECT original_path FROM native_attachment_fixture').get().original_path,path.join(target,'data','sales','originals','invoice.pdf'));migratedDb.close();
+ const migratedDb=new DatabaseSync(path.join(target,'data','purchase',databases.purchase),{readOnly:true});
+ assert.equal(migratedDb.prepare('SELECT file_path FROM imports WHERE id=?').get('migration-original').file_path,'originals/invoice.pdf');migratedDb.close();
+ assert.equal(fs.readFileSync(path.join(target,'data','purchase','originals','invoice.pdf'),'utf8'),'retained original');
  assert.equal(hash(file),before);assert.equal(hash(path.join(source,'state','month-admin','secret.json')),admin);
  const sourceIdentity=path.join(source,'state','gateway','identity.json'),savedIdentity=fs.readFileSync(sourceIdentity);
  c.tcpEnabled=false;fs.writeFileSync(file,JSON.stringify(c));await sealStoppedSource(source);
@@ -83,11 +98,11 @@ test('existing configure waits for the lifecycle transaction and merges independ
  const dir=fixture(t),data=path.join(dir,'instance'),file=await configureNative(options(data)),c=loadConfig(file);
  const lock=new DatabaseSync(path.join(c.stateDir,'native-lifecycle.sqlite'));lock.exec('BEGIN EXCLUSIVE');
  let finished=0;const first=configureNative({...options(data),mode:'existing',allowedOrigins:undefined,allowedUids:['1002']}).then(v=>{finished++;return v;});
- const second=configureNative({...options(data),mode:'existing',allowedUids:undefined,allowedOrigins:['https://second-nas.example.com']}).then(v=>{finished++;return v;});
+ const second=configureNative({...options(data),mode:'existing',allowedUids:undefined,allowedOrigins:[origin,'https://second-nas.example.com']}).then(v=>{finished++;return v;});
  let early;try{await new Promise(r=>setTimeout(r,100));early=finished;}finally{lock.close();}
  await Promise.all([first,second]);
  assert.equal(early,0,'configuration may not commit inside a start/stop critical section');
- const updated=loadConfig(file);assert.deepEqual(updated.fnos.allowedUids,['1002']);assert.deepEqual(updated.fnos.allowedOrigins,['https://second-nas.example.com']);
+ const updated=loadConfig(file);assert.deepEqual(updated.fnos.allowedUids,['1002']);assert.deepEqual(updated.fnos.allowedOrigins,[origin,'https://second-nas.example.com']);
 });
 test('existing configure refuses the ownership window before the supervisor publishes a PID record',async t=>{
  const dir=fixture(t),data=path.join(dir,'instance'),file=await configureNative(options(data)),c=loadConfig(file);
@@ -129,11 +144,11 @@ test('real package configure CLI preserves independent updates with one serializ
  t.after(async()=>{fs.writeFileSync(resume,'resume');for(const child of children)if(child.exitCode===null){child.kill();await new Promise(r=>child.once('close',r));}fs.rmSync(dir,{recursive:true,force:true});});
  const first=launch(['--uids','3003'],true),until=Date.now()+10000;
  while(!fs.existsSync(committed)&&Date.now()<until)await new Promise(r=>setTimeout(r,20));assert.ok(fs.existsSync(committed),first.error());
- const second=launch(['--origins','https://second-nas.example.com']);
+ const second=launch(['--origins',origin+',https://second-nas.example.com']);
  const secondCode=await deadline(second.closed,10000,'second package configure failed to finish');fs.writeFileSync(resume,'resume');
  const firstCode=await deadline(first.closed,10000,'first package configure failed to finish');
  assert.equal(firstCode,0);assert.equal(secondCode,0);
- const result=loadConfig(file);assert.deepEqual(result.fnos.allowedUids,['3003']);assert.deepEqual(result.fnos.allowedOrigins,['https://second-nas.example.com']);
+ const result=loadConfig(file);assert.deepEqual(result.fnos.allowedUids,['3003']);assert.deepEqual(result.fnos.allowedOrigins,[origin,'https://second-nas.example.com']);
  assert.equal(result.native.requireBrowsers,true);assert.equal(Number(fs.readFileSync(committed,'utf8')),1,'package requirement belongs to the serialized commit');
 });
 test('interrupting a blocked startup drains its already-owned module before supervisor exit',async t=>{

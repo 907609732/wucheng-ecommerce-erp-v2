@@ -35,6 +35,25 @@ as_package() {
   "$@"
  fi
 }
+recover_retained() {
+ [ "$(id -u)" = 0 ] || return 0
+ [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+ PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+ PACKAGE_GID=$(id -g "$TRIM_USERNAME")
+ [ "$PACKAGE_UID" != 0 ] || fail 'ERP package 用户不能为 root。'
+ # Only root-owned appcenter hooks are trusted here, never target payload code.
+ TRUSTED="$SELF/retained_recovery.py"
+ [ -f "$TRUSTED" ] && [ ! -L "$TRUSTED" ] || fail 'ERP 缺少可信的保留数据恢复钩子。'
+ while :; do
+  [ "$(stat -c %u "$TRUSTED")" = 0 ] || fail 'ERP 恢复钩子及父目录必须由 root 所有。'
+  RIGHTS=$(stat -c %a "$TRUSTED")
+  [ "$((0$RIGHTS & 022))" = 0 ] || fail 'ERP 恢复钩子路径不能被非 root 写入。'
+  [ "$TRUSTED" != / ] || break
+  TRUSTED=$(dirname "$TRUSTED")
+ done
+ [ -x /usr/bin/python3 ] || fail '保留数据属主恢复需要系统 /usr/bin/python3；已阻止继续安装。'
+ /usr/bin/python3 -I -B "$SELF/retained_recovery.py" "$VOLUME" "$PACKAGE_UID" "$PACKAGE_GID" || fail '保留账本恢复被阻止；请先确认旧服务完全停止并检查物理保留目录。'
+}
 prepare() {
  [ ! -L "$BASE" ] && [ ! -L "$DATA" ] || fail 'ERP 持久目录不能是符号链接。'
  # Root prepares only exact app-owned directories. All recursive copying is
