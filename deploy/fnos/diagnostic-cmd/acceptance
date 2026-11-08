@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/diag_env"
+prepare_diag
+stop_diag
+run="run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+RUN="$BASE/$run"
+mkdir -m700 "$RUN"
+if [ "$(id -u)" = 0 ]; then chown "$uid:$gid" "$RUN"; fi
+printf '%s\n' "$run" > "$BASE/active-run"
+status=0
+# timeout is itself unprivileged. TERM allows nativeLifecycle/finally cleanup;
+# after any timeout a second identity-checked native stop is always attempted.
+as_package timeout --signal=TERM --kill-after=45s 240s "$NODE" "$PAYLOAD/smoke-native.mjs" --app-root "$PAYLOAD" --data-root "$RUN/data" --evidence-dir "$RUN/evidence" --port-offset 10000 --diagnostic 1 || status=$?
+stop_diag || status=1
+printf '%s\n' "诊断结果：$RUN/evidence/acceptance.json；作业已结束，诊断应用保持停止。"
+[ "$status" = 0 ] || fail "原生诊断失败或超时（$status），保留证据：$RUN/evidence；正式应用未操作。"

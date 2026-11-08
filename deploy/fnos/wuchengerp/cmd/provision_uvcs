@@ -1,0 +1,25 @@
+#!/bin/sh
+# Invoked only by native_env after root ownership/path checks and wizard opt-in.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+[ "$(id -u)" = 0 ] || { echo '系统 UVCS 安装需要 root 准备权限。' >&2; exit 1; }
+version=11.0.16.10616-1
+if [ "$(dpkg-query -W -f='${Status} ${Version}' plasticscm-client-core 2>/dev/null || :)" = "install ok installed $version" ]; then exit 0; fi
+[ "$(dpkg --print-architecture)" = amd64 ] || { echo 'UVCS 仅核验了 amd64 官方安装包。' >&2; exit 1; }
+for tool in curl sha256sum dpkg-deb apt-get; do command -v "$tool" >/dev/null || { echo "安装可选 UVCS 缺少系统工具 $tool；请先由管理员准备。" >&2; exit 1; }; done
+work=$(mktemp -d /var/tmp/wuchengerp-uvcs.XXXXXXXX)
+trap 'rm -rf -- "$work"' EXIT HUP INT TERM
+deb="$work/plasticscm-client-core.deb"
+curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$deb" 'https://uvcs.unity3d.com/linux/repos/deb/pool/main/u/unity/uvcs_amd64/plasticscm-client-core_11.0.16.10616-1_amd64.deb'
+[ "$(stat -c %s "$deb")" = 81720976 ] || { echo 'UVCS 官方安装包大小不匹配。' >&2; exit 1; }
+printf '%s  %s\n' b90be9da5670b8aa129b7ed3c3527192e7620c5f1f6d3f97e33f0e2733502ef6 "$deb" | sha256sum --check --strict
+[ "$(dpkg-deb -f "$deb" Package)" = plasticscm-client-core ]
+[ "$(dpkg-deb -f "$deb" Version)" = "$version" ]
+[ "$(dpkg-deb -f "$deb" Architecture)" = amd64 ]
+# No dist-upgrade, apt update, unrelated removals or credential setup. Missing
+# dependencies fail clearly; this never installs the CLI from writable target.
+apt-get --no-remove --no-upgrade install -y -- "$deb" || { echo 'UVCS 系统依赖安装失败；请管理员核对官方依赖后重试。原账本和队列保留。' >&2; exit 1; }
+[ "$(dpkg-query -W -f='${Status} ${Version}' plasticscm-client-core)" = "install ok installed $version" ]
+[ -x /usr/bin/cm ]

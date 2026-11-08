@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fail() { printf '%s\n' "$1" >&2; [ -z "${TRIM_TEMP_LOGFILE:-}" ] || printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -n "${TRIM_APPDEST:-}" ] && [ -n "${TRIM_APPDEST_VOL:-}" ] || fail '诊断包缺少官方安装环境。'
+TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" && pwd -P)
+VOLUME=$(CDPATH= cd -P "$TRIM_APPDEST_VOL" && pwd -P)
+BASE="$VOLUME/@wuchengerpdiag-data"
+PAYLOAD="$TARGET"
+[ -d "$PAYLOAD/runtime" ] || PAYLOAD="$TARGET/app"
+NODE="$PAYLOAD/runtime/node/bin/node"
+[ "${TRIM_APPNAME:-wuchengerpdiag}" = wuchengerpdiag ] || fail '仅允许独立诊断包。'
+case "$BASE/" in "$TARGET/"*) fail '诊断数据不能位于 target。';; esac
+as_package() {
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail '诊断包缺少专用用户。'
+  [ "$(id -u "$TRIM_USERNAME")" != 0 ] || fail '诊断不能以 root 运行。'
+  runuser -u "$TRIM_USERNAME" -- "$@"
+ else "$@"; fi
+}
+prepare_diag() {
+ [ ! -L "$BASE" ] || fail '诊断私有根不能是链接。'
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail '缺少诊断专用用户。'
+  uid=$(id -u "$TRIM_USERNAME"); gid=$(id -g "$TRIM_USERNAME")
+  [ "$uid" != 0 ] || fail '诊断用户不能为 root。'
+  if [ -d "$BASE" ]; then [ "$(stat -c %u "$BASE")" = "$uid" ] || fail '保留诊断根属于旧 UID；请先审核旧诊断数据，禁止自动递归 chown。'
+  else mkdir -m700 "$BASE"; chown "$uid:$gid" "$BASE"; fi
+  chmod 700 "$BASE"
+ fi
+}
+current_config() {
+ [ -f "$BASE/active-run" ] && [ ! -L "$BASE/active-run" ] || return 1
+ run=$(cat "$BASE/active-run")
+ case "$run" in run-*) ;; *) fail '诊断 run 标记无效。';; esac
+ case "$run" in *[!a-zA-Z0-9-]*|'') fail '诊断 run 标记无效。';; esac
+ CONFIG="$BASE/$run/data/config/web.json"
+}
+stop_diag() {
+ if current_config && [ -f "$CONFIG" ]; then as_package "$NODE" "$PAYLOAD/erp/server/fnos-native/lifecycle.mjs" stop --config "$CONFIG"; fi
+}

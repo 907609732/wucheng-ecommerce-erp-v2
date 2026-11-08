@@ -1,0 +1,43 @@
+name: fnOS native FPK
+run-name: Native FPK · ${{ github.ref_name }} · ${{ github.sha }}
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on Debian 12, test real package-user namespace sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fnos-output" "$RUNNER_TEMP/fnos-work"
+          # Privilege belongs only to this ephemeral test container. The FPK
+          # neither uses Docker nor grants Linux capabilities to its package user.
+          docker run --rm --privileged --security-opt apparmor=unconfined \
+            -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_WORK_ROOT=/build \
+            -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
+            -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
+            bash deploy/fnos/ci-native.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/ci-build.log"
+      - name: Upload native FPK, diagnostic FPK and verifiable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnos-native-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fnos-output/**
+            !${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload complete corresponding-source companion
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnos-corresponding-source-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
