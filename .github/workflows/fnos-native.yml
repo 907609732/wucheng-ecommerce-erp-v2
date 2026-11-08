@@ -6,7 +6,11 @@ on:
     paths:
       - .github/workflows/fnos-native.yml
       - deploy/fnos/**
-      - tests/web-fnos-artifact.test.mjs
+      - server/**
+      - apps/**
+      - shared/**
+      - tests/**
+      - .gitattributes
       - package.json
       - package-lock.json
   workflow_dispatch:
