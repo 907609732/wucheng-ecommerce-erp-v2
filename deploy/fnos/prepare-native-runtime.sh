@@ -30,6 +30,7 @@ apt-get install -y --no-install-recommends \
   x11vnc xauth x11-xkb-utils xkb-data xfonts-base xfonts-encodings fonts-noto-cjk fontconfig \
   "xvfb=$XORG_VERSION" \
   libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 \
+  libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2 \
   ca-certificates zstd strace util-linux
 apt-get build-dep -y --no-install-recommends "xorg-server=$XORG_VERSION"
 (cd "$work/debs"; apt-get download "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION")
@@ -64,11 +65,12 @@ lddtree --copy-to-tree "$sysroot" --bindir /usr/bin /usr/bin/x11vnc /usr/bin/xau
 mkdir -p "$runtime/chromium"
 cp -a /usr/lib/chromium/. "$runtime/chromium/"
 mv "$runtime/chromium/chromium" "$runtime/chromium/chrome"
-lddtree --copy-to-tree "$sysroot" /usr/lib/chromium/chromium "$runtime/node/bin/node" "$xorg/build-native/hw/vfb/Xvfb"
+lddtree --copy-to-tree "$sysroot" /usr/lib/chromium/chromium /usr/lib/chromium/libvulkan.so.1 /usr/lib/chromium/libvk_swiftshader.so "$runtime/node/bin/node" "$xorg/build-native/hw/vfb/Xvfb"
 rm -rf -- "$sysroot/usr/lib/chromium" "${sysroot}${runtime}" "${sysroot}${work}"
-# Mozilla NSS/GTK/Mesa are loaded with dlopen and must be included explicitly.
+# Mozilla NSS differs from glibc's external NSS plugins. Both those plugins and
+# GIO/VA backends can be loaded by name even when lddtree sees no DT_NEEDED edge.
 extras=()
-for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0; do
+for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2; do
  while IFS= read -r file; do
   if [[ -f "$file" && "$file" =~ \.so(\.|$) ]]; then extras+=("$file"); fi
  done < <(dpkg-query -L "$package")
@@ -81,7 +83,7 @@ done
 # the font metadata with standard mkfontdir and relative paths for both packages.
 (cd "$sysroot/usr/share/fonts/X11/misc"; mkfontdir -e ../encodings -e ../encodings/large .)
 # Keep the NAS loader/glibc 2.36 family. Never mix a private glibc and host loader.
-find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*' -o -name 'libm.so*' -o -name 'libmvec.so*' -o -name 'libpthread.so*' -o -name 'libdl.so*' -o -name 'librt.so*' -o -name 'libresolv.so*' -o -name 'libutil.so*' -o -name 'libanl.so*' -o -name 'libBrokenLocale.so*' -o -name 'libnss_*.so*' \) -delete
+find "$sysroot" \( -type f -o -type l \) \( -name 'ld-linux*' -o -name 'libc.so*' -o -name 'libm.so*' -o -name 'libmvec.so*' -o -name 'libpthread.so*' -o -name 'libdl.so*' -o -name 'librt.so*' -o -name 'libresolv.so*' -o -name 'libutil.so*' -o -name 'libanl.so*' -o -name 'libBrokenLocale.so*' -o -name 'libnss_files.so*' -o -name 'libnss_dns.so*' -o -name 'libnss_compat.so*' -o -name 'libnss_hesiod.so*' \) -delete
 # Source ownership is derived from every copied Debian path, including resource
 # data and dlopen libraries. Xvfb is custom-built from the patched xorg source.
 printf '%s\n' xvfb > "$work/owners.txt"

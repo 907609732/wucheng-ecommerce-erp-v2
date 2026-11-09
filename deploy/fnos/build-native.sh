@@ -77,6 +77,36 @@ ln -s "$stage/app" /var/apps/wuchengerp/target
 chmod 755 "$work"
 chown erpbuild:erpbuild "$stage/app"
 mkdir -p "$work/fixture" "$work/smoke-evidence"; chown erpbuild:erpbuild "$work/fixture" "$work/smoke-evidence"
+# Deliberately populated desktop host, in this disposable builder only. Normal
+# and diagnostic smoke inherit hostile discovery paths; runtime must replace them.
+apt-get install -y --no-install-recommends mesa-vulkan-drivers
+for file in /usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so /usr/lib/x86_64-linux-gnu/libnss_mymachines.so.2 /usr/lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2 /usr/lib/x86_64-linux-gnu/libvulkan_intel.so /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so /usr/lib/x86_64-linux-gnu/libva.so.2 /usr/lib/x86_64-linux-gnu/libva-drm.so.2; do
+ [[ -f $file ]]; printf '%s\n' "$file" >> "$out/host-library-fixture.txt"
+done
+export GIO_MODULE_DIR=/usr/lib/x86_64-linux-gnu/gio/modules GIO_EXTRA_MODULES=/usr/lib/x86_64-linux-gnu/gio/modules
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d VK_ICD_FILENAMES=/usr/share/vulkan/icd.d VK_ADD_DRIVER_FILES=/usr/share/vulkan/icd.d
+export VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d VK_IMPLICIT_LAYER_PATH=/usr/share/vulkan/implicit_layer.d
+export LIBVA_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri
+# Force actual libc NSS lookups without changing global nsswitch or depending
+# on DNS service order. Audit every initialized dependency with the SAME policy.
+runuser -u erpbuild -- "$runtime/node/bin/node" --input-type=module - "$runtime" "$helper" "$work/smoke-evidence" <<'JS'
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
+const [runtime,helper,evidence]=process.argv.slice(2);
+const {isAllowedRuntimeLibrary}=await import(pathToFileURL(path.join(helper,'smoke-checks.mjs')));
+const libs=['usr/lib/x86_64-linux-gnu','lib/x86_64-linux-gnu','usr/lib','lib'].map(p=>path.join(runtime,'sysroot',p)).join(':');
+for(const service of ['mymachines','mdns4_minimal']){
+ const result=spawnSync('/usr/bin/getent',['-s',service,'hosts','erp-closure-fixture.invalid'],{env:{...process.env,LD_LIBRARY_PATH:libs,LD_DEBUG:'libs'},encoding:'utf8',timeout:10000});
+ fs.writeFileSync(path.join(evidence,'nss-'+service+'-loader.log'),result.stderr||'');
+ assert(!result.error,result.error?.message);assert([0,2].includes(result.status),'NSS lookup failed to execute: '+result.status);
+ const loaded=[...(result.stderr||'').matchAll(/calling init:\s+(\/[^\r\n]+)/g)].map(m=>m[1].trim());
+ assert(loaded.some(p=>p.startsWith(runtime+'/')&&path.basename(p)==='libnss_'+service+'.so.2'),'Private NSS plugin was not actually loaded: '+service);
+ for(const file of loaded)assert(isAllowedRuntimeLibrary(file,runtime,path.join(path.dirname(runtime),'erp')),'Host NSS dependency: '+file);
+}
+JS
 runuser -u erpbuild -- env PATH="$PATH" LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/node/bin/node" "$helper/smoke-native.mjs" --app-root /var/apps/wuchengerp/target --data-root "$work/fixture/data" --evidence-dir "$work/smoke-evidence" --port-offset 1000
 strace -f -e trace=%file -o "$out/private-runtime-file-probe.log" runuser -u erpbuild -- env LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/chromium/chrome" --version
 cp -a "$work/smoke-evidence" "$out/smoke-evidence"

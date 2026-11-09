@@ -22,6 +22,12 @@ ln -s "$work/unpacked-diag/app" /var/apps/wuchengerpdiag/target
 chown erpbuild:erpbuild "$app"
 chown erpbuild:erpbuild "$work/clean-fixture" /output/release/clean-runtime-evidence
 libs="$app/runtime/sysroot/usr/lib/x86_64-linux-gnu:$app/runtime/sysroot/lib/x86_64-linux-gnu:$app/runtime/sysroot/usr/lib:$app/runtime/sysroot/lib"
+# Keep this image clean; hostile desktop environment variables must not make
+# either packed main or diagnostic runtime fall back to those absent host paths.
+export GIO_MODULE_DIR=/usr/lib/x86_64-linux-gnu/gio/modules GIO_EXTRA_MODULES=/usr/lib/x86_64-linux-gnu/gio/modules
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d VK_ICD_FILENAMES=/usr/share/vulkan/icd.d VK_ADD_DRIVER_FILES=/usr/share/vulkan/icd.d
+export VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d VK_IMPLICIT_LAYER_PATH=/usr/share/vulkan/implicit_layer.d
+export LIBVA_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri
 runuser -u erpbuild -- env LD_LIBRARY_PATH="$libs" "$app/runtime/node/bin/node" /src/deploy/fnos/smoke-native.mjs --app-root "$app" --data-root "$work/clean-fixture/data" --evidence-dir /output/release/clean-runtime-evidence --port-offset 1000
 mkdir -p "$work/clean-dv"
 export TRIM_APPDEST=/var/apps/wuchengerpdiag/target TRIM_APPDEST_VOL="$work/clean-dv" TRIM_USERNAME=erpdiag TRIM_APPNAME=wuchengerpdiag

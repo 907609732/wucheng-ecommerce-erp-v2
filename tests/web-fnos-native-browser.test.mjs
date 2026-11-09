@@ -37,7 +37,8 @@ function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'native-browser-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const runtimeRoot=path.join(root,'runtime');
- for(const file of ['sysroot/usr/bin/Xvfb','sysroot/usr/bin/x11vnc','sysroot/usr/bin/xauth','chromium/chrome','novnc/vnc.html']){const p=path.join(runtimeRoot,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,'fixture');}
+ for(const file of ['sysroot/usr/bin/Xvfb','sysroot/usr/bin/x11vnc','sysroot/usr/bin/xauth','chromium/chrome','chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so','novnc/vnc.html']){const p=path.join(runtimeRoot,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,'fixture');}
+ fs.writeFileSync(path.join(runtimeRoot,'chromium/vk_swiftshader_icd.json'),JSON.stringify({ICD:{library_path:'./libvk_swiftshader.so'}}));
  return {native:{dataRoot:path.join(root,'data'),browser:{enabled:true,runtimeRoot,chromiumPath:path.join(runtimeRoot,'chromium/chrome'),novncRoot:path.join(runtimeRoot,'novnc')}},stateDir:path.join(root,'data/state')};
 }
 function processes({fail}={}){
@@ -60,6 +61,31 @@ test('native browser manager owns two private loopback profiles and stops only i
  for(const c of p.calls.filter(c=>path.basename(c.file)==='Xvfb')){assert(c.args.includes('-auth'));assert(c.args.includes('-nolisten'));assert(!c.args.includes('-ac'));}
  for(const c of p.calls.filter(c=>path.basename(c.file)==='x11vnc')){assert(c.args.includes('127.0.0.1'));assert(c.args.includes('-no6'));assert(c.args.includes('-rfbport'));for(const disabled of ['-nosel','-noprimary','-nosetprimary','-nosetclipboard'])assert(!c.args.includes(disabled),'authenticated clipboard must remain usable inside private Xvfb');}
  await manager.stop();assert.equal(manager.status().ready,false);assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
+});
+
+test('native browser launch overrides inherited host GIO, Vulkan and VA discovery with the private payload',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),config=fixture(t),p=processes();
+ const poisoned={GIO_MODULE_DIR:'/host/gio',GIO_EXTRA_MODULES:'/host/extra-gio',VK_DRIVER_FILES:'/host/driver.json',VK_ICD_FILENAMES:'/host/old-driver.json',VK_ADD_DRIVER_FILES:'/host/add-driver.json',VK_LAYER_PATH:'/host/layers',VK_IMPLICIT_LAYER_PATH:'/host/implicit',VK_ADD_LAYER_PATH:'/host/add-layers',VK_ADD_IMPLICIT_LAYER_PATH:'/host/add-implicit',VK_INSTANCE_LAYERS:'host-layer',VK_LOADER_LAYERS_ENABLE:'host-layer',VK_LOADER_LAYERS_ALLOW:'host-layer',LIBVA_DRIVERS_PATH:'/host/dri',LIBVA_DRIVER_NAME:'host-driver'};
+ const previous=Object.fromEntries(Object.keys(poisoned).map(key=>[key,process.env[key]]));Object.assign(process.env,poisoned);
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});
+ try{
+  await manager.start();const runtime=config.native.browser.runtimeRoot,sysroot=path.join(runtime,'sysroot');
+  for(const {options:{env}} of p.calls){
+   assert.ok(env.LD_LIBRARY_PATH.endsWith(':'+path.join(runtime,'chromium')),'private Vulkan loader follows sysroot Mesa but precedes default host search');
+   assert.equal(env.GIO_MODULE_DIR,path.join(sysroot,'usr/lib/x86_64-linux-gnu/gio/modules'));
+   assert.equal(env.GIO_EXTRA_MODULES,undefined);assert.equal(env.GIO_USE_VFS,'local');
+   assert.equal(env.VK_DRIVER_FILES,path.join(runtime,'chromium/vk_swiftshader_icd.json'));assert.equal(env.VK_ICD_FILENAMES,env.VK_DRIVER_FILES);
+   for(const key of ['VK_ADD_DRIVER_FILES','VK_ADD_LAYER_PATH','VK_ADD_IMPLICIT_LAYER_PATH','VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_ALLOW','LIBVA_DRIVER_NAME'])assert.equal(env[key],undefined,key);
+   assert.equal(env.VK_LAYER_PATH,env.VK_IMPLICIT_LAYER_PATH);assert.ok(env.VK_LAYER_PATH.startsWith(config.stateDir+path.sep));assert.deepEqual(fs.readdirSync(env.VK_LAYER_PATH),[]);
+   assert.equal(env.LIBVA_DRIVERS_PATH,path.join(sysroot,'usr/lib/x86_64-linux-gnu/dri'));
+  }
+ }finally{await manager.stop();for(const [key,value] of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;}
+});
+test('native browser refuses a SwiftShader manifest pointing outside its Chromium payload',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),config=fixture(t),p=processes();
+ fs.writeFileSync(path.join(config.native.browser.runtimeRoot,'chromium/vk_swiftshader_icd.json'),JSON.stringify({ICD:{library_path:'/host/libvulkan.so'}}));
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>manager.stop());
+ await assert.rejects(manager.start(),/SwiftShader/);assert.equal(p.calls.length,0);
 });
 
 test('native stop closes owned Chromium before terminating its storage children and X display',async t=>{

@@ -146,13 +146,19 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
     try{
      checkCancellation();
      for(const name of ['runtimeRoot','chromiumPath','novncRoot'])if(!path.isAbsolute(browser[name]||''))throw Error('原生浏览器缺少绝对路径 '+name);
-     const sysroot=path.join(browser.runtimeRoot,'sysroot'),bin=path.join(sysroot,'usr/bin');
-     for(const file of [browser.chromiumPath,...['Xvfb','x11vnc','xauth'].map(n=>path.join(bin,n)),path.join(browser.novncRoot,'vnc.html')])if(!fs.statSync(file).isFile())throw Error('原生浏览器缺少运行文件 '+file);
+     const sysroot=path.join(browser.runtimeRoot,'sysroot'),bin=path.join(sysroot,'usr/bin'),chromiumDir=path.dirname(browser.chromiumPath),vulkanIcd=path.join(chromiumDir,'vk_swiftshader_icd.json'),gioModules=path.join(sysroot,'usr/lib/x86_64-linux-gnu/gio/modules');
+     for(const file of [browser.chromiumPath,...['Xvfb','x11vnc','xauth'].map(n=>path.join(bin,n)),path.join(browser.novncRoot,'vnc.html'),...['libvulkan.so.1','libvk_swiftshader.so','vk_swiftshader_icd.json'].map(n=>path.join(chromiumDir,n)),path.join(gioModules,'libdconfsettings.so')])if(!fs.statSync(file).isFile())throw Error('原生浏览器缺少运行文件 '+file);
+     const icdLibrary=JSON.parse(fs.readFileSync(vulkanIcd,'utf8')).ICD?.library_path;
+     if(typeof icdLibrary!=='string'||path.resolve(chromiumDir,icdLibrary)!==path.join(chromiumDir,'libvk_swiftshader.so'))throw Error('SwiftShader ICD 必须指向同包私有库');
      for(const s of Object.values(specs)){await available(s.cdpPort);await available(s.vncPort);if(fs.existsSync('/tmp/.X'+s.display+'-lock')||fs.existsSync('/tmp/.X11-unix/X'+s.display))throw Error('原生 display 已占用，拒绝接管');}
      privateDir(path.join(config.native.dataRoot,'browser-profiles'));privateDir(path.join(config.stateDir,'native-browser'));
      runDir=path.join(config.stateDir,'native-browser',randomUUID());privateDir(runDir);
+     const vulkanLayers=path.join(runDir,'vulkan-layers');privateDir(vulkanLayers);
      const fontConfig=path.join(runDir,'fonts.conf');fs.writeFileSync(fontConfig,'<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>'+xml(path.join(sysroot,'usr/share/fonts'))+'</dir><cachedir>'+xml(path.join(runDir,'font-cache'))+'</cachedir><include ignore_missing="yes">'+xml(path.join(sysroot,'etc/fonts/conf.d'))+'</include></fontconfig>',{mode:0o600});
-     const baseEnv={...process.env,LD_LIBRARY_PATH:['usr/lib/x86_64-linux-gnu/pulseaudio','lib/x86_64-linux-gnu/pulseaudio','usr/lib/x86_64-linux-gnu','lib/x86_64-linux-gnu','usr/lib','lib'].map(p=>path.join(sysroot,p)).join(':'),XKB_CONFIG_ROOT:path.join(sysroot,'usr/share/X11/xkb'),FONTCONFIG_FILE:fontConfig,FONTCONFIG_PATH:path.join(sysroot,'etc/fonts'),LIBGL_DRIVERS_PATH:path.join(sysroot,'usr/lib/x86_64-linux-gnu/dri'),__EGL_VENDOR_LIBRARY_DIRS:path.join(sysroot,'usr/share/glvnd/egl_vendor.d'),XDG_RUNTIME_DIR:runDir};
+     const baseEnv={...process.env,LD_LIBRARY_PATH:[...['usr/lib/x86_64-linux-gnu/pulseaudio','lib/x86_64-linux-gnu/pulseaudio','usr/lib/x86_64-linux-gnu','lib/x86_64-linux-gnu','usr/lib','lib'].map(p=>path.join(sysroot,p)),chromiumDir].join(':'),XKB_CONFIG_ROOT:path.join(sysroot,'usr/share/X11/xkb'),FONTCONFIG_FILE:fontConfig,FONTCONFIG_PATH:path.join(sysroot,'etc/fonts'),LIBGL_DRIVERS_PATH:path.join(sysroot,'usr/lib/x86_64-linux-gnu/dri'),__EGL_VENDOR_LIBRARY_DIRS:path.join(sysroot,'usr/share/glvnd/egl_vendor.d'),XDG_RUNTIME_DIR:runDir,GIO_MODULE_DIR:gioModules,GIO_USE_VFS:'local',VK_DRIVER_FILES:vulkanIcd,VK_ICD_FILENAMES:vulkanIcd,VK_LAYER_PATH:vulkanLayers,VK_IMPLICIT_LAYER_PATH:vulkanLayers,LIBVA_DRIVERS_PATH:path.join(sysroot,'usr/lib/x86_64-linux-gnu/dri')};
+     // Optional modules are discovered independently of ELF DT_NEEDED. Keep
+     // inherited desktop/plugin overrides from reopening host search paths.
+     for(const key of ['GIO_EXTRA_MODULES','VK_ADD_DRIVER_FILES','VK_ADD_LAYER_PATH','VK_ADD_IMPLICIT_LAYER_PATH','VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_ALLOW','LIBVA_DRIVER_NAME'])delete baseEnv[key];
      const version=versionParts(await run(browser.chromiumPath,['--version'],baseEnv));if(!version)throw Error('无法确认 Chromium 版本');
      for(const s of Object.values(specs)){
       let retainedProfile=null,login='unknown';

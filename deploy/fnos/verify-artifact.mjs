@@ -31,6 +31,12 @@ export function verifyArtifact(folder){
   if(process.platform!=='win32'&&!(fs.statSync(f).mode&0o111))throw Error('ELF is not executable '+relative);
  }
  for(const p of ['runtime/node/LICENSE','runtime/novnc/LICENSE.txt','runtime/sysroot/usr/share/X11/xkb/rules/base','runtime/sysroot/usr/share/fonts/X11/misc/fonts.dir','runtime/sysroot/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc','THIRD-PARTY.json','erp/server/fnos-native/lifecycle.mjs'])requireFile('app/'+p);
+ for(const p of ['chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so'])requireFile('app/runtime/'+p);
+ for(const name of ['libnss_mymachines.so.2','libnss_mdns4_minimal.so.2','libva.so.2','libva-drm.so.2']){
+  if(!['usr/lib','lib'].some(dir=>{const f=path.join(app,'runtime/sysroot',dir,'x86_64-linux-gnu',name);return fs.existsSync(f)&&fs.statSync(f).isFile();}))throw Error('Missing dlopen payload '+name);
+ }
+ const chromiumDir=path.join(app,'runtime/chromium'),icdLibrary=JSON.parse(read('app/runtime/chromium/vk_swiftshader_icd.json')).ICD?.library_path;
+ if(typeof icdLibrary!=='string'||path.resolve(chromiumDir,icdLibrary)!==path.join(chromiumDir,'libvk_swiftshader.so'))throw Error('SwiftShader ICD must point at the private Chromium library');
  for(const p of fs.readdirSync(path.join(root,'cmd'))){
   const f=path.join(root,'cmd',p);if(!fs.statSync(f).isFile())throw Error('Unexpected cmd entry');
   if(fs.readFileSync(f).includes(13))throw Error('CRLF hook '+p);
@@ -46,7 +52,7 @@ export function verifyArtifact(folder){
   else if(e.isFile()){
    if(/\.sqlite(?:[-.]|$)|(?:^|\/)\.env(?:\.|$)|(?:^|\/)(?:identity\.json|client\.conf|crypt\.key|Cookies|Login Data)$/.test(relative))throw Error('Private data '+relative);
    if(relative.startsWith('app/erp/')&&!relative.includes('/node_modules/')&&/^app\/erp\/(?:data|state|config|backups|logs)\//.test(relative))throw Error('Private ERP state '+relative);
-   if(relative.startsWith('app/runtime/sysroot/')&&/^(?:ld-linux.*|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_[^/]+)\.so(?:\..*)?)$/.test(e.name))throw Error('Private glibc is forbidden '+relative);
+   if(relative.startsWith('app/runtime/sysroot/')&&/^(?:ld-linux.*|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\..*)?)$/.test(e.name))throw Error('Private glibc is forbidden '+relative);
   }else throw Error('Special payload file '+relative);
  }}walk(root);
  const release=verifyRelease(path.join(app,'erp'));
