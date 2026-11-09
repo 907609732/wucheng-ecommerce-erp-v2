@@ -16,7 +16,8 @@ import {captureNativeSetupFailure} from './fnos-native-setup-diagnostics.mjs';
 const releaseRoot=path.resolve(import.meta.dirname,'..');
 const origin='https://nas.example.com:5667';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
+function fixtureDirectory(t,prefix='fnative-'){const dir=fs.mkdtempSync(path.join(os.tmpdir(),prefix));captureNativeSetupFailure(t,dir,{fixtureRoot:true});return dir;}
+function fixture(t){const dir=fixtureDirectory(t);t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
 const options=(dataRoot)=>({releaseRoot,dataRoot,mode:'fresh',publicOrigin:origin,allowedOrigins:[origin],allowedUids:['1000'],socketPath:path.join(dataRoot,'socket','app.sock')});
 test('fresh is explicit, rejects replaceable data and unconfigured HTTPS, never overwrites books',async t=>{
  const dir=fixture(t),data=path.join(dir,'data');
@@ -142,7 +143,7 @@ test('existing configure refuses the ownership window before the supervisor publ
  assert.deepEqual(loadConfig(file).fnos.allowedUids,['1000']);
 });
 test('direct supervisor reloads the access configuration after claiming its initially located ownership lock',async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-read-race-')),data=path.join(dir,'data'),file=await configureNative(options(data));
+ const dir=fixtureDirectory(t,'fnative-read-race-'),data=path.join(dir,'data'),file=await configureNative(options(data));
  const read=path.join(dir,'initial-read'),resume=path.join(dir,'resume');
  const source=`import fs from 'node:fs';import {runSupervisor} from ${JSON.stringify(pathToFileURL(path.join(releaseRoot,'server/fnos-native/supervisor.mjs')).href)};const original=fs.readFileSync;let held=false;fs.readFileSync=function(p,...args){const value=original.call(this,p,...args);if(p===${JSON.stringify(file)}&&!held){held=true;fs.writeFileSync(${JSON.stringify(read)},'read');while(!fs.existsSync(${JSON.stringify(resume)}))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}return value;};runSupervisor(${JSON.stringify(file)},{createRuntime:async c=>{process.send({uids:c.fnos.allowedUids});throw Error('snapshot captured before runtime launch');}}).catch(()=>{if(process.connected)process.disconnect();});`;
  const child=spawn(process.execPath,['--input-type=module','-e',source],{windowsHide:true,stdio:['ignore','ignore','pipe','ipc']});
@@ -165,7 +166,7 @@ test('direct supervisor reloads the access configuration after claiming its init
  assert.equal(constructed,false,'changing state/lock binding after the initial read must refuse runtime construction');
 });
 test('real package configure CLI preserves independent updates with one serialized browser-required commit',async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-package-race-')),data=path.join(dir,'data'),file=await configureNative(options(data));
+ const dir=fixtureDirectory(t,'fnative-package-race-'),data=path.join(dir,'data'),file=await configureNative(options(data));
  const committed=path.join(dir,'committed'),resume=path.join(dir,'resume'),hook=path.join(dir,'hook.mjs');
  const source=`import fs from 'node:fs';import path from 'node:path';const target=${JSON.stringify(file)},commit=${JSON.stringify(committed)},resume=${JSON.stringify(resume)},read=fs.readFileSync,rename=fs.renameSync;let writes=0,held=false;fs.renameSync=function(from,to){const result=rename.call(this,from,to);if(path.resolve(to)===target){writes++;fs.writeFileSync(commit,String(writes));}return result;};fs.readFileSync=function(p,...args){const value=read.call(this,p,...args);if(writes&&path.resolve(String(p))===target&&!held){held=true;while(!fs.existsSync(resume))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}return value;};`;
  fs.writeFileSync(hook,source);
@@ -183,7 +184,7 @@ test('real package configure CLI preserves independent updates with one serializ
  assert.equal(result.native.requireBrowsers,true);assert.equal(Number(fs.readFileSync(committed,'utf8')),1,'package requirement belongs to the serialized commit');
 });
 test('interrupting a blocked startup drains its already-owned module before supervisor exit',async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnative-interrupt-')),file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
+ const dir=fixtureDirectory(t,'fnative-interrupt-'),file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
  c.fnos={enabled:false};c.tcpEnabled=true;c.port=45000+Math.floor(Math.random()*1000);
  for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(file,JSON.stringify(c));const marker=path.join(dir,'owned-child.json');
@@ -255,7 +256,7 @@ test('Linux package user: Unix-only native instance reports real identity over p
  await nativeLifecycle('stop',file);assert.equal((await nativeLifecycle('status',file)).status,'stopped');
 });
 test('missing required browsers fail startup instead of a false ready status',async t=>{
- const dir=fixture(t);captureNativeSetupFailure(t,path.join(dir,'data'));
+ const dir=fixture(t);
  const file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
  c.fnos={enabled:false};c.tcpEnabled=true;c.native.requireBrowsers=true;fs.writeFileSync(file,JSON.stringify(c));
  await assert.rejects(nativeLifecycle('start',file),/启动失败/);

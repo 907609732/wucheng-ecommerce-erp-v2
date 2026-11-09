@@ -24,15 +24,23 @@ function errorTail(file){
  while(Buffer.byteLength(safe.join('\n'))>8192)safe.shift();
  return safe.join('\n')||'[no error code or stack captured]';
 }
-export function captureNativeSetupFailure(t,dataRoot){
- const remove=fs.rmSync,prefix=path.resolve(dataRoot)+'.staging-';
+export function captureNativeSetupFailure(t,dataRoot,{fixtureRoot=false}={}){
+ const remove=fs.rmSync,root=path.resolve(dataRoot),prefix=root+'.staging-';
+ const matches=target=>{
+  if(typeof target!=='string')return false;
+  if(!fixtureRoot)return target.startsWith(prefix)&&uuid.test(target.slice(prefix.length));
+  if(path.dirname(target)!==root)return false;
+  const name=path.basename(target),marker=name.lastIndexOf('.staging-');
+  return marker>0&&uuid.test(name.slice(marker+9))&&fs.existsSync(path.join(target,'state/web-registry.json'))
+   &&!fs.existsSync(path.join(target,'config.json'))&&!fs.existsSync(path.join(target,'config/web.json'));
+ };
  t.mock.method(fs,'rmSync',function(target,...args){
   try{
-   if(typeof target==='string'&&target.startsWith(prefix)&&uuid.test(target.slice(prefix.length))){
+   if(matches(target)){
     let registry={};try{registry=JSON.parse(fs.readFileSync(path.join(target,'state/web-registry.json'),'utf8'));}catch{}
     for(const module of ['purchase','sales','overview']){
      const metadata={module};for(const key of ['port','mobilePort'])if(Number.isInteger(registry[module]?.[key]))metadata[key]=registry[module][key];
-     let evidence;try{evidence=errorTail(path.join(target,'data',module,'integration-service.log'));}catch(error){evidence=errorCode(error.code)?error.code:'[log unavailable]';}
+     let evidence;try{evidence=errorTail(path.join(target,'data',module,'integration-service.log'));}catch(error){evidence='[log unavailable: '+(errorCode(error.code)?error.code:'unknown')+']';}
      console.error('[native setup failure]',JSON.stringify(metadata),evidence);
     }
    }
