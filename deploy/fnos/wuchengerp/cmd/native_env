@@ -57,7 +57,7 @@ recover_retained() {
   TRUSTED=$(dirname "$TRUSTED")
  done
  [ -x /usr/bin/python3 ] || fail '保留数据恢复需要可信系统 /usr/bin/python3；请管理员通过已审核的官方系统方式安装 python3 后重试，不能使用 target 内运行时替代。'
- /usr/bin/python3 -I -B "$SELF/retained_recovery.py" "$VOLUME" "$PACKAGE_UID" "$PACKAGE_GID" || fail '保留账本恢复被阻止；请先确认旧服务完全停止并检查物理保留目录。'
+ RECOVERY_ERROR=$(/usr/bin/python3 -I -B "$SELF/retained_recovery.py" "$VOLUME" "$PACKAGE_UID" "$PACKAGE_GID" 2>&1) || fail "保留账本恢复被阻止；请先确认旧服务完全停止并检查物理保留目录。$RECOVERY_ERROR"
 }
 prepare_base() {
  [ ! -L "$BASE" ] && [ ! -L "$DATA" ] || fail 'ERP 持久目录不能是符号链接。'

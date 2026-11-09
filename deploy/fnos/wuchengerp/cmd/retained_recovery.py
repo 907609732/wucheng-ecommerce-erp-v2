@@ -173,6 +173,13 @@ def recover(volume, uid, gid):
                 stack.callback(os.close, retained_parent)
                 db = sqlite3.connect('file:/proc/self/fd/' + str(retained_parent) + '/' + name + '?mode=rw', uri=True, timeout=0)
                 stack.callback(db.close)
+                # BEGIN EXCLUSIVE on a zero-byte coordination DB otherwise
+                # creates a rollback journal and changes this copied inventory.
+                # This connection never writes SQL data or commits. Keep its
+                # journal in memory while retaining SQLite's exclusive lock.
+                if before.st_size == 0:
+                    if db.execute('PRAGMA journal_mode=MEMORY').fetchone() != ('memory',):
+                        raise ValueError('Cannot hold empty coordination lock without a disk journal')
                 db.execute('BEGIN EXCLUSIVE')
 
         for name in sorted(original_top - abandoned):

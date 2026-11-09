@@ -111,7 +111,9 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.outside.stat().st_uid, 0)
 
     def test_install_init_refuses_unsafe_retained_then_recovers_without_payload(self):
-        run, target, package, _ = self.install_hook()
+        run, target, package, env = self.install_hook()
+        log = self.root / 'install-error.log'
+        env['TRIM_TEMP_LOGFILE'] = str(log)
         target.symlink_to(self.root / 'absent-payload', target_is_directory=True)
         before = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
         unsafe = self.data / 'originals' / 'linked'
@@ -119,6 +121,7 @@ class Recovery(unittest.TestCase):
         result = run()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('保留账本恢复被阻止', result.stderr)
+        self.assertIn('Retained path links/mounts are forbidden', log.read_text())
         self.assertTrue(all(p.lstat().st_uid == 42001 for p in [self.base, *self.base.rglob('*')] if p != unsafe))
         self.assertEqual(self.outside.stat().st_uid, 0)
         unsafe.unlink()
@@ -224,15 +227,82 @@ class Recovery(unittest.TestCase):
             self.recover()
         self.assertLessEqual(census.call_count, 3, 'full /proc scans must not grow with file count')
 
+    def test_idle_coordination_locks_preserve_bytes_inventory_and_exclusion(self):
+        backup_state = self.base / 'backups' / 'retained' / 'preflight.configure-state'
+        backup_state.mkdir(mode=0o700)
+        os.chown(backup_state, 42001, 42001)
+        locks = [self.data / 'state' / 'native-ownership.sqlite',
+                 backup_state / 'native-lifecycle.sqlite',
+                 self.data / 'state' / 'native-lifecycle.sqlite']
+        for lock in locks:
+            lock.write_bytes(b'')
+            lock.chmod(0o600)
+            os.chown(lock, 42001, 42001)
+        initialized = sqlite3.connect(locks[-1])
+        initialized.execute('CREATE TABLE retained(value TEXT)')
+        initialized.execute('INSERT INTO retained VALUES(?)', ('coordination fixture',))
+        initialized.commit()
+        initialized.close()
+        def inventory(read_bytes=True):
+            result = {}
+            for p in [self.base, *self.base.rglob('*')]:
+                info = p.lstat()
+                result[str(p.relative_to(self.base))] = (info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_size, info.st_mtime_ns, p.read_bytes() if read_bytes and p.is_file() else None)
+            return result
+        before = inventory()
+        metadata = {name: values[:-1] for name, values in before.items()}
+        chown_count = 0
+        checked = []
+        original = self.module.chown_inode
+        def check_exclusion(fd, uid, gid):
+            nonlocal chown_count
+            chown_count += 1
+            if chown_count in (1, len(before) - 1):
+                checked.append(chown_count)
+                # Closing any ordinary FD for a locked inode drops this process's
+                # POSIX locks. Read bytes only before/after recovery, never here.
+                self.assertEqual({name: values[:-1] for name, values in inventory(read_bytes=False).items()}, metadata, 'holding locks must not create journals or mutate copied data')
+                script = """import sqlite3,sys
+db=sqlite3.connect(sys.argv[1],timeout=0)
+try:
+    db.execute('BEGIN EXCLUSIVE')
+except sqlite3.OperationalError as error:
+    assert error.sqlite_errorcode == sqlite3.SQLITE_BUSY, repr(error)
+    print('SQLITE_BUSY')
+else:
+    raise AssertionError('recovery did not hold the coordination lock')
+finally:
+    db.close()
+"""
+                for lock in locks:
+                    result = subprocess.run([sys.executable, '-I', '-B', '-c', script, str(lock)], capture_output=True, text=True, timeout=10)
+                    context = str(lock.relative_to(self.base)) + ' before chown #' + str(chown_count)
+                    self.assertEqual(result.returncode, 0, context + ': ' + result.stderr)
+                    self.assertEqual(result.stdout.strip(), 'SQLITE_BUSY', context)
+            original(fd, uid, gid)
+        with mock.patch.object(self.module, 'chown_inode', side_effect=check_exclusion):
+            self.recover()
+        self.assertEqual(checked, [1, len(before) - 1])
+        self.assertEqual(inventory(), before)
+        self.assertTrue(all(p.stat().st_uid == 42002 for p in [self.base, *self.base.rglob('*')]))
+        self.assertEqual([p.stat().st_size for p in locks[:2]], [0, 0])
+
     def test_busy_sqlite_ownership_refuses_before_chown(self):
-        db = sqlite3.connect(self.data / 'state' / 'native-ownership.sqlite')
-        db.execute('BEGIN EXCLUSIVE')
+        lock = self.data / 'state' / 'native-ownership.sqlite'
+        lock.write_bytes(b'')
+        os.chown(lock, 42001, 42001)
+        script = "import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=0); db.execute('BEGIN EXCLUSIVE'); print('ready',flush=True); sys.stdin.read(); db.close()"
+        child = subprocess.Popen([sys.executable, '-I', '-B', '-c', script, str(lock)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         try:
-            with self.assertRaises(Exception):
+            self.assertEqual(child.stdout.readline().strip(), 'ready')
+            with self.assertRaises(sqlite3.OperationalError) as refused:
                 self.recover()
+            self.assertEqual(refused.exception.sqlite_errorcode, sqlite3.SQLITE_BUSY)
             self.assertEqual(self.base.stat().st_uid, 42001)
+            self.assertEqual(lock.stat().st_uid, 42001)
+            self.assertEqual(lock.read_bytes(), b'')
         finally:
-            db.close()
+            child.communicate('', timeout=5)
 
     def test_abandoned_uuid_stage_is_preserved_without_ownership_repair(self):
         stage = self.base / 'erp.staging-01234567-0123-4123-8123-0123456789ab'
