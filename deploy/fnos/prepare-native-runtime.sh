@@ -30,7 +30,7 @@ apt-get install -y --no-install-recommends \
   x11vnc xauth x11-xkb-utils xkb-data xfonts-base xfonts-encodings fonts-noto-cjk fontconfig \
   "xvfb=$XORG_VERSION" \
   libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 \
-  libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2 \
+  libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2 mesa-vulkan-drivers \
   ca-certificates zstd strace util-linux
 apt-get build-dep -y --no-install-recommends "xorg-server=$XORG_VERSION"
 (cd "$work/debs"; apt-get download "chromium=$CHROMIUM_VERSION" "chromium-common=$CHROMIUM_VERSION")
@@ -69,8 +69,10 @@ lddtree --copy-to-tree "$sysroot" /usr/lib/chromium/chromium /usr/lib/chromium/l
 rm -rf -- "$sysroot/usr/lib/chromium" "${sysroot}${runtime}" "${sysroot}${work}"
 # Mozilla NSS differs from glibc's external NSS plugins. Both those plugins and
 # GIO/VA backends can be loaded by name even when lddtree sees no DT_NEEDED edge.
+# Chromium GPU pre-sandbox also directly dlopens Mesa Vulkan drivers, bypassing
+# VK_DRIVER_FILES. Keep those official drivers private even with SwiftShader ICD.
 extras=()
-for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2; do
+for package in libnss3 libnspr4 libgtk-3-0 libasound2 libgl1-mesa-dri libegl-mesa0 libgles2 libegl1 libgl1 libglx0 libopengl0 libnss-mymachines libnss-mdns dconf-gsettings-backend libva2 libva-drm2 mesa-vulkan-drivers; do
  while IFS= read -r file; do
   if [[ -f "$file" && "$file" =~ \.so(\.|$) ]]; then extras+=("$file"); fi
  done < <(dpkg-query -L "$package")

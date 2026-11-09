@@ -23,6 +23,8 @@ sudo bash deploy/fnos/build-native.sh /tmp/new-native-output
 
 Chromium 的可选动态加载也必须闭包：包内保留官方 SwiftShader ICD/loader，GIO/dconf、外置 `mymachines`/`mdns` NSS 插件和 VA 库及其 lddtree 依赖。进程环境限定私有 GIO、Vulkan ICD/layer、VA 路径，sysroot 优先于 Chromium 目录，避免 ANGLE 抢占 Mesa EGL；继续使用宿主 glibc，不允许宿主外置 NSS 或 GPU 库通过审计。NSS 插件可能查询宿主 systemd-machined/Avahi 服务，打包库并不安装或保证这些可选服务。构建 smoke 在真实带这些宿主库与 Mesa Vulkan 驱动的环境运行，并用标准 getent 实际加载两个私有 NSS 插件检查完整加载链；主包、诊断包及干净运行容器都注入宿主插件路径，仍须通过原有运行库审计。
 
+Chromium 156 的 GPU pre-sandbox hook 会直接预加载硬件 Vulkan 库，绕过 ICD 环境配置；因此也收集官方 `mesa-vulkan-drivers` 的全部共享库及闭包，并检查真实 Chromium maps 中 Intel/Radeon 来自私有包。保留原 SwiftShader ICD，不启用 Mesa 的宿主 ICD/layer JSON。该上游 hook 还尝试 `libGLX_nvidia.so.0` 和 `libvulkan_freedreno.so`：Debian bookworm amd64 的 Mesa 包不提供这两项，本包也不分发 NVIDIA 专有驱动；若宿主存在可加载的这类额外驱动，现有审计仍会拒绝，不能宣称支持该宿主。
+
 ## 安装前提与正式切换
 
 - 系统必须为实测兼容的 x86_64 / glibc 2.36，并支持非 root Chromium namespace sandbox；禁止添加 `--no-sandbox` 绕过。系统需有 `runuser`、标准 POSIX/Linux 工具和可信 `/usr/bin/python3`。安装钩子使用系统 Python 进行保留目录的安全属主恢复；包内 Python 或 python312 应用不能替代这个可信路径。缺少时安装明确失败，管理员应通过另行审核的官方系统安装方案准备 Python，然后重试；FPK 不自动修改 NAS apt 环境。

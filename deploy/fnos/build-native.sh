@@ -108,6 +108,15 @@ for(const service of ['mymachines','mdns4_minimal']){
 }
 JS
 runuser -u erpbuild -- env PATH="$PATH" LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/node/bin/node" "$helper/smoke-native.mjs" --app-root /var/apps/wuchengerp/target --data-root "$work/fixture/data" --evidence-dir "$work/smoke-evidence" --port-offset 1000
+# Chromium's pre-sandbox hook dlopens hardware ICD libraries independently of
+# VK_* discovery. Prove that this real polluted-host path loaded private copies.
+node --input-type=module - "$work/smoke-evidence/loaded-libraries.json" "$runtime" <<'JS'
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const [file,runtime]=process.argv.slice(2),audit=JSON.parse(fs.readFileSync(file,'utf8'));
+for(const name of ['libvulkan_intel.so','libvulkan_radeon.so'])assert(audit.observed.some(p=>p.exe.startsWith(runtime+'/chromium/')&&p.libraries.some(lib=>lib.startsWith(runtime+'/sysroot/')&&path.basename(lib)===name)),'Chromium did not preload private '+name);
+JS
 strace -f -e trace=%file -o "$out/private-runtime-file-probe.log" runuser -u erpbuild -- env LD_LIBRARY_PATH="$runtime/sysroot/usr/lib/x86_64-linux-gnu:$runtime/sysroot/lib/x86_64-linux-gnu:$runtime/sysroot/usr/lib:$runtime/sysroot/lib" "$runtime/chromium/chrome" --version
 cp -a "$work/smoke-evidence" "$out/smoke-evidence"
 # Source archives are mandatory before packaging, but expensive transfers must

@@ -22,7 +22,7 @@
 
 ## 执行清单
 
-- [x] **1. 最终产物与检查。** 检查 PR21 当前 Windows 检查；下载 Linux run42537761253 的主包、诊断包和源码伴随包。核对服务端 ZIP digest、三个本地文件 SHA256、全部源码成员及九份实际验收报告。产出本地 delivery-summary 和 source-contents-verification。
+- [ ] **1. 最终产物与检查。** 594aeec 基线产物已下载并完整验证；实机动态依赖修复后，重新验证最终候选的 PR21 检查和同次主包、诊断包、源码伴随包。核对服务端 ZIP digest、三个本地文件 SHA256、全部源码成员及九份实际验收报告，更新 delivery-summary 和 source-contents-verification。
 - [ ] **2. NAS 独立诊断。** 复用专用飞牛窗口；上传有明确版本名的诊断包并核对 NAS 文件。仅安装诊断包，读取实际 acceptance，要求 Node／SQLite／沙箱／中文／RFB／下载／重启及 cleanup 通过。正式 Docker 保持运行到此步结束。
 - [ ] **3. 停写与备份恢复。** 记录最新三模块摘要、实例身份和 UVCS 全队列；停止 ERP／collector／两浏览器，确认退出。向备份卷唯一私有目录归档完整源、HOME、整份浏览器配置、旧应用／Compose 与回退 FPK。核对 SHA 和恢复副本的全部 SQLite、原件及业务状态。
 - [ ] **4. 原生主应用迁移。** 从原始备份生成独立 normalized 副本，仅调整已核实的权限和失效运行锁；浏览器 user-data 内容放入各自目标根。绑定原工作区身份并 seal，通过官方向导迁移；在最终物理路径登记同一工作区。失败保留账本和 pending 状态，不创建空库。
@@ -40,6 +40,12 @@
 2026-11-09 迁移准备：已核对原包用户 947:901。独立副本 `/vol4/@wuchengerp-data/backups/native-migration-20261109-final/normalized` 含 3516 个逐文件比对通过的普通文件，仅省略已核实的三份旧容器 PID 记录和六个当前 profile 的失效 Singleton 链接。原始归档、恢复副本未修改，可信原工作区身份另存于本次私有目录；尚未 seal 或发布正式数据。首次空目录属主检查拒绝后，实查确认空根为 root:root 0755，仅初始化这一空目录为包用户与 0700 后才生成新副本，未递归修改旧数据。
 
 2026-11-09 本地清理：两份已解压、全量 SHA 校验且对应源码成员已验证的下载 ZIP，通过 Send2Trash 移入 Windows 回收站，工作目录减少 3223780248 字节；不宣称回收站占用已经从磁盘释放。FPK、对应源码归档、回退包、正式备份及验收证据保留。Docker 镜像与容器库存已保存，删除尚未执行。
+
+2026-11-09 后续记录：独立副本已由既有 `seal-source` CLI 以辅助容器数字 UID 947 封存，3516 个文件与复制证明完全一致、原工作区身份匹配。此为复制与封存证明，不替代真实宿主的 package UID／UVCS 验证。使用的 594aeec 封存 CLI 与当时 HEAD 在 configure、lifecycle、UVCS registration、stored-file 上字节相同。
+
+2026-11-09 CI 收敛：a7c2cb1 的 Linux FULL run42569021340 中，四套业务测试 322／198／214／98 均零失败；Windows 检查通过。新增污染宿主验证已证明私有 NSS 插件实际加载、GIO／VA／Vulkan loader 闭包修复，但 Chromium pre-sandbox hook 仍直接加载宿主 Intel／Radeon 驱动，因此产物被拦截。按固定版本官方源码补入 Mesa Vulkan 全部共享库与依赖，保留原审计。Ruling: 后续窄构建改动重跑 native focused 套件与完整真实主／诊断包、污染宿主和 clean runtime 验收，Windows 自动全量检查继续；不重复已通过且未再改动的业务套件。
+
+本地已另将两个早期失败候选目录内的 8 个大安装包／源码归档／重复 ZIP 移入回收站，保留日志与元数据；连同前述 ZIP 累计移走 12159760346 字节，当前 594aeec 候选与对应源码、旧薄入口回退包仍保留。
 
 新原生服务停止并确认所有权范围内进程／端口释放后，通过官方应用中心恢复旧入口，启动保留的旧 Docker 服务重新生成真实 socket。若原生已产生合法新业务写入，回退程序必须使用当前兼容账本，禁止用旧备份覆盖新数据。
 

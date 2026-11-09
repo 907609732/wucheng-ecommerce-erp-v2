@@ -20,7 +20,7 @@ function fixture(t){
  for(const p of ['runtime/node/bin/node','runtime/chromium/chrome',...['Xvfb','x11vnc','xauth','xkbcomp'].map(n=>'runtime/sysroot/usr/bin/'+n)]){
   const f=path.join(stage,'app',p);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,elf,{mode:0o755});
  }
- for(const p of ['chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so',...['libnss_mymachines.so.2','libnss_mdns4_minimal.so.2','libva.so.2','libva-drm.so.2'].map(n=>'sysroot/usr/lib/x86_64-linux-gnu/'+n)]){const file=path.join(stage,'app/runtime',p);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,elf);}
+ for(const p of ['chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so',...['libnss_mymachines.so.2','libnss_mdns4_minimal.so.2','libva.so.2','libva-drm.so.2','libvulkan_intel.so','libvulkan_radeon.so'].map(n=>'sysroot/usr/lib/x86_64-linux-gnu/'+n)]){const file=path.join(stage,'app/runtime',p);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,elf);}
  fs.writeFileSync(path.join(stage,'app/runtime/chromium/vk_swiftshader_icd.json'),JSON.stringify({ICD:{library_path:'./libvk_swiftshader.so'}}));
  const html=fs.readFileSync(path.join(root,'tests/fixtures/novnc-v1.6.0-vnc.html'));
  for(const [p,b] of Object.entries({'runtime/novnc/vnc.html':html,'runtime/node/LICENSE':'Node license','runtime/novnc/LICENSE.txt':'MPL-2.0','runtime/sysroot/usr/share/X11/xkb/rules/base':'xkb','runtime/sysroot/usr/share/fonts/X11/misc/fonts.dir':'font','runtime/sysroot/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc':'font','THIRD-PARTY.json':'{}','erp/server/fnos-native/lifecycle.mjs':'export {};','erp/package.json':'{"version":"0.15.0"}'})){
@@ -36,7 +36,7 @@ test('complete native artifact validates its private runtime, upstream CSP and a
 });
 test('artifact requires dlopen payload but permits external NSS plugins without bundling glibc NSS',t=>{
  const stage=fixture(t);assert.equal(run(stage).status,0,'external NSS plugins are not glibc');
- for(const p of ['chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so',...['libnss_mymachines.so.2','libnss_mdns4_minimal.so.2','libva.so.2','libva-drm.so.2'].map(n=>'sysroot/usr/lib/x86_64-linux-gnu/'+n)]){
+ for(const p of ['chromium/libvulkan.so.1','chromium/libvk_swiftshader.so','chromium/vk_swiftshader_icd.json','sysroot/usr/lib/x86_64-linux-gnu/gio/modules/libdconfsettings.so',...['libnss_mymachines.so.2','libnss_mdns4_minimal.so.2','libva.so.2','libva-drm.so.2','libvulkan_intel.so','libvulkan_radeon.so'].map(n=>'sysroot/usr/lib/x86_64-linux-gnu/'+n)]){
   const file=path.join(stage,'app/runtime',p),bytes=fs.readFileSync(file);fs.unlinkSync(file);assert.notEqual(run(stage).status,0,p+' must not silently fall back to host');fs.writeFileSync(file,bytes);
  }
  const file=path.join(stage,'app/runtime/sysroot/usr/lib/x86_64-linux-gnu/libnss_files.so.2');fs.writeFileSync(file,'host glibc must remain external');assert.notEqual(run(stage).status,0);
