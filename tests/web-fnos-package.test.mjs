@@ -21,7 +21,8 @@ test('native FPK registers only the official authenticated Unix gateway',()=>{
  assert.deepEqual(JSON.parse(read('config/resource')),{});
 });
 test('native hooks launch bundled lifecycle with explicit config and surface failures',()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-native-package-'));
+ // Match the hook's physical path when Windows TEMP contains an 8.3 alias.
+ const dir=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-native-package-')));
  try{
   for(const p of ['app/runtime/node/bin','app/erp/server/fnos-native','@wuchengerp-data/erp/config','target'])fs.mkdirSync(path.join(dir,p),{recursive:true});
   fs.writeFileSync(path.join(dir,'app/erp/server/fnos-native/lifecycle.mjs'),'');
