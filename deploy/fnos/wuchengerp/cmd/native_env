@@ -59,7 +59,7 @@ recover_retained() {
  [ -x /usr/bin/python3 ] || fail '保留数据恢复需要可信系统 /usr/bin/python3；请管理员通过已审核的官方系统方式安装 python3 后重试，不能使用 target 内运行时替代。'
  /usr/bin/python3 -I -B "$SELF/retained_recovery.py" "$VOLUME" "$PACKAGE_UID" "$PACKAGE_GID" || fail '保留账本恢复被阻止；请先确认旧服务完全停止并检查物理保留目录。'
 }
-prepare() {
+prepare_base() {
  [ ! -L "$BASE" ] && [ ! -L "$DATA" ] || fail 'ERP 持久目录不能是符号链接。'
  # Root prepares only exact app-owned directories. All recursive copying is
  # performed by the package process into a new isolated instance directory.
@@ -69,11 +69,18 @@ prepare() {
   [ "$PACKAGE_UID" != 0 ] || fail 'ERP package 用户不能为 root。'
   PACKAGE_GID=$(id -g "$TRIM_USERNAME")
   mkdir -p "$BASE"
-  chown "$PACKAGE_UID:$PACKAGE_GID" "$BASE" "$TARGET"
+  chown "$PACKAGE_UID:$PACKAGE_GID" "$BASE"
   chmod 700 "$BASE"
-  chmod go-w "$TARGET"
  else
   mkdir -p "$BASE"
+ fi
+}
+prepare() {
+ prepare_base
+ # Only post-deployment callers have resolved an existing target payload.
+ if [ "$(id -u)" = 0 ]; then
+  chown "$PACKAGE_UID:$PACKAGE_GID" "$TARGET"
+  chmod go-w "$TARGET"
  fi
 }
 provision_uvcs() {

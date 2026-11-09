@@ -3,6 +3,5 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
-resolve_payload
 recover_retained
-prepare
+prepare_base

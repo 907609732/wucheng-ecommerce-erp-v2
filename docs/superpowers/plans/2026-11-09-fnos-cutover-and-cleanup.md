@@ -59,6 +59,8 @@
 
 ## Review Focus
 
+后续现场诊断已经明确：f3e7a9d 已通过全部云端门禁、同次产物/源码完整校验及 NAS 文件哈希；重试升级在 `install_init` 以 UID 0 访问 `/vol4/@appcenter/wuchengerp` 时失败，证明安装准备早于 payload 目录部署。此前仅将 pre-upgrade/stop 的解析延后，仍遗漏 install_init 的阶段边界。现仅把持久 BASE 准备抽为 prepare_base，install_init 保留 trusted recover_retained 与 BASE 准备，不解析/创建 TARGET；callback 继续要求已部署的 target 并执行完整原准备、UVCS、配置。新增 missing/dangling target、unsafe retained 和真实 root helper/独立 UID 的回归，必须在新 HEAD 的 Linux/root CI 与实机安装中验证。为不阻塞当前修复，本次不新增运行包重打包工作流，继续现有官方构建流程。
+
 2026-11-09 实机切换记录：5cb28ec 两份 FPK 已经局域网上传并由 NAS 侧重新核对全部字节大小和 SHA256。最终独立诊断 `run-20261109T085614Z-1761302` 为 ok/cleanupComplete/SQLite/sandbox=true、uid=945、两次启动、34 个进程 maps 通过，Cookie/localStorage 保留。迁移前重新校验封存副本全部 3516 文件及三主数据库与原始正式源一致。中转上传失败的两份约 232 MiB 临时文件不能用于安装，已改用局域网成功上传，待最后清理。
 
 主应用升级在数据迁移前被 `ERP target 无法解析。` 阻止；实查原生 DATA 仍不存在，官方应用中心仍记录旧薄入口 0.14.4。修复范围仅主包 shell 钩子：把需 payload 的路径解析与持久卷/CONFIG 检查分离；无原生配置的 pre-upgrade/stop/status 不再要求可替换 target，已有 CONFIG 时仍严格停写并验证完整备份，其他安装与配置钩子继续要求真实 payload。错误仅增加 UID、钩子、动作和 target 路径，不记录环境凭据。具体旧 target 的解析失败条件没有完整现场证据，不写成权限或平台时序已证明。官方生命周期参考 https://developer.fnnas.com/docs/core-concepts/framework/ ，参考现有项目 https://github.com/conversun/fnos-apps/blob/main/shared/cmd/common 的分层思路，未引入依赖或复制宽泛进程终止逻辑。

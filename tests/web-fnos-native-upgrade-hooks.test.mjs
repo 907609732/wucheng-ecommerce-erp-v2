@@ -13,11 +13,11 @@ const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin
 const unix=p=>p.replaceAll('\\','/').replace(/^([A-Za-z]):/,(_,drive)=>'/'+drive.toLowerCase());
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-function fixture(t,targetState='missing'){
+function fixture(t,targetState='missing',retain=true){
  const dir=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-upgrade-hook-')));
  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const target=path.join(dir,'target'),base=path.join(dir,'@wuchengerp-data'),data=path.join(base,'erp'),config=path.join(data,'config/web.json');
- const retained=path.join(base,'backups/prior/retained.txt');fs.mkdirSync(path.dirname(retained),{recursive:true});fs.writeFileSync(retained,'prior backup remains private');
+ const retained=path.join(base,'backups/prior/retained.txt');if(retain){fs.mkdirSync(path.dirname(retained),{recursive:true});fs.writeFileSync(retained,'prior backup remains private');}
  if(targetState==='dangling')fs.symlinkSync(path.join(dir,'absent-payload'),target,process.platform==='win32'?'junction':'dir');
  const env={...process.env,TRIM_APPDEST:unix(target),TRIM_APPDEST_VOL:unix(dir),TRIM_TEMP_LOGFILE:unix(path.join(dir,'error.log')),ERP_TEST_SECRET:'must-not-be-logged'};
  const run=(hook,action)=>spawnSync(shell,[unix(path.join(cmd,hook)),...(action?[action]:[])],{env,encoding:'utf8',timeout:30000});
@@ -44,9 +44,28 @@ for(const targetState of ['missing','dangling'])test('native configured upgrade/
  assert.deepEqual([hash(f.config),hash(f.retained)],before);assert.deepEqual(fs.readdirSync(path.join(f.base,'backups')),['prior']);
 });
 
+for(const targetState of ['missing','dangling'])test('native install_init prepares only persistent base with '+targetState+' target',t=>{
+ const f=fixture(t,targetState,false);let r=f.run('install_init');assert.equal(r.status,0,r.stderr);
+ assert.ok(fs.statSync(f.base).isDirectory());assert.equal(fs.existsSync(f.data),false);assert.equal(fs.existsSync(f.target),false);
+ if(targetState==='dangling')assert.ok(fs.lstatSync(f.target).isSymbolicLink());
+ fs.mkdirSync(path.join(f.data,'data/purchase'),{recursive:true});const ledger=path.join(f.data,'data/purchase/retained');fs.writeFileSync(ledger,'original ledger bytes');
+ r=f.run('install_init');assert.equal(r.status,0,r.stderr);assert.equal(fs.readFileSync(ledger,'utf8'),'original ledger bytes');assert.equal(fs.existsSync(f.config),false);
+});
+
+test('native install_init rejects invalid volumes and linked retained directories',t=>{
+ const f=fixture(t);const before=hash(f.retained),file=path.join(f.dir,'not-volume');fs.writeFileSync(file,'not a volume');
+ for(const volume of ['',unix(path.join(f.dir,'absent-volume')),unix(file)]){
+  f.env.TRIM_APPDEST_VOL=volume;const r=f.run('install_init');assert.equal(r.status,1);assert.match(r.stderr,/存储卷/);
+ }
+ f.env.TRIM_APPDEST_VOL=unix(f.dir);const outside=path.join(f.dir,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'keep'),'unrelated bytes');
+ fs.symlinkSync(outside,f.data,process.platform==='win32'?'junction':'dir');let r=f.run('install_init');assert.equal(r.status,1);assert.match(r.stderr,/持久目录不能是符号链接/);fs.unlinkSync(f.data);
+ const saved=f.base+'-saved';fs.renameSync(f.base,saved);fs.symlinkSync(saved,f.base,process.platform==='win32'?'junction':'dir');r=f.run('install_init');assert.equal(r.status,1);assert.match(r.stderr,/持久目录不能是符号链接/);
+ assert.equal(hash(f.retained),before);assert.equal(fs.readFileSync(path.join(outside,'keep'),'utf8'),'unrelated bytes');assert.equal(fs.existsSync(f.target),false);
+});
+
 test('native installation/configuration callbacks still require their payload',t=>{
  const f=fixture(t);
- for(const hook of ['install_init','install_callback','upgrade_callback','config_init','config_callback','uninstall_init']){
+ for(const hook of ['install_callback','upgrade_callback','config_init','config_callback','uninstall_init']){
   const r=f.run(hook);assert.equal(r.status,1,hook);assert.match(r.stderr,/target 无法解析/,hook);
  }
  assert.equal(fs.existsSync(f.data),false);assert.equal(fs.readFileSync(f.retained,'utf8'),'prior backup remains private');

@@ -67,6 +67,70 @@ class Recovery(unittest.TestCase):
     def recover(self):
         self.module.recover(str(self.volume), 42002, 42002)
 
+    def install_hook(self):
+        # Exercise the actual root-owned shell/helper chain in the existing
+        # isolated CI root suite, with a private inactive package UID.
+        import pwd
+        username = 'erp-init-' + str(os.getpid())
+        subprocess.run(['useradd', '--system', '--no-create-home', '--user-group', username], check=True)
+        self.addCleanup(subprocess.run, ['userdel', username], check=True)
+        package = pwd.getpwnam(username)
+        cmd = self.root / 'cmd'
+        cmd.mkdir(mode=0o700)
+        for name in ['install_init', 'native_env', 'retained_recovery.py']:
+            shutil.copyfile(HELPER.parent / name, cmd / name)
+            (cmd / name).chmod(0o600)
+        target = self.root / 'undeployed-target'
+        env = {**os.environ, 'TRIM_APPDEST': str(target), 'TRIM_APPDEST_VOL': str(self.volume), 'TRIM_USERNAME': username}
+        env.pop('TRIM_TEMP_LOGFILE', None)
+        def run():
+            return subprocess.run(['/bin/sh', str(cmd / 'install_init')], env=env, capture_output=True, text=True, timeout=30)
+        return run, target, package, env
+
+    def test_install_init_prepares_private_base_before_payload_deployment(self):
+        run, target, package, env = self.install_hook()
+        shutil.rmtree(self.base)
+        for dangling in [False, True]:
+            if dangling:
+                target.symlink_to(self.root / 'absent-payload', target_is_directory=True)
+            result = run()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.base.stat().st_uid, package.pw_uid)
+            self.assertEqual(self.base.stat().st_gid, package.pw_gid)
+            self.assertEqual(self.base.stat().st_mode & 0o777, 0o700)
+            self.assertFalse(self.data.exists())
+            self.assertFalse(target.exists())
+            self.assertEqual(target.is_symlink(), dangling)
+        for volume in ['', str(self.root / 'absent-volume'), str(self.outside)]:
+            env['TRIM_APPDEST_VOL'] = volume
+            result = run()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('存储卷', result.stderr)
+        self.assertFalse(self.data.exists())
+        self.assertEqual(self.outside.read_bytes(), b'never chown')
+        self.assertEqual(self.outside.stat().st_uid, 0)
+
+    def test_install_init_refuses_unsafe_retained_then_recovers_without_payload(self):
+        run, target, package, _ = self.install_hook()
+        target.symlink_to(self.root / 'absent-payload', target_is_directory=True)
+        before = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        unsafe = self.data / 'originals' / 'linked'
+        unsafe.symlink_to(self.outside)
+        result = run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('保留账本恢复被阻止', result.stderr)
+        self.assertTrue(all(p.lstat().st_uid == 42001 for p in [self.base, *self.base.rglob('*')] if p != unsafe))
+        self.assertEqual(self.outside.stat().st_uid, 0)
+        unsafe.unlink()
+        result = run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(all(p.stat().st_uid == package.pw_uid for p in [self.base, *self.base.rglob('*')]))
+        self.assertEqual({str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}, before)
+        self.assertFalse((self.data / 'config' / 'web.json').exists())
+        self.assertFalse(target.exists())
+        self.assertTrue(target.is_symlink())
+        self.assertEqual(self.outside.read_bytes(), b'never chown')
+
     def test_changed_uid_retains_bytes_and_all_validated_ownership(self):
         before = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
         self.recover()
