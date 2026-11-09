@@ -70,6 +70,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
  }catch(error){lock.close();throw error;}
  const record={schemaVersion:1,pid:process.pid,generation:randomUUID(),token:randomUUID()+randomUUID(),configFile,startedAt:new Date().toISOString()};
  const recordFile=path.join(config.stateDir,'native-supervisor.json'),endpoint=nativeEndpoint(config.stateDir);
+ let resolveStopped;const stopped=new Promise(resolve=>{resolveStopped=resolve;});
  let runtime,collector,browsers,server,monitor,startupTask,collectorFailure,stopping=null,ready=false,closed=false,monitoring=false;
  const cancellation=new AbortController();
  const checkCancellation=()=>{if(cancellation.signal.aborted)throw cancellation.signal.reason;};
@@ -90,6 +91,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
    for(const signal of ['SIGTERM','SIGINT'])process.off(signal,onInterrupted);
    process.off('message',onParentMessage);process.off('disconnect',onParentDisconnect);
    if(process.connected){process.send?.({type:'native-stopped',pid:process.pid,generation:record.generation});process.disconnect();}
+   resolveStopped();
   }
  }
  const shutdown=()=>{
@@ -167,7 +169,7 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
   },5000);monitor.unref();
   return {status:health,stop:shutdown};
  })();
- try{return await startupTask;}catch(error){await shutdown().catch(()=>{});throw error;}
+ try{const started=await startupTask;return {...started,wait:stopped};}catch(error){await shutdown().catch(()=>{});throw error;}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  const args=process.argv.slice(2);if(args.length!==2||args[0]!=='--config'){console.error('需要 --config <absolute>');process.exitCode=1;}

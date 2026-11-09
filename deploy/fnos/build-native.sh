@@ -64,6 +64,10 @@ bash "$helper/prepare-native-runtime.sh" "$runtime" "$work"
 cd "$repo"
 export npm_execpath="$runtime/node/lib/node_modules/npm/bin/npm-cli.js"
 node server/release.mjs "$stage/app/erp"
+version=$("$runtime/node/bin/node" -e "process.stdout.write(JSON.parse(require('node:fs').readFileSync(process.argv[1],'utf8')).version)" "$stage/app/erp/package.json")
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Accepted ERP package.json version is invalid.' >&2; exit 1; }
+sed -i -E "s/^version=.*/version=$version/" "$stage/manifest"
+grep -Fx "version=$version" "$stage/manifest" >/dev/null || { echo 'fnOS manifest version did not match accepted ERP.' >&2; exit 1; }
 cp "$work/debian-packages.json" "$out/debian-packages.json"
 cp "$work/xvfb-meson-log.txt" "$out/xvfb-meson-log.txt"
 cp "$helper/native-inputs.env" "$out/INPUTS.env"
@@ -157,10 +161,24 @@ cp "$stage/app/THIRD-PARTY.json" "$work/sources/"
 cp "$helper/THIRD-PARTY.md" "$work/sources/README.md"
 mkdir -p "$work/sources/native-build"; cp "$helper/"*.sh "$helper/"*.mjs "$helper/"*.py "$helper/native-inputs.env" "$work/sources/native-build/"
 cp "$work/diagnostic/meson-buildoptions.json" "$work/sources/native-build/diag-meson-buildoptions.json"
+if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
+ mkdir -p "$work/sources/environment-build"
+ cp -a "$repo/deploy/environments" "$repo/deploy/linux" "$work/sources/environment-build/"
+ mkdir -p "$work/sources/native-build/linux-xvfb"
+ cp "$work/linux-xvfb/meson-buildoptions.json" "$work/linux-xvfb/source-provenance.txt" "$work/sources/native-build/linux-xvfb/"
+ (cd "$work/sources/native-build/linux-xvfb"; sha256sum meson-buildoptions.json source-provenance.txt > SHA256SUMS.txt)
+fi
 (cd "$work/sources"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/SOURCE-SHA256SUMS.txt")
-tar --zstd -cf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" -C "$work/sources" .
-zstd --test "$out/wuchengerp-0.15.0-corresponding-source.tar.zst"
-tar --zstd -tf "$out/wuchengerp-0.15.0-corresponding-source.tar.zst" | grep -v '/$' | LC_ALL=C sort > "$out/SOURCE-FILES.txt"
+tar --zstd -cf "$out/wuchengerp-$version-corresponding-source.tar.zst" -C "$work/sources" .
+zstd --test "$out/wuchengerp-$version-corresponding-source.tar.zst"
+tar --zstd -tf "$out/wuchengerp-$version-corresponding-source.tar.zst" | grep -v '/$' | LC_ALL=C sort > "$out/SOURCE-FILES.txt"
 diff -u <(awk '{ print substr($0,67) }' "$out/SOURCE-SHA256SUMS.txt") "$out/SOURCE-FILES.txt"
-sha256sum wuchengerp-0.15.0-corresponding-source.tar.zst >> SHA256SUMS.txt
-printf '%s\n' "commit=$(git -C "$repo" rev-parse HEAD)" "run_id=${GITHUB_RUN_ID:-local}" 'platform=linux/amd64' 'libc=host glibc 2.36' > BUILD-INFO.txt
+sha256sum "wuchengerp-$version-corresponding-source.tar.zst" >> SHA256SUMS.txt
+printf '%s\n' "version=$version" "commit=$(git -C "$repo" rev-parse HEAD)" "run_id=${GITHUB_RUN_ID:-local}" 'platform=linux/amd64' 'libc=host glibc 2.36' > BUILD-INFO.txt
+if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
+ [[ -n ${ERP_LINUX_OUTPUT:-} ]] || { echo 'ERP_BUILD_LINUX=1 requires a separate ERP_LINUX_OUTPUT directory.' >&2; exit 1; }
+ mapfile -t companions < <(find "$out" -maxdepth 1 -type f -name '*-corresponding-source.tar.zst')
+ [[ ${#companions[@]} == 1 ]] || { echo 'Expected exactly one same-run corresponding source archive.' >&2; exit 1; }
+ export ERP_FNOS_SOURCE_COMPANION=${companions[0]}
+ bash "$repo/deploy/linux/build-environment.sh" "$stage/app/erp" "$runtime" "$work/linux-xvfb" "$ERP_LINUX_OUTPUT"
+fi

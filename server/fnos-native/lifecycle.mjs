@@ -12,8 +12,12 @@ function commandIdentity(record,file){
  if(!record||!Number.isSafeInteger(record.pid)||record.pid<1||record.configFile!==file||typeof record.token!=='string'||typeof record.generation!=='string')throw Error('原生进程身份 identity 无效');
  if(process.platform==='linux'){
   let argv;try{argv=fs.readFileSync('/proc/'+record.pid+'/cmdline','utf8').split('\0');}catch(error){if(error.code==='ENOENT')return false;throw error;}
-  if(path.resolve(argv[1]||'')!==path.join(loadConfig(file).releaseRoot,'server','fnos-native','supervisor.mjs')||argv[2]!=='--config'||argv[3]!==file)throw Error('原生进程真实命令身份不符');
   const config=loadConfig(file);
+  const supervisor=path.join(config.releaseRoot,'server','fnos-native','supervisor.mjs');
+  const environment=path.join(config.releaseRoot,'server','environment.mjs');
+  const nativeSupervisor=path.resolve(argv[1]||'')===supervisor&&argv[2]==='--config'&&argv[3]===file;
+  const foregroundServe=path.resolve(argv[1]||'')===environment&&argv[2]==='serve'&&argv[3]==='--config'&&argv[4]===file;
+  if(!nativeSupervisor&&!foregroundServe)throw Error('原生进程真实命令身份不符');
   if(fs.realpathSync('/proc/'+record.pid+'/exe')!==fs.realpathSync(config.native?.nodePath||process.execPath)||fs.statSync('/proc/'+record.pid).uid!==process.getuid())throw Error('原生进程可执行文件或用户身份不符');
  }
  return true;

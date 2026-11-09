@@ -36,3 +36,6 @@ run=$(cat "$work/clean-dv/@wuchengerpdiag-data/active-run")
 cp -a "$work/clean-dv/@wuchengerpdiag-data/$run/evidence" /output/release/clean-diagnostic-evidence
 status=0; /bin/sh "$work/unpacked-diag/cmd/main" status || status=$?; [[ $status = 3 ]]
 /bin/sh "$work/unpacked-diag/cmd/main" stop
+if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
+ env LD_LIBRARY_PATH="$libs" "$app/runtime/node/bin/node" /src/deploy/environments/record-fnos-delivery.mjs /output/release /output/fnos-x64
+fi

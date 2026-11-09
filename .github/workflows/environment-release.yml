@@ -1,0 +1,123 @@
+name: Same source environment packages
+run-name: Environment packages · ${{ github.ref_name }} · ${{ github.sha }}
+on:
+  workflow_call:
+  push:
+    branches: [main, 'codex/fnos-native']
+    paths:
+      - .github/workflows/environment-release.yml
+      - .github/workflows/fnos-native.yml
+      - .github/workflows/browser-release.yml
+      - deploy/environments/**
+      - deploy/linux/**
+      - deploy/fnos/**
+      - server/**
+      - apps/**
+      - ui/**
+      - shared/**
+      - tests/**
+      - .gitattributes
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: environment-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+      - name: Install and prepare accepted common release
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix apps/purchase --ignore-scripts
+          npm ci --prefix apps/sales --ignore-scripts
+          npm ci --prefix apps/overview --ignore-scripts
+          node server/release.mjs "$env:RUNNER_TEMP/accepted-release"
+          if ($LASTEXITCODE -ne 0) { throw 'Common release acceptance failed.' }
+      - name: Build and accept Windows package with bundled Node
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'windows-envelope'
+          ./deploy/environments/build-windows.ps1 -AcceptedRelease "$env:RUNNER_TEMP/accepted-release" -OutputDirectory $out -Commit $env:GITHUB_SHA -RunId $env:GITHUB_RUN_ID
+          if ($LASTEXITCODE -ne 0) { throw 'Windows environment package build failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: environment-windows-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/windows-envelope.zip
+            ${{ runner.temp }}/windows-envelope.zip.sha256
+            ${{ runner.temp }}/environment-build.json
+            ${{ runner.temp }}/environment-receipt.json
+            ${{ runner.temp }}/environment-acceptance.json
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+  fnos-linux:
+    uses: ./.github/workflows/fnos-native.yml
+    with:
+      check_scope: full
+      build_linux: true
+    permissions:
+      contents: read
+  delivery-gate:
+    needs: [windows, fnos-linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.2
+      - name: Read version from this checkout
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid checked-out package version.' }
+          "ERP_VERSION=$version" >> $env:GITHUB_ENV
+      - uses: actions/download-artifact@v4
+        with:
+          name: environment-windows-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/environment-inputs/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: environment-linux-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/environment-inputs/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: fnos-native-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/environment-inputs/fnos
+      - name: Move Linux envelope and fnOS release under unique targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/environment-delivery"
+          input="$RUNNER_TEMP/environment-inputs"
+          mkdir -p "$root/linux-x64" "$root/fnos-x64"
+          mkdir -p "$root/windows-x64"
+          cp -a "$input/linux/." "$root/linux-x64/"
+          cp -a "$input/windows/." "$root/windows-x64/"
+          cp -a "$input/fnos/fnos-x64/." "$root/fnos-x64/"
+      - name: Verify three-package delivery and write manifest
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          ERP_VERSION: ${{ env.ERP_VERSION }}
+        run: |
+          node deploy/environments/verify-delivery.mjs "$RUNNER_TEMP/environment-delivery" "$RUNNER_TEMP/environment-delivery/DELIVERY.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: environment-delivery-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/environment-delivery/**
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0

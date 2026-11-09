@@ -19,8 +19,11 @@ export function verifyArtifact(folder){
  const root=fs.realpathSync(folder),app=path.join(root,'app');
  const read=p=>fs.readFileSync(path.join(root,p),'utf8');
  const requireFile=p=>{if(!fs.statSync(path.join(root,p)).isFile())throw Error('Missing payload '+p);};
+ const release=verifyRelease(path.join(app,'erp'));
+ const releaseVersion=JSON.parse(fs.readFileSync(path.join(app,'erp/package.json'),'utf8')).version;
+ if(typeof releaseVersion!=='string'||!/^\d+\.\d+\.\d+$/.test(releaseVersion))throw Error('Invalid accepted release version');
  const manifest=read('manifest'),fields=manifestFields(manifest);
- for(const [key,value] of Object.entries({appname:'wuchengerp',version:'0.15.0',platform:'x86'}))if(fields[key]!==value)throw Error('Invalid manifest '+key);
+ for(const [key,value] of Object.entries({appname:'wuchengerp',version:releaseVersion,platform:'x86'}))if(fields[key]!==value)throw Error('Invalid manifest '+key);
  const staticConfig=path.join(app,'config');
  if(JSON.stringify(fs.readdirSync(staticConfig).sort())!==JSON.stringify(['privilege','resource']))throw Error('Only official static metadata may exist in app/config');
  for(const name of ['privilege','resource'])if(!fs.readFileSync(path.join(root,'config',name)).equals(fs.readFileSync(path.join(staticConfig,name))))throw Error('Official static metadata differs: '+name);
@@ -55,8 +58,7 @@ export function verifyArtifact(folder){
    if(relative.startsWith('app/runtime/sysroot/')&&/^(?:ld-linux.*|lib(?:c|m|mvec|pthread|dl|rt|resolv|util|anl|BrokenLocale|nss_(?:files|dns|compat|hesiod))\.so(?:\..*)?)$/.test(e.name))throw Error('Private glibc is forbidden '+relative);
   }else throw Error('Special payload file '+relative);
  }}walk(root);
- const release=verifyRelease(path.join(app,'erp'));
- if(!release.acceptance?.ok||JSON.parse(read('app/erp/package.json')).version!=='0.15.0')throw Error('Release version or acceptance missing');
- return {ok:true,platform:'x86',version:'0.15.0',releaseFiles:release.files.length,manifestSHA256:sha(Buffer.from(manifest)),novncHTMLSHA256:sha(Buffer.from(html))};
+ if(!release.acceptance?.ok)throw Error('Release acceptance missing');
+ return {ok:true,platform:'x86',version:releaseVersion,releaseFiles:release.files.length,manifestSHA256:sha(Buffer.from(manifest)),novncHTMLSHA256:sha(Buffer.from(html))};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){try{console.log(JSON.stringify(verifyArtifact(process.argv[2])));}catch(e){console.error(e.message);process.exitCode=1;}}

@@ -3,6 +3,8 @@
 set -euo pipefail
 helper=$(cd -- "$(dirname -- "$0")" && pwd)
 stage=$1; work=$2; out=$3
+main_version=$(awk -F= '$1=="version" { if (++count > 1) exit 2; value=$2; sub(/^[[:space:]]+/,"",value); sub(/[[:space:]]+$/, "", value) } END { if (count != 1) exit 3; print value }' "$stage/manifest")
+[[ $main_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid main package manifest version.' >&2; exit 1; }
 diag="$work/stage/wuchengerpdiag"
 mkdir -p "$diag/app" "$diag/config" "$diag/cmd"
 cp -a "$stage/app/." "$diag/app/"
@@ -14,9 +16,9 @@ cp "$helper/smoke-checks.mjs" "$diag/app/smoke-checks.mjs"
 import fs from 'node:fs';const f=process.argv[2],j=JSON.parse(fs.readFileSync(f));j.packageName='wuchengerpdiag';j.xvfbBuild.xkbBinDir='/var/apps/wuchengerpdiag/target/runtime/sysroot/usr/bin';j.xvfbBuild.xkbDir='/var/apps/wuchengerpdiag/target/runtime/sysroot/usr/share/X11/xkb';fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n');
 EOF
 cp "$stage/ICON.PNG" "$stage/ICON_256.PNG" "$diag/"
-cat > "$diag/manifest" <<'EOF'
+cat > "$diag/manifest" <<EOF
 appname=wuchengerpdiag
-version=0.15.0
+version=$main_version
 display_name=五成ERP原生隔离验收（测试）
 desc=仅合成数据的有界原生诊断；结果保留在独立私有目录；非正式服务。
 platform=x86

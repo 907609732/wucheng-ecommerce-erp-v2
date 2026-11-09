@@ -38,19 +38,28 @@ printf '%s  %s\n' "$CHROMIUM_SHA256" "$work/debs/chromium_${CHROMIUM_VERSION}_am
 (cd "$work/xorg"; apt-get source "xorg-server=$XORG_VERSION")
 xorg=$(find "$work/xorg" -mindepth 1 -maxdepth 1 -type d -name 'xorg-server-*' -print -quit)
 build_xvfb() {
- local package=$1 build=$2
+ local package=$1 build=$2 prefix=${3:-/var/apps/$1/target/runtime}
  meson setup "$build" "$xorg" \
-  --prefix="/var/apps/$package/target/runtime" \
+  --prefix="$prefix" \
   -Dxorg=false -Dxephyr=false -Dxnest=false -Dxwin=false -Dxquartz=false -Dxvfb=true \
   -Dglamor=false -Dglx=false -Dudev=false -Dudev_kms=false -Dsystemd_logind=false \
   -Ddri1=false -Ddri2=false -Ddri3=false -Ddrm=false \
   -Ddocs=false -Ddevel-docs=false -Dlisten_tcp=false \
-  -Dxkb_bin_dir="/var/apps/$package/target/runtime/sysroot/usr/bin" \
-  -Dxkb_dir="/var/apps/$package/target/runtime/sysroot/usr/share/X11/xkb" -Dxkb_output_dir=/tmp
+  -Dxkb_bin_dir="$prefix/sysroot/usr/bin" \
+  -Dxkb_dir="$prefix/sysroot/usr/share/X11/xkb" -Dxkb_output_dir=/tmp
  meson compile -C "$build" -j 2
 }
 build_xvfb wuchengerp "$xorg/build-native"
 build_xvfb wuchengerpdiag "$xorg/build-diag"
+if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
+ linux_work="$work/linux-xvfb"; mkdir -p "$linux_work"
+ build_xvfb wuchengerp-linux "$xorg/build-linux" /opt/wuchengerp/runtime
+ install -m755 "$xorg/build-linux/hw/vfb/Xvfb" "$linux_work/Xvfb"
+ cp "$xorg/build-linux/meson-info/intro-buildoptions.json" "$linux_work/meson-buildoptions.json"
+ cp "$xorg/build-linux/meson-logs/meson-log.txt" "$linux_work/meson-log.txt"
+ printf '%s\n' "source=xorg-server=$XORG_VERSION" 'repository=https://deb.debian.org/debian (Debian bookworm source package, apt signature checked)' 'prefix=/opt/wuchengerp/runtime' 'target=linux-x64' > "$linux_work/source-provenance.txt"
+ (cd "$linux_work"; sha256sum Xvfb meson-buildoptions.json meson-log.txt source-provenance.txt > SHA256SUMS.txt)
+fi
 mkdir -p "$work/diagnostic"
 install -m755 "$xorg/build-diag/hw/vfb/Xvfb" "$work/diagnostic/Xvfb"
 cp "$xorg/build-diag/meson-info/intro-buildoptions.json" "$work/diagnostic/meson-buildoptions.json"

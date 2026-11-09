@@ -6,6 +6,7 @@ import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {manifestFields} from '../deploy/fnos/verify-artifact.mjs';
+import {acceptedNativeRelease,writeNativeManifest} from '../deploy/fnos/write-native-manifest.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const checker=path.join(root,'deploy/fnos/verify-artifact.mjs');
@@ -33,6 +34,26 @@ function fixture(t){
 const run=stage=>spawnSync(process.execPath,[checker,stage],{encoding:'utf8'});
 test('complete native artifact validates its private runtime, upstream CSP and accepted release',t=>{
  const stage=fixture(t),r=run(stage);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).platform,'x86');
+});
+test('native artifact version follows the hash-verified accepted release package',t=>{
+ const stage=fixture(t),packageFile=path.join(stage,'app/erp/package.json'),releaseFile=path.join(stage,'app/erp/web-release.json');
+ fs.writeFileSync(packageFile,JSON.stringify({version:'0.16.3'}));
+ const release=JSON.parse(fs.readFileSync(releaseFile,'utf8'));
+ release.files.find(item=>item.path==='package.json').sha256=createHash('sha256').update(fs.readFileSync(packageFile)).digest('hex');
+ fs.writeFileSync(releaseFile,JSON.stringify(release));
+ const identity=acceptedNativeRelease(path.join(stage,'app/erp'));assert.equal(identity.version,'0.16.3');assert.equal(identity.sourceCompanion,'wuchengerp-0.16.3-corresponding-source.tar.zst');
+ const work=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-version-manifest-'));t.after(()=>fs.rmSync(work,{recursive:true,force:true}));
+ for(const file of ['debian-packages.json','sharp-source-inputs.json','canvas-source-inputs.json'])fs.writeFileSync(path.join(work,file),'{}');
+ const thirdParty=writeNativeManifest(stage,work);assert.equal(thirdParty.version,'0.16.3');assert.equal(thirdParty.sourceCompanion,'wuchengerp-0.16.3-corresponding-source.tar.zst');
+ const manifestFile=path.join(stage,'manifest'),manifest=fs.readFileSync(manifestFile,'utf8');
+ fs.writeFileSync(manifestFile,manifest.replace('version=0.15.0','version=0.16.3'));
+ const result=run(stage);assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout).version,'0.16.3');
+ fs.writeFileSync(manifestFile,manifest);assert.notEqual(run(stage).status,0,'manifest/package version mismatch must fail');
+ fs.writeFileSync(packageFile,JSON.stringify({version:'0.16'}));
+ release.files.find(item=>item.path==='package.json').sha256=createHash('sha256').update(fs.readFileSync(packageFile)).digest('hex');
+ fs.writeFileSync(releaseFile,JSON.stringify(release));
+ fs.writeFileSync(manifestFile,manifest.replace('version=0.15.0','version=0.16'));
+ assert.notEqual(run(stage).status,0,'invalid accepted release package version syntax must fail');
 });
 test('artifact requires dlopen payload but permits external NSS plugins without bundling glibc NSS',t=>{
  const stage=fixture(t);assert.equal(run(stage).status,0,'external NSS plugins are not glibc');
@@ -64,11 +85,13 @@ test('packed manifest preserves every source field and verifies official app arc
 
 test('diagnostic source declares the complete actual official fnpack manifest field set',()=>{
  const build=fs.readFileSync(path.join(root,'deploy/fnos/build-diagnostic.sh'),'utf8');
- const source=manifestFields(build.match(/cat > "\$diag\/manifest" <<'EOF'\r?\n([\s\S]*?)\r?\nEOF/)[1]);
+ const source=manifestFields(build.match(/cat > "\$diag\/manifest" <<'?EOF'?\r?\n([\s\S]*?)\r?\nEOF/)[1]);
  // Entire real diagnostic manifest from run42526258527/fnpack1.2.3, with only
  // trailing spaces on the two empty values normalized. Full archive
  // MD5 is separately checked against that downloaded actual 624MB app.tgz.
  const packed=manifestFields(fs.readFileSync(path.join(root,'tests/fixtures/fnpack-1.2.3-diagnostic-manifest.txt'),'utf8'));
+ assert.equal(source.version,'$main_version');assert.match(build,/main_version=\$\(awk[\s\S]*?\$stage\/manifest/);assert.match(build,/\[\[ \$main_version =~ \^\[0-9\]/);
+ source.version=packed.version;
  for(const [key,value] of Object.entries(source))assert.equal(packed[key],value,key);
  assert.deepEqual(Object.keys(packed).filter(k=>k!=='checksum').sort(),Object.keys(source).sort());
  assert.equal(packed.desktop_uidir,'');assert.equal(packed.desktop_applaunchname,'');

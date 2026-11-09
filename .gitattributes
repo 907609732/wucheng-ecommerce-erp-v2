@@ -16,4 +16,6 @@ scripts/public-scan/gitleaks-v8.30.1.official.toml text eol=lf
 tests/fixtures/novnc-v1.6.0-* text eol=lf
 deploy/fnos/*.sh text eol=lf
 deploy/fnos/*.env text eol=lf
+deploy/linux/*.sh text eol=lf
+deploy/environments/templates/linux-x64/* text eol=lf
 deploy/fnos/diagnostic-cmd/* text eol=lf

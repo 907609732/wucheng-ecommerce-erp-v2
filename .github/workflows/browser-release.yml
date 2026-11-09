@@ -1,83 +1,11 @@
-name: Browser release package
-run-name: Browser service · ${{ github.ref_name }} · ${{ github.sha }}
+name: Browser release package (legacy manual)
+run-name: Environment packages (legacy browser entry) · ${{ github.ref_name }} · ${{ github.sha }}
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  package:
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Read release version
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
-          "ERP_VERSION=$version" >> $env:GITHUB_ENV
-      - name: Scan source history
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'gitleaks.zip'
-          $toolDir = Join-Path $env:RUNNER_TEMP 'gitleaks'
-          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern 'gitleaks_8.30.1_windows_x64.zip' --output $archive
-          if ($LASTEXITCODE -ne 0) { throw 'Gitleaks download failed' }
-          Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
-          & (Join-Path $toolDir 'gitleaks.exe') git --redact --no-banner
-          if ($LASTEXITCODE -ne 0) { throw 'Source secret scan failed' }
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: npm ci --ignore-scripts
-      - run: npm ci --prefix apps/purchase --ignore-scripts
-      - run: npm ci --prefix apps/sales --ignore-scripts
-      - run: npm ci --prefix apps/overview --ignore-scripts
-      - run: npm run check
-      - run: npm run sync:approval
-      - run: npm run check:ui
-      - run: npm test
-      - run: npm run test:purchase
-      - run: npm run test:sales
-      - name: Verify real Windows DPAPI without competing business fixtures
-        working-directory: apps/overview
-        run: node --test tests/cainiao-auth.test.mjs
-      - name: Verify remaining overview business rules
-        working-directory: apps/overview
-        shell: pwsh
-        run: |
-          $tests = @(Get-ChildItem tests/*.test.mjs | Where-Object Name -ne 'cainiao-auth.test.mjs' | ForEach-Object FullName)
-          node --test --test-concurrency=2 $tests
-          if ($LASTEXITCODE -ne 0) { throw 'Overview business tests failed' }
-      - run: npm audit --omit=dev --audit-level=high
-      - name: Prepare and accept standalone browser service
-        shell: pwsh
-        run: |
-          node server/release.mjs "$env:RUNNER_TEMP/browser-service"
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate acceptance failed' }
-      - name: Create verified runtime ZIP
-        shell: pwsh
-        run: |
-          $candidate = Join-Path $env:RUNNER_TEMP 'browser-service'
-          $forbidden = Get-ChildItem -LiteralPath $candidate -File -Recurse | Where-Object { $_.Name -match '\.sqlite(?:-|$)|^\.env(?:$|\.)|^config\.json$' }
-          if ($forbidden) { throw 'Package contains local data or configuration' }
-          Copy-Item docs/browser-service.md "$candidate/OPERATIONS.md"
-          Copy-Item docs/browser-release.md "$candidate/README.md"
-          Copy-Item docs/data-version-operations.md "$candidate/DATA-VERSIONS.md"
-          @{ commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; version=$env:ERP_VERSION; target='windows-x64'; node=(node --version) } | ConvertTo-Json | Set-Content -Encoding utf8 "$candidate/build-info.json"
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          $zip = "dist/WuchengERP-Browser-$env:ERP_VERSION-windows-x64.zip"
-          Compress-Archive -Path "$candidate/*" -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  WuchengERP-Browser-$env:ERP_VERSION-windows-x64.zip" | Set-Content -Encoding ascii dist/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v7
-        with:
-          name: browser-service-${{ env.ERP_VERSION }}-${{ github.run_id }}
-          path: dist/*
-          retention-days: 14
-          if-no-files-found: error
+  environment-packages:
+    uses: ./.github/workflows/environment-release.yml
+    permissions:
+      contents: read

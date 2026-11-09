@@ -26,6 +26,14 @@ test('fresh is explicit, rejects replaceable data and unconfigured HTTPS, never 
  await assert.rejects(configureNative({...options(data),publicOrigin:undefined}),/HTTPS|地址/);
  assert.equal(fs.existsSync(data),false);
 });
+test('explicit tailscale entry disables fnOS without inventing NAS identity',async t=>{
+ const dir=fixture(t),data=path.join(dir,'tailscale-data');
+ const file=await configureNative({releaseRoot,dataRoot:data,mode:'fresh',entry:'tailscale',publicOrigin:'https://erp.tailnet-123.ts.net',runtimeDir:path.join(dir,'runtime-state'),requireBrowsers:true,browser:{enabled:true,runtimeRoot:path.join(releaseRoot,'runtime'),chromiumPath:path.join(releaseRoot,'runtime/chromium/chrome'),novncRoot:path.join(releaseRoot,'runtime/novnc')}});
+ const c=loadConfig(file);
+ assert.equal(c.fnos.enabled,false);assert.equal(c.tcpEnabled,true);
+ assert.equal(c.native.dataRoot,data);assert.equal(c.native.requireBrowsers,true);assert.equal(c.native.runtimeDir,path.join(dir,'runtime-state'));
+ assert.equal(Object.hasOwn(c.fnos,'instanceId'),false);assert.equal(Object.hasOwn(c.fnos,'allowedUids'),false);
+});
 test('fresh creates three real production books, no dev gateway identity, and existing mode preserves identity',async t=>{
  const dir=fixture(t),data=path.join(dir,'instance');
  const file=await configureNative(options(data)),c=loadConfig(file);
@@ -35,6 +43,7 @@ test('fresh creates three real production books, no dev gateway identity, and ex
  for(const [id,m] of Object.entries(c.modules)){const db=new DatabaseSync(path.join(m.dataDir,databases[id]),{readOnly:true});assert.equal(Object.values(db.prepare('PRAGMA integrity_check').get())[0],'ok');db.close();}
  const before=hash(path.join(c.modules.purchase.dataDir,databases.purchase));
  await assert.rejects(configureNative(options(data)),/存在|existing/);
+ await assert.rejects(configureNative({...options(data),mode:'existing',entry:'tailscale'}),/切换现有身份入口/);
  const file2=await configureNative({...options(data),mode:'existing',allowedUids:['1001']});
  assert.equal(loadConfig(file2).fnos.instanceId,c.fnos.instanceId);
  assert.deepEqual(loadConfig(file2).fnos.allowedUids,['1001']);
@@ -100,6 +109,7 @@ test('migration requires stopped verified complete source and preserves private 
  ledger.prepare('INSERT INTO imports VALUES(?,?,?,?,?,?,?,?,?)').run('migration-original','invoice.pdf',hash(path.join(c.modules.purchase.dataDir,'originals','invoice.pdf')),'originals/invoice.pdf','2026-01-01',1,0,1,'{}');ledger.close();
  await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),/校验|manifest/);
  await sealStoppedSource(source);
+ await assert.rejects(configureNative({...options(path.join(dir,'wrong-provider')),mode:'migrate',sourceRoot:source,entry:'tailscale'}),/身份入口|切换/);
  const before=hash(file),admin=hash(path.join(source,'state','month-admin','secret.json'));
  const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source}));
  assert.equal(migrated.fnos.instanceId,c.fnos.instanceId);assert.equal(migrated.publicOrigin,c.publicOrigin);assert.equal(migrated.tcpEnabled,true);

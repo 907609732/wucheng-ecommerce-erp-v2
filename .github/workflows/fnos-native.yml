@@ -1,18 +1,18 @@
 name: fnOS native FPK
 run-name: Native FPK · ${{ github.ref_name }} · ${{ github.sha }}
 on:
-  push:
-    branches: [codex/fnos-native]
-    paths:
-      - .github/workflows/fnos-native.yml
-      - deploy/fnos/**
-      - server/**
-      - apps/**
-      - shared/**
-      - tests/**
-      - .gitattributes
-      - package.json
-      - package-lock.json
+  workflow_call:
+    inputs:
+      check_scope:
+        description: Test scope for the complete native build
+        required: false
+        type: string
+        default: focused
+      build_linux:
+        description: Also produce the standalone Linux environment package
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       check_scope:
@@ -60,6 +60,8 @@ jobs:
           docker run --rm --init --privileged --security-opt apparmor=unconfined \
             -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_WORK_ROOT=/build \
             -e ERP_CI_CHECK_SCOPE="${{ inputs.check_scope || 'focused' }}" \
+            -e ERP_BUILD_LINUX="${{ inputs.build_linux && '1' || '0' }}" \
+            -e ERP_LINUX_OUTPUT=/output/linux-x64 \
             -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/ci-native.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/ci-build.log"
@@ -68,6 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --init --privileged --security-opt apparmor=unconfined \
+            -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_LINUX="${{ inputs.build_linux && '1' || '0' }}" \
             -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/verify-clean-runtime.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/clean-runtime.log"
@@ -80,13 +83,44 @@ jobs:
         shell: bash
         run: sudo chmod -R a+rX "$RUNNER_TEMP/fnos-output"
       - name: Upload native FPK, diagnostic FPK and verifiable evidence
-        if: always()
+        if: always() && !inputs.build_linux
         uses: actions/upload-artifact@v4
         with:
           name: fnos-native-${{ github.sha }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/fnos-output/**
+            !${{ runner.temp }}/fnos-output/linux-x64/**
             !${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload unified fnOS delivery package and verifiable evidence
+        if: always() && inputs.build_linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnos-native-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fnos-output/**
+            !${{ runner.temp }}/fnos-output/linux-x64/**
+            !${{ runner.temp }}/fnos-output/release/wuchengerp.fpk
+            !${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload standalone Linux package and sidecars
+        if: success() && inputs.build_linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: environment-linux-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fnos-output/linux-x64/*.tar.gz
+            ${{ runner.temp }}/fnos-output/linux-x64/*.tar.gz.sha256
+            ${{ runner.temp }}/fnos-output/linux-x64/environment-build.json
+            ${{ runner.temp }}/fnos-output/linux-x64/environment-receipt.json
+            ${{ runner.temp }}/fnos-output/linux-x64/environment-acceptance.json
+            ${{ runner.temp }}/fnos-output/linux-x64/chrome-sandbox.txt
+            ${{ runner.temp }}/fnos-output/linux-x64/loaded-libraries.json
+            ${{ runner.temp }}/fnos-output/linux-x64/source-companion.txt
           retention-days: 14
           if-no-files-found: error
           compression-level: 0
