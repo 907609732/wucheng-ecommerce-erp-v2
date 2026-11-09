@@ -2,6 +2,7 @@ import {trustedIdentity,metadataFingerprint,assertNativeUvcsPrepared,markNativeU
 import {resolveStoredFile} from '../../shared/stored-file.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
@@ -215,10 +216,24 @@ export async function configureNative(o={}){
   if(fs.existsSync(dataRoot))throw Error('持久数据目录已存在；请显式使用 existing');fs.mkdirSync(stage,{mode:0o700});
   if(o.mode==='fresh'){
    for(const name of ['state','data','data-version','socket','uvcs-home'])fs.mkdirSync(path.join(stage,name),{mode:0o700});
-   const dev=developmentConfig({root:releaseRoot,stateDir:path.join(stage,'state'),port:40000+Math.floor(Math.random()*10000)});
-   for(const id of moduleIds)dev.modules[id].dataDir=path.join(stage,'data',id);
-   // No gateway: never create development actors, sessions or gateway identity.
-   const services=await createSourceServices(dev);try{for(const id of moduleIds)await services.ensure(id);}finally{await services.stopOwned();}
+   const dev=developmentConfig({root:releaseRoot,stateDir:path.join(stage,'state')}),reservations=new Map();
+   const release=sockets=>Promise.all(sockets.map(socket=>new Promise(resolve=>socket.close(resolve))));
+   try{
+    for(const id of moduleIds){
+     const module=dev.modules[id],sockets=[];reservations.set(id,sockets);module.dataDir=path.join(stage,'data',id);
+     // Match both business HTTP and purchase mobile's actual loopback bind.
+     // Hold distinct OS-assigned ports until the owning module is about to start.
+     for(const key of id==='purchase'?['port','mobilePort']:['port']){
+      const socket=net.createServer(connection=>connection.destroy());sockets.push(socket);
+      await new Promise((resolve,reject)=>socket.once('error',reject).listen({port:0,host:'127.0.0.1',exclusive:true},resolve));
+      module[key]=socket.address().port;
+     }
+    }
+    // No gateway or changes to the final config. The existing foreign-port
+    // guards still fail closed if another process wins the release/start gap.
+    const services=await createSourceServices(dev);
+    try{for(const id of moduleIds){await release(reservations.get(id));await services.ensure(id);}}finally{await services.stopOwned();}
+   }finally{await release([...reservations.values()].flat());}
   }else{
    const source=physicalPath(o.sourceRoot);if(within(dataRoot,source)||within(source,dataRoot))throw Error('迁移目标不能覆盖源副本');const manifest=verifySource(source);
    fs.cpSync(source,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});verifySource(source);
