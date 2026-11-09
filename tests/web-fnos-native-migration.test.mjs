@@ -138,3 +138,44 @@ test('enabled migration requires trusted identity, registers only final workspac
  const manifest=JSON.parse(fs.readFileSync(path.join(backup,'migration-manifest.json')));assert.deepEqual(manifest.uvcs.identity,expected);assert.equal(manifest.uvcs.metadataSha256,metadataFingerprint(current.dataVersion.workspace));
  for(const [p,digest]of before.filter(([p])=>p.startsWith('data'+path.sep)))assert.equal(hash(path.join(target,p)),digest,p);
 });
+
+test('migration persists official VAR runtime independently without changing readonly source logs or financial modes',async t=>{
+ const {dir,source}=await fixture(t,{capture:false}),target=path.join(dir,'target'),runtimeDir=path.join(dir,'official-var/runtime');
+ for(const id of Object.keys(databases)){const log=path.join(source,'data',id,'integration-service.log');fs.writeFileSync(log,'retained historical log\n');fs.chmodSync(log,0o400);}
+ await sealStoppedSource(source);const before=files(source),modes=new Map(before.map(([p])=>[p,fs.statSync(path.join(source,p)).mode&0o777]));
+ const file=await configureNative({...options(target),mode:'migrate',sourceRoot:source,runtimeDir}),config=JSON.parse(fs.readFileSync(file));
+ assert.equal(config.native.runtimeDir,runtimeDir);assert.equal(config.stateDir,path.join(target,'state'));
+ assert.deepEqual(files(source),before);
+ for(const [p,digest]of before){assert.equal(fs.statSync(path.join(source,p)).mode&0o777,modes.get(p));if(p!==path.join('config','web.json')){assert.equal(hash(path.join(target,p)),digest);assert.equal(fs.statSync(path.join(target,p)).mode&0o777,modes.get(p));}}
+ const next=path.join(dir,'replacement-var/runtime');await configureNative({...options(target),mode:'existing',runtimeDir:next});
+ assert.equal(JSON.parse(fs.readFileSync(file)).native.runtimeDir,next);
+ await configureNative({...options(target),mode:'existing'});assert.equal(JSON.parse(fs.readFileSync(file)).native.runtimeDir,next,'optional CLI retains configured path');
+ const previous=process.env.ERP_NATIVE_RUNTIME_DIR,fromEnv=path.join(dir,'env-var/runtime');process.env.ERP_NATIVE_RUNTIME_DIR=fromEnv;
+ try{const {main}=await import('../server/fnos-native/lifecycle.mjs');await main(['configure','--config',file]);assert.equal(JSON.parse(fs.readFileSync(file)).native.runtimeDir,fromEnv);}finally{if(previous===undefined)delete process.env.ERP_NATIVE_RUNTIME_DIR;else process.env.ERP_NATIVE_RUNTIME_DIR=previous;}
+ const {validateConfig}=await import('../server/config.mjs');
+ for(const invalid of ['relative',target,path.join(target,'state'),releaseRoot,path.join(releaseRoot,'runtime')])assert.throws(()=>validateConfig({...config,native:{...config.native,runtimeDir:invalid}}),/runtime|运行/);
+ const linked=path.join(dir,'linked-var');fs.mkdirSync(runtimeDir,{recursive:true});fs.symlinkSync(path.dirname(runtimeDir),linked,process.platform==='win32'?'junction':'dir');
+ assert.throws(()=>validateConfig({...config,native:{...config.native,runtimeDir:path.join(linked,'runtime')}}),/runtime|运行/);
+});
+
+test('native runtime guard creates a private directory and refuses links before use',async t=>{
+ const {ensureNativeRuntimeDirectory}=await import('../server/config.mjs');
+ assert.equal(typeof ensureNativeRuntimeDirectory,'function');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-runtime-guard-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const runtimeDir=path.join(dir,'runtime'),config={native:{runtimeDir}};ensureNativeRuntimeDirectory(config);assert.ok(fs.statSync(runtimeDir).isDirectory());
+ if(process.platform!=='win32')assert.equal(fs.statSync(runtimeDir).mode&0o777,0o700);
+ fs.rmdirSync(runtimeDir);const outside=path.join(dir,'outside');fs.mkdirSync(outside);fs.symlinkSync(outside,runtimeDir,process.platform==='win32'?'junction':'dir');
+ assert.throws(()=>ensureNativeRuntimeDirectory(config),/runtime/);assert.deepEqual(fs.readdirSync(outside),[]);
+ ensureNativeRuntimeDirectory({});
+});
+
+test('Linux native runtime guard rejects broad permissions and foreign ownership without repairing it',{skip:process.platform!=='linux'||process.getuid?.()===0},async t=>{
+ const {ensureNativeRuntimeDirectory,validateConfig}=await import('../server/config.mjs');
+ const {dir:base,source}=await fixture(t,{capture:false}),dir=path.join(base,'runtime');fs.mkdirSync(dir,{mode:0o700});
+ const config=JSON.parse(fs.readFileSync(path.join(source,'config/web.json')));config.native.runtimeDir=dir;
+ for(const mode of [0o777,0o770,0o755]){fs.chmodSync(dir,mode);assert.throws(()=>validateConfig(config),/runtime/);assert.throws(()=>ensureNativeRuntimeDirectory(config),/runtime/);assert.equal(fs.statSync(dir).mode&0o777,mode);assert.deepEqual(fs.readdirSync(dir),[]);}
+ // /root is a real foreign-owned 0700 directory on the Linux CI host; no write
+ // or traversal into it is needed to establish the ownership rejection.
+ const foreign='/root',before=fs.lstatSync(foreign);assert.notEqual(before.uid,process.getuid());
+ config.native.runtimeDir=foreign;assert.throws(()=>validateConfig(config),/runtime/);assert.throws(()=>ensureNativeRuntimeDirectory(config),/runtime/);assert.equal(fs.lstatSync(foreign).mode,before.mode);
+});

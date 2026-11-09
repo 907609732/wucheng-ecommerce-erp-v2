@@ -110,6 +110,35 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.outside.read_bytes(), b'never chown')
         self.assertEqual(self.outside.stat().st_uid, 0)
 
+    def test_official_var_runtime_is_created_as_package_without_changing_platform_var(self):
+        _, target, package, env = self.install_hook()
+        target.mkdir()
+        (target / 'erp').mkdir()
+        var = Path(tempfile.mkdtemp(prefix='fnos-platform-var-', dir='/tmp'))
+        self.addCleanup(shutil.rmtree, var)
+        os.chown(var, package.pw_uid, package.pw_gid)
+        var.chmod(0o770)
+        logical = self.root / 'platform-var-link'
+        logical.symlink_to(var, target_is_directory=True)
+        env['TRIM_PKGVAR'] = str(logical)
+        script = '. "$1"; resolve_payload; prepare_runtime; as_package --system /bin/sh -c \'test -z "${LD_LIBRARY_PATH+x}"\''
+        def run():
+            return subprocess.run(['/bin/sh', '-eu', '-c', script, 'test', str(self.root / 'cmd/native_env')], env=env, capture_output=True, text=True, timeout=30)
+        result = run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = var / 'runtime'
+        self.assertEqual((runtime.stat().st_uid, runtime.stat().st_gid, runtime.stat().st_mode & 0o777), (package.pw_uid, package.pw_gid, 0o700))
+        self.assertEqual((var.stat().st_uid, var.stat().st_gid, var.stat().st_mode & 0o777), (package.pw_uid, package.pw_gid, 0o770))
+        runtime.chmod(0o770)
+        result = run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(runtime.stat().st_mode & 0o777, 0o770, 'never repair an existing broad runtime directory')
+        runtime.chmod(0o700)
+        os.chown(runtime, 0, 0)
+        result = run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(runtime.stat().st_uid, 0, 'never take over a foreign runtime directory')
+
     def test_install_init_refuses_unsafe_retained_then_recovers_without_payload(self):
         run, target, package, env = self.install_hook()
         log = self.root / 'install-error.log'

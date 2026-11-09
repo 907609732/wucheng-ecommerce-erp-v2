@@ -2,6 +2,12 @@
 
 构建目标是 Debian 12 / glibc 2.36 / x86_64 的飞牛 Native 应用。包内包含 Node 24.22.2、Linux 生产依赖、采购/销售/经营总览、Debian Chromium、Xvfb、x11vnc、XKB、中文字体及 noVNC 1.6.0；部署不使用 Docker。官方 fnpack 1.2.3 生成 FPK。实机安装、正式迁移与公网入口需要单独验收，CI 成功不代表这些已经完成。
 
+## 访问入口
+
+公网主入口使用飞牛应用入口，经飞牛中转与反向代理访问，并保留飞牛登录身份校验。ERP 安装包不包含 Tailscale，也不要求安装 Tailscale 才能使用。
+
+需要备用组网时，优先复用飞牛主机已有的 Tailscale 服务和现有转发配置，不创建第二套组网容器。已有实例迁移保留原备用入口；新建实例默认只启用飞牛入口。不得将内部模块端口直接暴露到公网。
+
 ## 构建与交付
 
 Windows 的 `build.ps1` 明确拒绝生成旧薄包。推送 `codex/fnos-native` 相关源码会自动运行 GitHub Actions **fnOS native FPK**，迭代检查 native/collector/release/privacy；手动入口可选择 full 全量检查。工作流使用临时 Debian 12 构建容器；仅为测试 Chromium namespace sandbox 允许 CI 容器特权，FPK 不授予 package 用户能力，也不依赖 Docker。
@@ -32,6 +38,7 @@ Chromium 156 的 GPU pre-sandbox hook 会直接预加载硬件 Vulkan 库，绕�
 - 现有实例迁移先停写、完整备份并恢复验证，再选择 migrate 和已经校验的停写副本。禁止旧容器和原生服务同时写入。保留原身份、锁、密码、历史和 UVCS 队列；不支持的原件绝对路径必须阻止切换。
 - 当前实例已启用 UVCS 时，必须验证原生 cm 可执行及原 HOME/认证/队列，不能关闭托管以通过迁移。UVCS 不随 FPK 再分发；向导可明确选择由 root-owned appcenter 钩子安装固定官方 11.0.16.10616-1 amd64 deb，核对大小/SHA256/包字段后安装，禁止升级/移除无关软件。不设置认证，不携带私有凭据。
 - 生命周期只在短暂准备阶段使用 root，Node/collector/两套浏览器全部使用专用 package 用户。长服务由已有 supervisor 管理，启停核对 generation、真实命令和账本身份；失败明确暴露。
+- 运行目录使用飞牛提供的 `TRIM_PKGVAR`，先解析平台路径，再以 package 用户创建私有 `runtime` 子目录。日志、派生模块注册表和浏览器临时文件写入此处；账本、HOME、持久浏览器 profile、身份、密码、审计及权威控制/归属锁继续保存在 DATA。迁移不通过批量 chmod 旧业务文件解决日志写入问题。目录规范见[飞牛应用目录结构](https://developer.fnnas.com/docs/core-concepts/framework/)。
 
 完成隔离诊断后，正式切换仍须依次验证账本摘要、两种入口的相同 serverId/dataSetId、权限/匿名拒绝、真实浏览器登录、UVCS、停止原 ERP 容器后的原生重启，以及 NAS 重启。保留旧 Docker 停机配置和原备份用于回退，不修改其他业务。
 

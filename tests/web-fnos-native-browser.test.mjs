@@ -137,3 +137,11 @@ test('trusted selected CDP ports reach the actual native collector adapter envir
 test('cancelling startup stops owned acquisitions before another browser launch',async t=>{
  const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),p=processes(),controller=new AbortController(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>false,readinessTimeoutMs:500,signal:controller.signal}),started=m.start();setTimeout(()=>controller.abort(Error('fixture cancel')),30);const now=Date.now();await assert.rejects(started,/fixture cancel/);assert(Date.now()-now<250);assert(p.calls.every(c=>!c.args.some(a=>a.startsWith('--remote-debugging-port='))));assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
 });
+
+test('official VAR contains browser launch files while persistent profiles remain in DATA',async t=>{
+ const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),config=fixture(t),p=processes();
+ config.native.runtimeDir=path.join(path.dirname(config.native.dataRoot),'official-var/runtime');
+ const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>manager.stop());await manager.start();
+ for(const call of p.calls.filter(c=>c.args.some(a=>a.startsWith('--user-data-dir=')))){assert.ok(call.options.env.XDG_RUNTIME_DIR.startsWith(config.native.runtimeDir+path.sep));assert.ok(call.args.includes('--user-data-dir='+path.join(config.native.dataRoot,'browser-profiles',call.args.find(a=>a.startsWith('--user-data-dir=')).endsWith('sales')?'sales':'overview')));}
+ assert.equal(fs.existsSync(path.join(config.stateDir,'native-browser')),false);await manager.stop();
+});

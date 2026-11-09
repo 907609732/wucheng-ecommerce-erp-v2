@@ -30,15 +30,34 @@ resolve_payload() {
  case "$DATA/" in "$TARGET/"*) fail 'ERP 持久数据不能位于可替换 target 内。';; esac
 }
 as_package() {
+ SYSTEM_COMMAND=0
+ if [ "${1:-}" = --system ]; then SYSTEM_COMMAND=1; shift; fi
  if [ "$(id -u)" = 0 ]; then
   [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
   PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
   [ "$PACKAGE_UID" != 0 ] || fail 'ERP 长期服务不能以 root 运行。'
   command -v runuser >/dev/null 2>&1 || fail 'ERP 需要系统 runuser 降权。'
-  runuser -u "$TRIM_USERNAME" -- env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"
+  if [ "$SYSTEM_COMMAND" = 1 ]; then runuser -u "$TRIM_USERNAME" -- env -u LD_LIBRARY_PATH "$@"
+  else runuser -u "$TRIM_USERNAME" -- env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
  else
-  env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"
+  if [ "$SYSTEM_COMMAND" = 1 ]; then env -u LD_LIBRARY_PATH "$@"
+  else env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
  fi
+}
+prepare_runtime() {
+ # fnOS creates VAR and may expose it through a logical application symlink.
+ # Resolve that platform path once; our private child must never be a link.
+ [ -n "${TRIM_PKGVAR:-}" ] || fail 'ERP 缺少应用运行目录 TRIM_PKGVAR。'
+ RUNTIME_BASE=$(CDPATH= cd -P "$TRIM_PKGVAR" 2>/dev/null && pwd -P) || fail 'ERP 应用 VAR 无法解析。'
+ ERP_NATIVE_RUNTIME_DIR="$RUNTIME_BASE/runtime"
+ as_package --system /bin/sh -eu -c '
+  runtime=$1
+  [ ! -L "$runtime" ] || exit 1
+  umask 077
+  mkdir -p "$runtime"
+  [ -d "$runtime" ] && [ "$(stat -c %u "$runtime")" = "$(id -u)" ] && [ "$(stat -c %a "$runtime")" = 700 ] || exit 1
+ ' sh "$ERP_NATIVE_RUNTIME_DIR" || fail 'ERP 私有 runtime 创建或属主校验失败。'
+ export ERP_NATIVE_RUNTIME_DIR
 }
 recover_retained() {
  [ "$(id -u)" = 0 ] || return 0
@@ -82,6 +101,7 @@ prepare() {
   chown "$PACKAGE_UID:$PACKAGE_GID" "$TARGET"
   chmod go-w "$TARGET"
  fi
+ prepare_runtime
 }
 provision_uvcs() {
  case "${wizard_uvcs_install:-0}" in

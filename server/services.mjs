@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { ServiceManager } from "./service-manager.mjs";
-import { moduleIds, databases } from "./config.mjs";
+import { moduleIds, databases, ensureNativeRuntimeDirectory } from "./config.mjs";
 import { silentLogger } from "./log.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const alive = (pid) => {
@@ -17,9 +17,14 @@ export async function createSourceServices(
   config,
   { Manager = ServiceManager, logger = null } = {},
 ) {
+  ensureNativeRuntimeDirectory(config);
   const log = (logger || silentLogger).child("modules");
-  const registryFile = path.join(config.stateDir, "web-registry.json");
+  const runtimeDir = config.native?.runtimeDir || config.stateDir;
+  const registryFile = path.join(runtimeDir, "web-registry.json");
   fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  const logDir = config.native?.runtimeDir ? path.join(runtimeDir, "logs") : undefined;
+  if (logDir) fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const registry = {};
   for (const id of moduleIds) {
     const m = config.modules[id];
@@ -38,9 +43,18 @@ export async function createSourceServices(
       nodePath: process.execPath,
     };
   }
-  fs.writeFileSync(registryFile, JSON.stringify(registry, null, 2));
+  // This registry is derived state; migrated copies may be owner-read-only.
+  // Replace the inode atomically instead of opening retained bytes for writing.
+  const registryTemporary = registryFile + "." + randomUUID() + ".tmp";
+  try {
+    fs.writeFileSync(registryTemporary, JSON.stringify(registry, null, 2), {flag: "wx", mode: 0o600});
+    fs.renameSync(registryTemporary, registryFile);
+  } finally {
+    fs.rmSync(registryTemporary, {force: true});
+  }
   const manager = new Manager({
     registryFile,
+    logDir,
     agentManaged: true,
     startupTimeoutMs: 30000,
     environment: { LINGTU_MONTH_ADMIN_DIR: path.join(config.stateDir,"month-admin"), LINGTU_MONTH_ADMIN_LEGACY_PURCHASE_DIR: config.modules.purchase.dataDir, LINGTU_WEB_COLLECTOR: "1", LINGTU_DATA_VERSION_DIR: config.dataVersion?.enabled ? config.dataVersion.dir : "", LINGTU_DATA_VERSION_MODE: config.dataVersion?.enabled ? "enabled" : "disabled" },

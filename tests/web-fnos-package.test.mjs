@@ -24,12 +24,12 @@ test('native hooks launch bundled lifecycle with explicit config and surface fai
  // Match the hook's physical path when Windows TEMP contains an 8.3 alias.
  const dir=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-native-package-')));
  try{
-  for(const p of ['app/runtime/node/bin','app/erp/server/fnos-native','@wuchengerp-data/erp/config','target'])fs.mkdirSync(path.join(dir,p),{recursive:true});
+  for(const p of ['app/runtime/node/bin','app/erp/server/fnos-native','@wuchengerp-data/erp/config','target','var'])fs.mkdirSync(path.join(dir,p),{recursive:true});
   fs.writeFileSync(path.join(dir,'app/erp/server/fnos-native/lifecycle.mjs'),'');
   fs.writeFileSync(path.join(dir,'@wuchengerp-data/erp/config/web.json'),'{}');
   const node=path.join(dir,'app/runtime/node/bin/node');fs.writeFileSync(node,'#!/bin/sh\nprintf "%s\\n" "$@" > "$ERP_TEST_ARGS"\nexit "${ERP_TEST_STATUS:-0}"\n');fs.chmodSync(node,0o755);
   const args=path.join(dir,'args'),log=path.join(dir,'error.log');
-  const env={...process.env,TRIM_APPDEST:unixPath(path.join(dir,'target')),TRIM_APPDEST_VOL:unixPath(dir),TRIM_TEMP_LOGFILE:unixPath(log),ERP_TEST_ARGS:unixPath(args)};
+  const env={...process.env,TRIM_APPDEST:unixPath(path.join(dir,'target')),TRIM_APPDEST_VOL:unixPath(dir),TRIM_PKGVAR:unixPath(path.join(dir,'var')),TRIM_TEMP_LOGFILE:unixPath(log),ERP_TEST_ARGS:unixPath(args)};
   fs.renameSync(path.join(dir,'app'),path.join(dir,'target','app'));
   const run=action=>spawnSync(bash,[unixPath(path.join(pkg,'cmd/main')),action],{env,encoding:'utf8'});
   for(const action of ['start','status','stop']){const r=run(action);assert.equal(r.status,0,r.stderr);const argv=fs.readFileSync(args,'utf8').trim().split('\n');assert.equal(argv[1],action);assert.equal(argv[2],'--config');assert.equal(argv[3],unixPath(path.join(dir,'@wuchengerp-data/erp/config/web.json')));}

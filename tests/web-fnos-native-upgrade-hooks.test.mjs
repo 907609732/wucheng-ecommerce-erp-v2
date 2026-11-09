@@ -94,3 +94,14 @@ test('native upgrade invokes real stop and sealed backup before allowing package
  // Real SQLite backup verification failure must also prevent package replacement.
  fs.writeFileSync(path.join(c.modules.purchase.dataDir,databases.purchase),'not a SQLite database');fs.writeFileSync(trace,'');r=f.run('upgrade_init');assert.equal(r.status,1);assert.match(r.stderr,/备份或恢复校验失败/);assert.deepEqual(fs.readFileSync(trace,'utf8').trim().split('\n'),['stop','backup']);assert.equal(fs.readFileSync(path.join(c.modules.purchase.dataDir,databases.purchase),'utf8'),'not a SQLite database');
 });
+
+test('official VAR logical path is resolved once and private runtime is prepared only after payload exists',t=>{
+ const f=fixture(t),physical=path.join(f.dir,'appdata'),logical=path.join(f.dir,'var-link');fs.mkdirSync(physical);fs.symlinkSync(physical,logical,process.platform==='win32'?'junction':'dir');f.env.TRIM_PKGVAR=unix(logical);
+ assert.equal(f.run('install_init').status,0);assert.equal(fs.existsSync(path.join(physical,'runtime')),false);
+ fs.mkdirSync(path.join(f.target,'erp'),{recursive:true});
+ const invoke=()=>spawnSync(shell,['-c',`set -eu; . ${quote(unix(path.join(cmd,'native_env')))}; resolve_payload; prepare_runtime; printf '%s' "$ERP_NATIVE_RUNTIME_DIR"`],{env:f.env,encoding:'utf8',timeout:30000});
+ let r=invoke();assert.equal(r.status,0,r.stderr);const actual=process.platform==='win32'?spawnSync(shell,['-c','cygpath -w "$1"','sh',r.stdout],{encoding:'utf8'}).stdout.trim():r.stdout;assert.equal(fs.realpathSync.native(actual),path.join(fs.realpathSync.native(physical),'runtime'));
+ const runtime=path.join(physical,'runtime');assert.ok(fs.statSync(runtime).isDirectory());if(process.platform!=='win32')assert.equal(fs.statSync(runtime).mode&0o777,0o700);
+ fs.rmdirSync(runtime);const outside=path.join(f.dir,'outside-runtime');fs.mkdirSync(outside);fs.symlinkSync(outside,runtime,process.platform==='win32'?'junction':'dir');
+ r=invoke();assert.notEqual(r.status,0);assert.match(r.stderr,/runtime/);assert.deepEqual(fs.readdirSync(outside),[]);
+});

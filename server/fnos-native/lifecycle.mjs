@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-import {loadConfig} from '../config.mjs';
+import {loadConfig,ensureNativeRuntimeDirectory} from '../config.mjs';
 import {configureNative,sealStoppedSource,backupNative,physicalPath,withNativeLifecycleLock} from './configure.mjs';
 import {nativeRequest,sleep,deadline} from './supervisor.mjs';
 
@@ -49,14 +49,17 @@ export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,
   if(current.ok)return current;
   if(current.status==='unavailable')throw Error('已有未确认身份的原生服务，拒绝重复启动：'+current.error);
   assertNativeUvcsPrepared(c);
-  const log=fs.openSync(path.join(c.stateDir,'native-supervisor.log'),'a',0o600);
+  ensureNativeRuntimeDirectory(c);
+  const logDir=c.native?.runtimeDir?path.join(c.native.runtimeDir,'logs'):c.stateDir;
+  fs.mkdirSync(logDir,{recursive:true,mode:0o700});
+  const logFile=path.join(logDir,'native-supervisor.log'),log=fs.openSync(logFile,'a',0o600);
   let child;
   try{child=spawn(c.native?.nodePath||process.execPath,[path.join(c.releaseRoot,'server','fnos-native','supervisor.mjs'),'--config',configFile],{cwd:c.releaseRoot,env:{...process.env,...(c.native?.home?{HOME:c.native.home}:{})},windowsHide:true,detached:true,stdio:['ignore',log,log,'ipc']});}finally{fs.closeSync(log);}
   let spawnError,exited=false;child.once('error',error=>{spawnError=error;});child.once('exit',()=>{exited=true;});
   const closed=new Promise(resolve=>child.once('close',resolve));child.unref();child.channel?.unref();
   const end=Date.now()+startupTimeoutMs;
   while(Date.now()<end){
-   if(spawnError)throw spawnError;if(exited)throw Error('原生服务启动失败，请检查 '+path.join(c.stateDir,'native-supervisor.log'));
+   if(spawnError)throw spawnError;if(exited)throw Error('原生服务启动失败，请检查 '+logFile);
    const next=await status(c,configFile);if(next.ok&&next.pid===child.pid){if(child.connected)child.disconnect();return next;}await sleep(200);
   }
   // IPC cancellation is graceful on Windows too; SIGTERM there terminates Node
@@ -77,11 +80,11 @@ export async function main(argv=process.argv.slice(2)){
  }
  if(action==='configure'){
   // fnOS wizard values arrive as environment fields. No shell eval or credentials
-  // are involved, and the data root remains the dedicated package var directory.
+  // are involved. Financial DATA and platform runtime VAR stay separate.
   const requested=o.config?loadConfig(physicalPath(o.config)):undefined;
   const releaseRoot=o.release||process.env.ERP_NATIVE_RELEASE||requested?.releaseRoot,appRoot=path.dirname(releaseRoot||'');
   const split=value=>value?value.split(/[\s,]+/).filter(Boolean):undefined;
-  const file=await configureNative({releaseRoot,dataRoot:o.data||process.env.ERP_NATIVE_DATA||requested?.native?.dataRoot,mode:o.mode||process.env.erp_mode||(requested?'existing':undefined),sourceRoot:o.source||process.env.erp_source,publicOrigin:o.origin||process.env.erp_origin,allowedOrigins:split(o.origins||process.env.erp_origins),allowedUids:split(o.uids||process.env.erp_uids),socketPath:o.socket||process.env.ERP_NATIVE_SOCKET,cmPath:o['cm-path']||process.env.ERP_NATIVE_CM_PATH,requireBrowsers:process.env.ERP_NATIVE_PACKAGE==='1'?true:undefined,browser:process.env.ERP_NATIVE_PACKAGE==='1'?{enabled:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined});
+  const file=await configureNative({releaseRoot,dataRoot:o.data||process.env.ERP_NATIVE_DATA||requested?.native?.dataRoot,mode:o.mode||process.env.erp_mode||(requested?'existing':undefined),sourceRoot:o.source||process.env.erp_source,publicOrigin:o.origin||process.env.erp_origin,allowedOrigins:split(o.origins||process.env.erp_origins),allowedUids:split(o.uids||process.env.erp_uids),socketPath:o.socket||process.env.ERP_NATIVE_SOCKET,cmPath:o['cm-path']||process.env.ERP_NATIVE_CM_PATH,runtimeDir:o['runtime-dir']||process.env.ERP_NATIVE_RUNTIME_DIR,requireBrowsers:process.env.ERP_NATIVE_PACKAGE==='1'?true:undefined,browser:process.env.ERP_NATIVE_PACKAGE==='1'?{enabled:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined});
   return {ok:true,config:file};
  }
  const r=await nativeLifecycle(action,o.config);if(action==='status'&&!r.ok)process.exitCode=3;return r;

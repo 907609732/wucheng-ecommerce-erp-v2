@@ -221,12 +221,15 @@ test('TCP-disabled configuration requires fnOS and retains backwards compatible 
 });
 test('lifecycle starts one generation, validates PID identity and stops only its supervisor',async t=>{
  let file;t.after(async()=>{if(file)await nativeLifecycle('stop',file).catch(()=>{});});
- const dir=fixture(t),data=path.join(dir,'instance');file=await configureNative(options(data));
+ const dir=fixture(t),data=path.join(dir,'instance'),runtimeDir=path.join(dir,'official-var/runtime');file=await configureNative({...options(data),runtimeDir});
+ const retainedLog=path.join(data,'state/native-supervisor.log');fs.writeFileSync(retainedLog,'retained readonly log');fs.chmodSync(retainedLog,0o400);
  const c=loadConfig(file);c.fnos={enabled:false};c.tcpEnabled=true;c.port=48000+Math.floor(Math.random()*1000);
  for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(file,JSON.stringify(c));
  const starts=await Promise.all([nativeLifecycle('start',file),nativeLifecycle('start',file)]);
  assert.equal(starts[0].generation,starts[1].generation);
+ assert.ok(fs.existsSync(path.join(runtimeDir,'logs/native-supervisor.log')));assert.equal(fs.readFileSync(retainedLog,'utf8'),'retained readonly log');assert.equal(fs.statSync(retainedLog).mode&0o200,0);
+ assert.ok(fs.existsSync(path.join(data,'state/native-ownership.sqlite')));assert.equal(fs.existsSync(path.join(runtimeDir,'native-supervisor.json')),false);
  const status=await nativeLifecycle('status',file);assert.equal(status.status,'running');assert.ok(status.serverId);assert.ok(status.dataSetId);
  const identityFile=path.join(c.stateDir,'gateway','identity.json'),identity=fs.readFileSync(identityFile,'utf8');
  fs.writeFileSync(identityFile,JSON.stringify({...JSON.parse(identity),serverId:'replacement-server-id'}));

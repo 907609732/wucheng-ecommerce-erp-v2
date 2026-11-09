@@ -8,6 +8,28 @@ export const databases = {
   overview: "overview.sqlite",
 };
 const absolute = (value) => typeof value === "string" && path.isAbsolute(value);
+function validateNativeRuntimeDirectory(config){
+  const r=config.native?.runtimeDir;if(r===undefined)return;
+  const inside=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
+  if(!absolute(r)||path.resolve(r)!==r||[config.native.dataRoot,config.releaseRoot].filter(Boolean).some(p=>inside(r,p)||inside(p,r)))throw Error('原生 runtime 目录必须为独立物理绝对路径');
+  let current=path.parse(r).root;
+  for(const segment of r.slice(current.length).split(path.sep).filter(Boolean)){
+    current=path.join(current,segment);
+    try{const st=fs.lstatSync(current);if(st.isSymbolicLink()||!st.isDirectory())throw Error('原生 runtime 路径不能使用链接或文件');}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+  }
+  try{
+    const st=fs.lstatSync(r);
+    if(process.platform!=='win32'&&(process.getuid()===0||st.uid!==process.getuid()||(st.mode&0o7777)!==0o700))throw Error('原生 runtime 必须由当前非 root 用户私有持有（0700）');
+  }catch(error){if(error.code!=='ENOENT')throw error;}
+}
+export function ensureNativeRuntimeDirectory(config){
+  if(config.native?.runtimeDir===undefined)return;
+  validateNativeRuntimeDirectory(config);
+  if(process.platform!=='win32'&&process.getuid()===0)throw Error('原生 runtime 必须由非 root 用户创建');
+  fs.mkdirSync(config.native.runtimeDir,{recursive:true,mode:0o700});
+  validateNativeRuntimeDirectory(config);
+}
 export function developmentConfig({
   root = path.resolve(import.meta.dirname, ".."),
   stateDir = path.join(root, ".codex-artifacts", "web-dev"),
@@ -128,6 +150,7 @@ export function validateConfig(value) {
     const inside=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
     if(c.releaseRoot&&(inside(n.dataRoot,c.releaseRoot)||inside(c.releaseRoot,n.dataRoot)))throw Error('原生持久数据必须位于可替换版本目录外');
     if(!inside(n.home,n.dataRoot))throw Error('原生 HOME 必须位于持久数据根内');
+    validateNativeRuntimeDirectory(c);
   }
   return c;
 }

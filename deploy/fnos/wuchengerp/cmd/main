@@ -14,7 +14,8 @@ if [ ! -x "$NODE" ] || [ ! -f "$LIFECYCLE" ]; then
  [ "$ACTION" != status ] || exit 3
  fail 'ERP 原生运行文件不完整，请重新安装完整 FPK。'
 fi
+if [ "$ACTION" = start ]; then prepare_runtime; fi
 if as_package "$NODE" "$LIFECYCLE" "$ACTION" --config "$CONFIG"; then exit 0; else
  [ "$ACTION" != status ] || exit 3
- fail 'ERP 启停失败，请检查持久目录 state/native-supervisor.log。'
+ fail "ERP 启停失败，请检查应用 VAR/runtime/logs/native-supervisor.log（旧配置为持久目录 state/native-supervisor.log）。"
 fi

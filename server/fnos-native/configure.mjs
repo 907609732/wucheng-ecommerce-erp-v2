@@ -132,6 +132,8 @@ function rebaseConfig(old,root,releaseRoot){
  if(old.dataVersion?.dir)maps.push([old.dataVersion.dir,path.join(root,'data-version')]);
  if(old.native?.home)maps.push([old.native.home,path.join(root,'uvcs-home')]);
  const c=remap(old,maps.sort((a,b)=>b[0].length-a[0].length));
+ // Platform VAR is independent of the migrated financial data root.
+ if(old.native?.runtimeDir!==undefined)c.native.runtimeDir=old.native.runtimeDir;
  c.releaseRoot=releaseRoot;c.stateDir=path.join(root,'state');c.mode='production';
  for(const id of moduleIds){c.modules[id].root=path.join(releaseRoot,'apps',id);c.modules[id].dataDir=path.join(root,'data',id);}
  delete c.windowsService;c.native={...c.native,dataRoot:root,home:path.join(root,'uvcs-home'),nodePath:process.execPath};return {config:c,maps};
@@ -202,6 +204,7 @@ export async function configureNative(o={}){
     }
     if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
     if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
+    if(o.runtimeDir!==undefined)c.native.runtimeDir=physicalPath(o.runtimeDir);
     if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
     c=validateConfig(c);await checkUvcs(c);await prepareNativeUvcs(c);atomicJson(configFileAt(dataRoot),c);return configFileAt(dataRoot);
    }finally{ownership.close();}
@@ -246,6 +249,7 @@ export async function configureNative(o={}){
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));
   }
   if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
+  if(o.runtimeDir!==undefined)c.native.runtimeDir=physicalPath(o.runtimeDir);
   fs.mkdirSync(path.join(stage,'socket'),{recursive:true,mode:0o700});integrity(stage);
   validateConfig(remap(c,[[dataRoot,stage]]));if(c.dataVersion?.enabled){c.dataVersion.cmPath=resolveNativeCmPath(c.dataVersion.cmPath,{allowSymlink:true});await checkUvcs(remap(c,[[dataRoot,stage]]));}
   atomicJson(path.join(stage,'config','web.json'),c);fs.renameSync(stage,dataRoot);
