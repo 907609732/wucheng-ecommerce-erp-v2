@@ -58,7 +58,7 @@ test('foreground environment serve reports its identity, stops cleanly, and rest
   for(let generation=0;generation<2;generation++){
    if(generation===1){
     assert.equal(fs.existsSync(record),false,'previous supervisor record must be gone before restart');
-    if(process.platform==='linux')assert.equal(fs.lstatSync(endpoint).isSocket(),true,'restart must clean the previous stale control socket');
+    assert.equal(fs.existsSync(endpoint),false,'clean stop must remove the previous control endpoint before restart');
    }
    const child=spawn(process.execPath,[path.join(releaseRoot,'server/environment.mjs'),'serve','--config',file],{cwd:releaseRoot,env:process.env,stdio:['ignore','pipe','pipe']});
    const childState=monitorChild(child);children.push({child,state:childState});
@@ -74,9 +74,7 @@ test('foreground environment serve reports its identity, stops cleanly, and rest
    const exit=await waitForChildExit(child,childState,10000);assert.equal(exit.code,0,stderr||stdout);assert.equal(exit.signal,null);
    assert.equal((await nativeLifecycle('status',file)).status,'stopped');
    assert.equal(fs.existsSync(record),false,'supervisor record must be removed after stop');
-   if(process.platform==='linux'){
-    const socket=fs.lstatSync(endpoint);assert.equal(socket.isSocket(),true);assert.equal(socket.uid,process.getuid());
-   }else assert.equal(fs.existsSync(endpoint),false);
+   assert.equal(fs.existsSync(endpoint),false,'clean stop must remove the control endpoint');
   }
   assert.notEqual(starts[0].pid,starts[1].pid);assert.notEqual(starts[0].generation,starts[1].generation);
   assert.equal((await nativeLifecycle('status',file)).status,'stopped');
