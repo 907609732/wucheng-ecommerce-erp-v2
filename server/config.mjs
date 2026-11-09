@@ -8,6 +8,28 @@ export const databases = {
   overview: "overview.sqlite",
 };
 const absolute = (value) => typeof value === "string" && path.isAbsolute(value);
+function validateNativeRuntimeDirectory(config){
+  const r=config.native?.runtimeDir;if(r===undefined)return;
+  const inside=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
+  if(!absolute(r)||path.resolve(r)!==r||[config.native.dataRoot,config.releaseRoot].filter(Boolean).some(p=>inside(r,p)||inside(p,r)))throw Error('原生 runtime 目录必须为独立物理绝对路径');
+  let current=path.parse(r).root;
+  for(const segment of r.slice(current.length).split(path.sep).filter(Boolean)){
+    current=path.join(current,segment);
+    try{const st=fs.lstatSync(current);if(st.isSymbolicLink()||!st.isDirectory())throw Error('原生 runtime 路径不能使用链接或文件');}
+    catch(error){if(error.code!=='ENOENT')throw error;}
+  }
+  try{
+    const st=fs.lstatSync(r);
+    if(process.platform!=='win32'&&(process.getuid()===0||st.uid!==process.getuid()||(st.mode&0o7777)!==0o700))throw Error('原生 runtime 必须由当前非 root 用户私有持有（0700）');
+  }catch(error){if(error.code!=='ENOENT')throw error;}
+}
+export function ensureNativeRuntimeDirectory(config){
+  if(config.native?.runtimeDir===undefined)return;
+  validateNativeRuntimeDirectory(config);
+  if(process.platform!=='win32'&&process.getuid()===0)throw Error('原生 runtime 必须由非 root 用户创建');
+  fs.mkdirSync(config.native.runtimeDir,{recursive:true,mode:0o700});
+  validateNativeRuntimeDirectory(config);
+}
 export function developmentConfig({
   root = path.resolve(import.meta.dirname, ".."),
   stateDir = path.join(root, ".codex-artifacts", "web-dev"),
@@ -40,6 +62,9 @@ export function developmentConfig({
 export function validateConfig(value) {
   const c = structuredClone(value);
   c.fnos = validateFnos(c.fnos);
+  c.tcpEnabled ??= true;
+  if(typeof c.tcpEnabled!=='boolean')throw Error('TCP 开关必须为布尔值');
+  if(!c.tcpEnabled&&!c.fnos.enabled)throw Error('禁用 TCP 必须启用飞牛 fnOS 入口');
   if (
     c.schemaVersion !== 1 ||
     !["development", "production"].includes(c.mode) ||
@@ -118,6 +143,14 @@ export function validateConfig(value) {
       if(!within(v.workspace,v.dir)||path.resolve(v.workspace)===path.resolve(v.dir))throw Error('数据版本工作区必须位于独立版本目录内');
       if(moduleIds.some(id=>within(v.dir,c.modules[id].dataDir)||within(c.modules[id].dataDir,v.dir)))throw Error('数据版本目录不能包含或位于正式数据目录');
     }
+  }
+  if(c.native!==undefined){
+    const n=c.native;
+    if(!n||!absolute(n.dataRoot)||!absolute(n.home)||path.resolve(c.stateDir)!==path.resolve(n.dataRoot,'state')||moduleIds.some(id=>path.resolve(c.modules[id].dataDir)!==path.resolve(n.dataRoot,'data',id)))throw Error('原生持久数据路径不能重定向');
+    const inside=(child,parent)=>path.resolve(child)===path.resolve(parent)||path.resolve(child).startsWith(path.resolve(parent)+path.sep);
+    if(c.releaseRoot&&(inside(n.dataRoot,c.releaseRoot)||inside(c.releaseRoot,n.dataRoot)))throw Error('原生持久数据必须位于可替换版本目录外');
+    if(!inside(n.home,n.dataRoot))throw Error('原生 HOME 必须位于持久数据根内');
+    validateNativeRuntimeDirectory(c);
   }
   return c;
 }

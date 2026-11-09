@@ -88,10 +88,21 @@ export function createFnosListener(app,c){
           fs.unlinkSync(markerPath);
         }else await cleanStaleSocket(c.socketPath);
         boundPath=path.join(parent,'.erp-'+randomUUID());
-        server=http.createServer((req,res)=>{
+        const prepare=req=>{
           const url=req.url||'',pathname=url.split('?')[0];
-          if(!(pathname===c.basePrefix||pathname.startsWith(c.basePrefix+'/'))||/[\\]/.test(pathname)||/%(?:2f|5c|2e|00)/i.test(pathname)||pathname.split('/').some(p=>p==='.'||p==='..')){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,code:'FNOS_PATH_INVALID'}));return;}
-          contexts.set(req,{publicPrefix:c.basePrefix});req.url=(pathname===c.basePrefix?'/':'')+url.slice(c.basePrefix.length);app.routing(req,res);
+          if(contexts.has(req)||!(pathname===c.basePrefix||pathname.startsWith(c.basePrefix+'/'))||/[\\]/.test(pathname)||/%(?:2f|5c|2e|00)/i.test(pathname)||pathname.split('/').some(p=>p==='.'||p==='..'))return false;
+          // This capability exists only on requests actually received here.
+          contexts.set(req,{publicPrefix:c.basePrefix});req.url=(pathname===c.basePrefix?'/':'')+url.slice(c.basePrefix.length);return true;
+        };
+        server=http.createServer((req,res)=>{
+          if(!prepare(req)){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,code:'FNOS_PATH_INVALID'}));return;}
+          app.routing(req,res);
+        });
+        server.on('upgrade',(req,socket,head)=>{
+          if(!prepare(req)){socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');return;}
+          // The maintained proxy owns framing/upgrading. Forward the original
+          // IncomingMessage, socket and head, preserving private transport context.
+          if(!app.server.emit('upgrade',req,socket,head))socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
         });
         // Each generation has a unique bound name: libuv close can never unlink
         // a later generation. A non-secret marker lets FPK verify its exact name.

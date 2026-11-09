@@ -1,0 +1,14 @@
+appname                    = wuchengerpdiag
+version                    = 0.15.0
+display_name               = 五成ERP原生隔离验收（测试）
+desc                       = 仅合成数据的有界原生诊断；结果保留在独立私有目录；非正式服务。
+platform                   = x86
+source                     = thirdparty
+maintainer                 = Wucheng
+distributor                = Wucheng
+os_min_version             = 1.1.3100
+ctl_stop                   = true
+disable_authorization_path = true
+desktop_uidir              =
+desktop_applaunchname      =
+checksum                   = c8664ce7ced96040f62b12e1814dea71

@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {collectorConnection} from '../server/collector-browser-connection.mjs';
 
+test('Linux MCP child preserves the trusted private loader path without copying unrelated credentials',async()=>{
+ const {collectorChildEnvironment}=await import('../server/collector-browser-connection.mjs');
+ const env={LD_LIBRARY_PATH:'/private/runtime/sysroot/lib/x86_64-linux-gnu',SECRET:'do-not-forward',PLAYWRIGHT_MCP_EXTENSION_TOKEN:'windows-only'};
+ assert.deepEqual(collectorChildEnvironment({platform:'linux',env}),{LD_LIBRARY_PATH:env.LD_LIBRARY_PATH});
+ assert.deepEqual(collectorChildEnvironment({platform:'linux',env:{}}),{});
+ assert.deepEqual(collectorChildEnvironment({platform:'win32',env}),{});
+});
+
 test('Windows collector retains the consented Chrome extension connection', () => {
   const result=collectorConnection('sales',{platform:'win32',env:{}});
   assert.deepEqual(result.args,['--extension']);

@@ -24,7 +24,7 @@ import {id,now,hash,fail,required,month,date,lastMonth,CATEGORIES} from './lib/u
 const root=path.dirname(fileURLToPath(import.meta.url));
 export function createApp({dataDir=process.env.OVERVIEW_DATA_DIR||path.join(root,'data'),sources=defaultPaths,cainiaoOptions={}}={}){
  const s=openStore(dataDir),app=express(),token=randomBytes(32).toString('hex'),previews=new Map();const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1}}),restoreUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024,files:1}});
- const integration=installLocalIntegration(app,{id:'lingtu-business-overview',version:JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version,root,dataDir,busy:()=>edits.busy()||!!cainiao.info().activeJobId,capabilities:['overview.read','dashboard.read','edits.prepare','edits.review-ui','bills.read']});
+ const integration=installLocalIntegration(app,{id:'lingtu-business-overview',version:JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version,root,dataDir,privatePaths:[sources.purchase,sources.sales],busy:()=>edits.busy()||!!cainiao.info().activeJobId,capabilities:['overview.read','dashboard.read','edits.prepare','edits.review-ui','bills.read']});
  const edits=installOverviewEdits(integration,s,()=>healthy());
  integration.agentBlocked=()=>edits.busy();
  integration.router.get('/bills',(_q,r)=>r.json({bills:s.bills(),payments:s.payments()}));

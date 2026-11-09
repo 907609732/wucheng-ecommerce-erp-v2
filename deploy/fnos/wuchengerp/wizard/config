@@ -1,0 +1,11 @@
+[
+ {"stepTitle":"ERP 访问设置","items":[
+  {"type":"tips","helpText":"保存前会安全停止服务。保留原实例身份、账本、月锁、管理员密码与 Tailscale 备用地址；留空的设置保持原值。"},
+  {"type":"select","field":"wizard_uvcs_verify","label":"仅执行原生 UVCS 只读验证","initValue":"0","options":[{"label":"关闭：正常保存设置","value":"0"},{"label":"停服并验证：忽略本页其他设置，完成后手动启动","value":"1"}]},
+  {"type":"tips","helpText":"只读验证先停止 ERP，再核对已登记工作区、仓库及全部已提交事件；不提交、不重试、不初始化，不更新配置。仅生成私有诊断报告。若官方客户端刷新认证或缓存，报告会明确失败。验证完成后请在应用中心手动启动服务。"},
+  {"type":"text","field":"erp_origin","label":"NAS HTTPS 地址（仅 fnOS-only 实例）"},
+  {"type":"text","field":"erp_origins","label":"飞牛允许源（逗号分隔）"},
+  {"type":"text","field":"erp_uids","label":"授权 NAS UID（逗号分隔）"},
+  {"type":"select","field":"wizard_uvcs_install","label":"可选系统 UVCS","initValue":"0","options":[{"label":"不安装","value":"0"},{"label":"从官方源安装系统 UVCS CLI","value":"1"}]}
+ ]}
+]

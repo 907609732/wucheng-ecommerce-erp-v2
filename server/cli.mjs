@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { developmentConfig, loadConfig, moduleIds } from "./config.mjs";
+import { developmentConfig, loadConfig, moduleIds, ensureNativeRuntimeDirectory } from "./config.mjs";
 import { createWebRuntime } from "./runtime.mjs";
 import { control } from "./control.mjs";
 import { snapshotData, restoreSnapshot, verifySnapshot } from "./backup.mjs";
@@ -116,12 +116,15 @@ function serviceCommand(config, action) {
 }
 function startDetached(configFile, folder) {
   const config = loadConfig(configFile);
+  ensureNativeRuntimeDirectory(config);
   if (config.windowsService) {
     serviceCommand(config, "start");
     return;
   }
   fs.mkdirSync(config.stateDir, { recursive: true });
-  const log = fs.openSync(path.join(config.stateDir, "web-service.log"), "a");
+  const logDir = config.native?.runtimeDir ? path.join(config.native.runtimeDir, "logs") : config.stateDir;
+  if (config.native?.runtimeDir) fs.mkdirSync(logDir, {recursive: true, mode: 0o700});
+  const log = fs.openSync(path.join(logDir, "web-service.log"), "a", config.native?.runtimeDir ? 0o600 : 0o666);
   try {
     const child = spawn(
       process.execPath,
@@ -273,7 +276,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   checkSource(root);
   const logLevel = o["log-level"] || (o.debug ? "debug" : undefined);
-  const logFile = file
+  const logFile = config.native?.runtimeDir ? path.join(config.native.runtimeDir, "logs", "web.log") : file
     ? path.join(path.dirname(path.resolve(file)), "logs", "web.log")
     : undefined;
   const runtime = await createWebRuntime(config, { logLevel, logFile });

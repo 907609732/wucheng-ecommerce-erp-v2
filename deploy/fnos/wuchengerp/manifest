@@ -1,8 +1,8 @@
 appname=wuchengerp
-version=0.14.4
+version=0.15.0
 display_name=五成ERP
-desc=飞牛可信登录入口；复用现有唯一ERP服务，不创建或管理账本。
-platform=all
+desc=完整原生 ERP：采购、销售、经营总览、采集浏览器；独立持久账本。
+platform=x86
 source=thirdparty
 maintainer=Wucheng
 distributor=Wucheng

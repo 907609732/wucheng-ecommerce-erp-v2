@@ -1,0 +1,71 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fail() { printf '%s\n' "$1" >&2; [ -z "${TRIM_TEMP_LOGFILE:-}" ] || printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; exit 1; }
+[ -n "${TRIM_APPDEST:-}" ] && [ -n "${TRIM_APPDEST_VOL:-}" ] || fail '诊断包缺少官方安装环境。'
+TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" && pwd -P)
+VOLUME=$(CDPATH= cd -P "$TRIM_APPDEST_VOL" && pwd -P)
+BASE="$VOLUME/@wuchengerpdiag-data"
+PAYLOAD="$TARGET"
+[ -d "$PAYLOAD/runtime" ] || PAYLOAD="$TARGET/app"
+NODE="$PAYLOAD/runtime/node/bin/node"
+CHILD_LIB_PATH="$PAYLOAD/runtime/sysroot/usr/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/usr/lib:$PAYLOAD/runtime/sysroot/lib"
+[ "${TRIM_APPNAME:-wuchengerpdiag}" = wuchengerpdiag ] || fail '仅允许独立诊断包。'
+case "$BASE/" in "$TARGET/"*) fail '诊断数据不能位于 target。';; esac
+as_package() {
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail '诊断包缺少专用用户。'
+  [ "$(id -u "$TRIM_USERNAME")" != 0 ] || fail '诊断不能以 root 运行。'
+  runuser -u "$TRIM_USERNAME" -- env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"
+ else env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
+}
+prepare_diag() {
+ [ ! -L "$BASE" ] || fail '诊断私有根不能是链接。'
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail '缺少诊断专用用户。'
+  uid=$(id -u "$TRIM_USERNAME"); gid=$(id -g "$TRIM_USERNAME")
+  [ "$uid" != 0 ] || fail '诊断用户不能为 root。'
+  if [ -d "$BASE" ]; then [ "$(stat -c %u "$BASE")" = "$uid" ] || fail '保留诊断根属于旧 UID；请先审核旧诊断数据，禁止自动递归 chown。'
+  else mkdir -m700 "$BASE"; chown "$uid:$gid" "$BASE"; fi
+  chmod 700 "$BASE"
+ fi
+}
+current_config() {
+ [ -f "$BASE/active-run" ] && [ ! -L "$BASE/active-run" ] || return 1
+ run=$(cat "$BASE/active-run")
+ case "$run" in run-*) ;; *) fail '诊断 run 标记无效。';; esac
+ case "$run" in *[!a-zA-Z0-9-]*|'') fail '诊断 run 标记无效。';; esac
+ CONFIG="$BASE/$run/data/config/web.json"
+}
+stop_diag() {
+ if current_config && [ -f "$CONFIG" ]; then as_package "$NODE" "$PAYLOAD/erp/server/fnos-native/lifecycle.mjs" stop --config "$CONFIG"; fi
+}
+stop_acceptance() {
+ [ -d "$BASE" ] || return 0
+ [ ! -L "$BASE" ] && [ ! -L "$BASE/acceptance.lock" ] || fail '诊断控制目录/作业锁不能是链接。'
+ command -v flock >/dev/null 2>&1 || fail '诊断需要系统 util-linux flock。'
+ exec 9>>"$BASE/acceptance.lock"
+ attempts=0
+ while ! flock -n 9; do
+  # Repeat while the lease is held: this also covers the short interval between
+  # taking the lease and publishing the new atomic active-run marker.
+  if current_config && [ -d "$BASE/$run" ] && [ ! -L "$BASE/$run" ]; then : > "$BASE/$run/cancel-request"; fi
+  attempts=$((attempts + 1))
+  [ "$attempts" -le 45 ] || fail '诊断取消清理未在 45 秒内确认，未报告停止成功；请检查独立诊断证据。'
+  sleep 1
+ done
+ # The acceptance shell holds its lease through Node/client/fixture cleanup and
+ # its final existing identity-checked native stop. No PID registry is added.
+ stop_diag
+ if current_config; then
+  env -u LD_LIBRARY_PATH -u LD_PRELOAD /usr/bin/python3 -I -B - "$BASE/$run/evidence/acceptance.json" <<'PY'
+import json,sys
+try:
+    report=json.load(open(sys.argv[1]))
+    assert report.get('cleanupComplete') is True
+except Exception:
+    sys.exit('诊断作业清理尚未确认，未报告停止成功；请检查独立诊断报告。')
+PY
+ fi
+}

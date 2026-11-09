@@ -1,3 +1,3 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
+# No deletion option: the retained volume directory is outside appcenter var.
 exit 0

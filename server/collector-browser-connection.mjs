@@ -1,5 +1,11 @@
 const endpoints={sales:'LINGTU_SALES_CDP_ENDPOINT',overview:'LINGTU_OVERVIEW_CDP_ENDPOINT'};
 
+// MCP's SDK keeps a small default environment which omits this loader setting.
+// Add only the trusted native launcher value; HOME/PATH remain SDK-managed.
+export function collectorChildEnvironment({platform=process.platform,env=process.env}={}) {
+  return platform==='linux'&&env.LD_LIBRARY_PATH?{LD_LIBRARY_PATH:env.LD_LIBRARY_PATH}:{};
+}
+
 export function collectorConnection(id,{platform=process.platform,env=process.env}={}) {
   if(!Object.hasOwn(endpoints,id))throw Error('采集模块无效');
   if(platform==='win32')return {args:['--extension'],usesExtension:true};

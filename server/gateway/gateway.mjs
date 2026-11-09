@@ -55,6 +55,8 @@ export async function createWorkbenchGateway(options={}) {
   if(!services||!storeDir)throw Error('缺少工作台服务注册表或存储目录');
   const log=(logger||silentLogger).child('gateway');
   const fnos=validateFnos(options.fnos);
+  const tcpEnabled=options.tcpEnabled!==false;
+  if(!tcpEnabled&&!fnos.enabled)throw Error('禁用 TCP 必须启用飞牛入口');
   const localDevelopment=options.localDevelopment===true;
   if(localDevelopment&&!/^http:\/\/127\.0\.0\.1:\d+$/.test(options.publicOrigin||''))throw Error('开发入口必须是本机 HTTP 地址');
   const publicOrigin=localDevelopment?new URL(options.publicOrigin).origin:validOrigin(options.publicOrigin),publicHost=new URL(publicOrigin).host;
@@ -209,7 +211,7 @@ export async function createWorkbenchGateway(options={}) {
     reply.setCookie(identity.cookie,token,{secure:identity.secure,httpOnly:true,sameSite:'strict',path:identity.publicPrefix||'/',maxAge:Math.floor((session.expires_at-Date.now())/1000)}).header('cache-control','no-store');
     store.observeIdentity(identity);
     const actor=companyActor({...identity,channel});
-    return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor)};
+    return {ok:true,protocolVersion:1,serverId:store.serverId,dataSetId:store.dataSetId,actor,sessionId:session.session_id,csrfToken:session.csrf,expiresAt:session.expires_at,modules:await metadata(actor),...(options.nativeBrowserEnabled===true?{nativeBrowser:{enabled:true}}:{})};
   });
   app.get(API+'/modules',{preHandler:requireSession},async request=>({ok:true,serverId:store.serverId,dataSetId:store.dataSetId,modules:await metadata(request.workbenchActor)}));
   app.get(API+'/modules/:id/connection',{preHandler:requireSession},async request=>{
@@ -237,7 +239,7 @@ export async function createWorkbenchGateway(options={}) {
   if(registerRoutes)await registerRoutes(app,context);
   const fnosListener=createFnosListener(app,fnos);
   app.addHook('onClose',async()=>{try{await fnosListener.stop();}finally{clearInterval(summary);store.close();}});
-  return {app,...context,fnosStatus:fnosListener.status,async start(){let address;try{address=await app.listen({host,port});}catch(error){await app.close();throw error;}try{await fnosListener.start();}catch(error){log.error('飞牛入口启动失败，Tailscale备用入口继续运行',{error:error.message});}return address;},async stop(){await app.close();}};
+  return {app,...context,fnosStatus:fnosListener.status,async start(){let address;try{if(tcpEnabled)address=await app.listen({host,port});else await app.ready();}catch(error){await app.close();throw error;}try{await fnosListener.start();}catch(error){if(!tcpEnabled){await app.close();throw error;}log.error('飞牛入口启动失败，Tailscale备用入口继续运行',{error:error.message});}return address||fnos.socketPath;},async stop(){await app.close();}};
 }
 
 export {validatePolicy};

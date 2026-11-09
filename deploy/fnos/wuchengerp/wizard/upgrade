@@ -1,0 +1,8 @@
+[
+ {"stepTitle":"升级五成 ERP","items":[
+  {"type":"tips","helpText":"升级先停止写入并生成配置、账本、状态、UVCS HOME 与浏览器 profile 完整备份，校验恢复后才继续。从旧薄入口升级必须选择迁移，填写已校验停写副本。"},
+  {"type":"select","field":"erp_mode","label":"数据方式","initValue":"existing","options":[{"label":"沿用已安装原生数据","value":"existing"},{"label":"从旧薄入口迁移停写副本","value":"migrate"}]},
+  {"type":"text","field":"erp_source","label":"停写副本完整路径（迁移填写）"},
+  {"type":"select","field":"wizard_uvcs_install","label":"可选系统 UVCS","initValue":"0","options":[{"label":"沿用已安装 CLI","value":"0"},{"label":"从官方源安装系统 UVCS CLI","value":"1"}]}
+ ]}
+]

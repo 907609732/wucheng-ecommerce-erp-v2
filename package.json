@@ -1,6 +1,6 @@
 {
   "name": "wucheng-ecommerce-erp-v2",
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "五成 ERP 浏览器服务：采购、销售、经营总览",
   "author": "五成电子商务集团",
   "private": true,
@@ -27,9 +27,11 @@
     "check:ui": "node scripts/sync-ui-assets.mjs --check"
   },
   "dependencies": {
-    "fastify": "^5.12.5",
     "@fastify/cookie": "11.1.3",
-    "@fastify/reply-from": "12.8.0"
+    "@fastify/http-proxy": "11.6.4",
+    "@fastify/reply-from": "12.8.0",
+    "fastify": "^5.12.5",
+    "ws": "8.22.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0"

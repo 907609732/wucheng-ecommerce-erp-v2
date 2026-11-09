@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../../shared/stored-file.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,4 +54,4 @@ export function sourceRecords(s,overrides=[]){
  return out;
 }
 export function sourceTarget(s,key){if(key.startsWith('purchase:')){const r=s.purchase.find(x=>'purchase:'+x.id===key);if(!r||r.excluded_from_spend||!['已完成','待发货','待收货'].includes(r.status))throw fail('关联采购不存在或未计入采购支出');return {raw:r,amount:r.amount_cents-r.refund_cents};}if(key.startsWith('sales:')){const r=s.sales.find(x=>'sales:'+x.id===key);if(!r||saleBucket(r)!=='platformFee'||r.amount>=0||r.currency!=='CNY')throw fail('只能关联已确认的人民币平台费用');return {raw:r,amount:-r.amount};}throw fail('关联来源无效');}
-export function sourceOriginal(s,source,id){const r=source==='purchase'?s.purchase.find(x=>x.id===id):s.sales.find(x=>x.id===id);if(!r)throw fail('源记录不存在',404);const imp=source==='purchase'?s.purchaseImports.find(x=>x.id===r.source_id):s.imports.find(x=>x.id===r.batch_id);if(!imp)throw fail('该记录没有原始文件',404);const base=path.dirname(s.paths[source]);const file=path.resolve(base,source==='purchase'?imp.file_path:imp.original_path);if(!file.startsWith(base+path.sep)||!fs.existsSync(file))throw fail('原件路径无效或文件缺失',404);return {file,name:imp.filename};}
+export function sourceOriginal(s,source,id){const r=source==='purchase'?s.purchase.find(x=>x.id===id):s.sales.find(x=>x.id===id);if(!r)throw fail('源记录不存在',404);const imp=source==='purchase'?s.purchaseImports.find(x=>x.id===r.source_id):s.imports.find(x=>x.id===r.batch_id);if(!imp)throw fail('该记录没有原始文件',404);const base=path.dirname(s.paths[source]);const {file}=resolveStoredFile(base,source==='purchase'?imp.file_path:imp.original_path,{folders:['originals']});return {file,name:imp.filename};}

@@ -10,29 +10,38 @@ const pkg=path.join(root,'deploy/fnos/wuchengerp');
 const read=p=>fs.readFileSync(path.join(pkg,p),'utf8');
 const bash=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'bash';
 const unixPath=p=>p.replaceAll('\\','/').replace(/^([A-Za-z]):/,(_,drive)=>'/'+drive.toLowerCase());
-test('thin FPK registers only the official authenticated Unix gateway',()=>{
+test('native FPK registers only the official authenticated Unix gateway',()=>{
  const manifest=read('manifest');
  assert.match(manifest,/^appname\s*=\s*wuchengerp$/m);
  assert.match(manifest,/^os_min_version\s*=\s*1\.1\.3100$/m);
  assert.doesNotMatch(manifest,/service_port|install_dep_apps/);
  const entry=JSON.parse(read('app/ui/config'))['.url']['wuchengerp.main'];
  assert.equal(entry.gatewayPrefix,'/app/wuchengerp');assert.equal(entry.gatewaySocket,'app.sock');assert.equal(entry.url,'/app/wuchengerp/');
- assert.equal(JSON.parse(read('config/privilege')).defaults['run-as'],'package');
+ assert.equal(JSON.parse(read('config/privilege')).defaults['run-as'],'root');
  assert.deepEqual(JSON.parse(read('config/resource')),{});
 });
-test('lifecycle is shell-only, read-only and cannot manage ERP or data',()=>{
- const main=read('cmd/main');
- assert.doesNotMatch(main,/\b(?:docker|python[23]?|curl|wget|kill|rm|mkdir|touch|chmod|chown|eval|source)\b|>>|\/var\/run/);
- assert.match(main,/cd -P/);assert.match(main,/app\.listener/);assert.match(main,/\[ \"\$SOCKET\" -ef \"\$PRIVATE\" \]/);assert.match(main,/\/proc\/net\/unix/);assert.match(main,/00010000/);assert.match(main,/\[ -S "\$SOCKET" \]/);
- for(const name of fs.readdirSync(path.join(pkg,'cmd'))){
-  if(name==='main')continue;
-  assert.match(read('cmd/'+name),/^#!\/bin\/sh\n(?:#[^\n]*\n)*exit 0\n$/);
- }
+test('native hooks launch bundled lifecycle with explicit config and surface failures',()=>{
+ // Match the hook's physical path when Windows TEMP contains an 8.3 alias.
+ const dir=fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-native-package-')));
+ try{
+  for(const p of ['app/runtime/node/bin','app/erp/server/fnos-native','@wuchengerp-data/erp/config','target','var'])fs.mkdirSync(path.join(dir,p),{recursive:true});
+  fs.writeFileSync(path.join(dir,'app/erp/server/fnos-native/lifecycle.mjs'),'');
+  fs.writeFileSync(path.join(dir,'@wuchengerp-data/erp/config/web.json'),'{}');
+  const node=path.join(dir,'app/runtime/node/bin/node');fs.writeFileSync(node,'#!/bin/sh\nprintf "%s\\n" "$@" > "$ERP_TEST_ARGS"\nexit "${ERP_TEST_STATUS:-0}"\n');fs.chmodSync(node,0o755);
+  const args=path.join(dir,'args'),log=path.join(dir,'error.log');
+  const env={...process.env,TRIM_APPDEST:unixPath(path.join(dir,'target')),TRIM_APPDEST_VOL:unixPath(dir),TRIM_PKGVAR:unixPath(path.join(dir,'var')),TRIM_TEMP_LOGFILE:unixPath(log),ERP_TEST_ARGS:unixPath(args)};
+  fs.renameSync(path.join(dir,'app'),path.join(dir,'target','app'));
+  const run=action=>spawnSync(bash,[unixPath(path.join(pkg,'cmd/main')),action],{env,encoding:'utf8'});
+  for(const action of ['start','status','stop']){const r=run(action);assert.equal(r.status,0,r.stderr);const argv=fs.readFileSync(args,'utf8').trim().split('\n');assert.equal(argv[1],action);assert.equal(argv[2],'--config');assert.equal(argv[3],unixPath(path.join(dir,'@wuchengerp-data/erp/config/web.json')));}
+  env.ERP_TEST_STATUS='1';assert.equal(run('start').status,1);assert.match(fs.readFileSync(log,'utf8'),/ERP|日志/);
+  env.ERP_TEST_STATUS='3';assert.equal(run('status').status,3);
+  assert.equal(run('arbitrary-command').status,1);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('missing socket start/status fail clearly, stop leaves all files untouched',()=>{
+test('missing installation start/status fail clearly, stop leaves retained data untouched',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-thin-package-'));
  try{
-  const env={...process.env,TRIM_APPDEST:unixPath(dir)};
+  fs.mkdirSync(path.join(dir,'target'));const env={...process.env,TRIM_APPDEST:unixPath(path.join(dir,'target')),TRIM_APPDEST_VOL:unixPath(dir)};
   const run=action=>spawnSync(bash,[unixPath(path.join(pkg,'cmd/main')),action],{env,encoding:'utf8'});
   let r=run('start');assert.equal(r.status,1);assert.match(r.stderr,/socket|ERP/i);
   r=run('status');assert.equal(r.status,3);
@@ -43,7 +52,7 @@ test('missing socket start/status fail clearly, stop leaves all files untouched'
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('marker parser rejects traversal, multiple lines and noncanonical UUID basenames',()=>{
- const program=read('cmd/main').match(/BASENAME=\$\(LC_ALL=C awk '([^']+)' "\$MARKER"\)/)?.[1];assert.ok(program);
+ const program=read('cmd/listener_check').match(/BASENAME=\$\(LC_ALL=C awk '([^']+)' "\$MARKER"\)/)?.[1];assert.ok(program);
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-marker-parser-')),file=path.join(dir,'app.listener');
  const parse=value=>{fs.writeFileSync(file,value);return spawnSync(bash,['-c','LC_ALL=C awk "$1" "$2"','marker-test',program,unixPath(file)],{encoding:'utf8'});};
  try{
@@ -60,7 +69,7 @@ test('packager delegates to official CLI and stages an explicit source allowlist
  assert.match(script,/manifest/);assert.match(script,/config\/privilege/);
 });
 
-test('Linux: real backend listener and FPK lifecycle share the private socket contract', {skip:process.platform!=='linux'}, async()=>{
+test('Linux: real backend listener and read-only diagnostics share the private socket contract', {skip:process.platform!=='linux'}, async()=>{
  const {createFnosListener}=await import('../server/gateway/fnos.mjs');
  const http=await import('node:http');
  const dir=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'fnos-package-unix-')));
@@ -68,7 +77,7 @@ test('Linux: real backend listener and FPK lifecycle share the private socket co
  let privateSocket;
  const alias=dir+'-installed-target';
  const listener=createFnosListener({routing(_req,res){res.end('ready');}},{enabled:true,socketPath:socket,basePrefix:'/app/wuchengerp'});
- const run=(action,target=dir)=>spawnSync(bash,[path.join(pkg,'cmd/main'),action],{env:{...process.env,TRIM_APPDEST:target},encoding:'utf8'});
+ const run=(action,target=dir)=>spawnSync(bash,[path.join(pkg,'cmd/listener_check'),action],{env:{...process.env,TRIM_APPDEST:target},encoding:'utf8'});
  const get=()=>new Promise((resolve,reject)=>{const request=http.get({socketPath:socket,path:'/app/wuchengerp/'},response=>{let text='';response.on('data',chunk=>text+=chunk);response.on('end',()=>resolve(text));});request.on('error',reject);});
  try{
   await listener.start();

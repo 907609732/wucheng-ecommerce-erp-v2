@@ -1,3 +1,4 @@
+import {resolveStoredFile} from '../../shared/stored-file.mjs';
 import {stageTaobao,commitTaobao,taobaoFunds,taobaoStatement,taobaoMovements,taobaoMovement,taobaoMovementRows} from './lib/taobao.mjs';
 import {installLocalIntegration} from './lib/local-integration.mjs';
 import {installWorkbenchMigration} from './lib/workbench-migration-routes.mjs';
@@ -124,13 +125,13 @@ export function createApp({dataDir=path.join(root,'data'),port=17869,demo=false,
     for(const key of ['income_count','expense_count']){input[key]=q.body[key]==null||q.body[key]===''?null:Number(q.body[key]);}
     r.json(saveReference(s,input));
   });
-  app.get('/api/pdd/references/:id/evidence',(q,r)=>{const ref=s.get('SELECT payload FROM platform_references WHERE id=?',q.params.id),relative=ref&&JSON.parse(ref.payload).evidence_path;if(!relative)throw fail('没有参考截图',404);const file=path.resolve(s.dir,relative);if(!file.startsWith(path.resolve(s.dir,'originals')+path.sep))throw fail('原件路径无效');r.sendFile(file);});
+  app.get('/api/pdd/references/:id/evidence',(q,r)=>{const ref=s.get('SELECT payload FROM platform_references WHERE id=?',q.params.id),relative=ref&&JSON.parse(ref.payload).evidence_path;if(!relative)throw fail('没有参考截图',404);const {file}=resolveStoredFile(s.dir,relative,{folders:['originals']});r.sendFile(file);});
   app.get('/api/report-history',(q,r)=>r.json(s.all('SELECT * FROM report_history ORDER BY created_at DESC')));
   app.get('/api/imports',(q,r)=>r.json(s.all("SELECT i.id,i.shop_id,i.dataset,i.filename,i.sha256,i.created_at,i.status,i.context_json,COALESCE(a.status,'confirmed') attribution FROM imports i LEFT JOIN batch_attributions a ON a.import_id=i.id ORDER BY i.created_at DESC LIMIT 200")));
   app.post('/api/imports/:id/preview',async(q,r)=>r.json(await previewImport(s,q.params.id,q.body)));
   app.post('/api/imports/:id/commit',async(q,r)=>{await makeBackup(s,'before-import');r.json(commitImport(s,q.params.id,q.body.revision));});
   app.post('/api/imports/:id/rollback',async(q,r)=>{await makeBackup(s,'before-import-rollback');r.json(rollbackImport(s,q.params.id,q.body.reason));});
-  app.get('/api/imports/:id/original',(q,r)=>{const b=s.get('SELECT * FROM imports WHERE id=?',q.params.id);if(!b)throw fail('原件不存在',404);r.download(path.join(s.dir,b.original_path),b.filename);});
+  app.get('/api/imports/:id/original',(q,r)=>{const b=s.get('SELECT * FROM imports WHERE id=?',q.params.id);if(!b)throw fail('原件不存在',404);r.download(resolveStoredFile(s.dir,b.original_path,{folders:['originals']}).file,b.filename);});
   app.get('/api/template/:type',(q,r)=>{const fields=FIELDS[q.params.type];if(!fields)throw fail('模板不存在');r.set('Content-Disposition',`attachment; filename="${q.params.type}-template.csv"`);r.type('text/csv').send('\ufeff'+Object.keys(fields).join(',')+'\r\n');});
   app.get('/api/close',(q,r)=>r.json(closePreview(s,month(q.query.month))));
   app.post('/api/close/lock',async(q,r)=>{r.json(await lockMonth(s,q.body,requireMonthUI(q)));});

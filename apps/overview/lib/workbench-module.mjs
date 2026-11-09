@@ -10,7 +10,7 @@ const task=/\/(?:jobs|download-jobs|run|sync|start|collect|retry|resume)(?:\/|$)
 const confirmation=/\/(?:review-session|review|confirm|commit|rollback|lock|unlock|void)(?:\/|$)/;
 const download=/\/(?:export|[^/]*-export|template|templates|original|source|attachments|images|evidence)(?:\/|$)/;
 const matcher=route=>new RegExp('^'+route.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/:[A-Za-z0-9_]+/g,'[^/]+')+'/?$');
-export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
+export function installWorkbenchModule(app,router,{module,dataDir,root,state,privatePaths=[]}){
  const key=provisionWorkbenchKey(dataDir),operations=[],patterns=[];
  const service={key,operations,module,onAudit:null};
  let approved=new Set();try{approved=new Set(JSON.parse(fs.readFileSync(path.join(root,'workbench-manifest.json'),'utf8')).operations.filter(o=>o.remote===true).map(o=>o.method+' '+o.path));}catch{}
@@ -45,7 +45,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state}){
     if(!found||!found.operation.remote&&!coordinator)throw Object.assign(Error('此接口仅允许主机本地管理'),{status:403});
     if(found.operation.uiOnly&&actor.channel!=='ui')throw Object.assign(Error('当前身份不能执行此操作'),{status:403});
    }else if(!safe.has(q.method))throw Object.assign(Error('不允许此页面操作'),{status:403});
-   const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/agent/')||upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api,localDesktop}));
+   const upstreamPath=q.path,json=r.json.bind(r);r.json=value=>json(upstreamPath.startsWith('/api/integration/v1/agent/')||upstreamPath.startsWith('/api/integration/v1/workbench/migration/')||upstreamPath==='/api/integration/v1/workbench/operations'?value:remoteValue(value,{module,ui,api,localDesktop,privatePaths:[dataDir,root,...privatePaths]}));
    const sendFile=r.sendFile.bind(r);r.sendFile=(file,...args)=>{if(!localDesktop&&path.extname(file)==='.html'){
     let html=fs.readFileSync(file,'utf8');html=html.replace(/(<(?:script|link|img|a|iframe|form)\b[^>]*?\b(?:src|href|action)=['"])\/(?!\/)/gi,(_,start)=>start+ui);html=html.replace(/<head([^>]*)>/i,'<head$1><script src="'+ui+'workbench-base.js"></script>');r.type('html');return r.send(html);
    }return sendFile(file,...args);};
@@ -69,17 +69,22 @@ export function installWorkbenchAudit(integration,store){
  const finalize=integration.workbench.finalize;integration.workbench.finalize=()=>{finalize();store.dataVersioning?.refresh();};
  integration.workbench.finalize();
 }
-function remoteValue(value,{module,ui,api,localDesktop=false}){
+function remoteValue(value,{module,ui,api,localDesktop=false,privatePaths=[]}){
  const prefix=ui.match(/^(\/app\/wuchengerp)\/apps\//)?.[1]||'';
- if(Array.isArray(value))return value.map(v=>remoteValue(v,{module,ui,api,localDesktop}));
- if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\'))?'':remoteValue(v,{module,ui,api,localDesktop})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url){if(localDesktop){delete result.sources[id].url;result.sources[id].target={module:id};}else result.sources[id].url=prefix+'/apps/'+id+'/';}return result;}
+ // Only known host roots are sensitive; ordinary /api, /apps and asset URLs
+ // retain their existing routing rules. Never infer a filesystem path from '/'.
+ const hostPath=v=>typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\')||privatePaths.some(p=>typeof p==='string'&&p.length>1&&(v===p||v.startsWith(p+'/')||v.startsWith(p+'\\'))));
+ if(Array.isArray(value))return value.map(v=>remoteValue(v,{module,ui,api,localDesktop,privatePaths}));
+ if(value&&typeof value==='object'){const result=Object.fromEntries(Object.entries(value).filter(([k])=>!['token','integrationKey','workbenchKey','dataDir','root','pid','keyFile','nodePath','exe','filePath','profileDir','ledgerPath','sqlitePath','file_path','original_path','evidence_path'].includes(k)).map(([k,v])=>[k,k==='path'&&hostPath(v)?'':remoteValue(v,{module,ui,api,localDesktop,privatePaths})]));if(result.sources)for(const id of ['purchase','sales'])if(result.sources[id]?.url){if(localDesktop){delete result.sources[id].url;result.sources[id].target={module:id};}else result.sources[id].url=prefix+'/apps/'+id+'/';}return result;}
  if(typeof value==='string'){
+  if(hostPath(value))return '[仅主机本地可用]';
+  for(const p of privatePaths)if(typeof p==='string'&&p.length>1)value=value.replaceAll(p,'[主机路径]');
   const legacyModule=/^http:\/\/127\.0\.0\.1:(17868|17870|17890)\/?$/.exec(value);
   if(legacyModule){const id={17868:'purchase',17870:'sales',17890:'overview'}[legacyModule[1]];return localDesktop?{module:id}:prefix+'/apps/'+id+'/';}
 
   if(localDesktop){const legacy=/^http:\/\/(?:127\.0\.0\.1|localhost):(17868|17870|17890)(?:[/?#]|$)/.exec(value);if(legacy)return {module:{17868:'purchase',17870:'sales',17890:'overview'}[legacy[1]]};}
   if(/^[A-Z]:[\\/]/i.test(value)||value.startsWith('\\\\'))return '[仅主机本地可用]';
-  if(/[A-Z]:[\\/]/i.test(value))return value.replace(/[A-Z]:[\\/][^\r\n"'<>|]*/gi,'[主机路径]');
+  value=value.replace(/(^|[^A-Za-z0-9])([A-Z]:[\\/][^\r\n"'<>|]*)/gi,(_match,before)=>before+'[主机路径]');
   if(prefix&&(value===prefix||value.startsWith(prefix+'/')))return value;
   if(value.startsWith('/apps/')||value.startsWith('/api/workbench/')||value.startsWith('/web/'))return prefix+value;
   if(value.startsWith('/api/'))return api+value;

@@ -29,12 +29,13 @@ async function startGuard(file,deadline){
 }
 const defaults=()=>({purchase:{id:'purchase-desk',package:'purchase-desk',db:'purchases.sqlite',env:'PORT'},sales:{id:'wucheng-sales-desk',package:'wucheng-sales-desk',db:'sales.sqlite',env:'SALES_PORT'},overview:{id:'lingtu-business-overview',package:'lingtu-business-overview',db:'overview.sqlite',env:'OVERVIEW_PORT'}});
 export class ServiceManager{
-  constructor({registryFile,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false,environment={}}={}){
+  constructor({registryFile,logDir,policyFile=process.env.LINGTU_WORKBENCH_POLICY_FILE,startupTimeoutMs=90000,startupPollMs=250,agentManaged=false,environment={}}={}){
     if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<50||startupTimeoutMs>300000||!Number.isInteger(startupPollMs)||startupPollMs<10||startupPollMs>1000)throw Error('扩展启动等待配置无效');
     this.startupTimeoutMs=startupTimeoutMs;this.startupPollMs=startupPollMs;this.agentManaged=agentManaged===true;
     this.environment=environment;
     if(!registryFile||!path.isAbsolute(registryFile))throw Error('必须显式指定完整注册表路径');
-    this.registryFile=registryFile;this.policyFile=policyFile;this.pending=new Map();this.errors=new Map();
+    if(logDir!==undefined&&!path.isAbsolute(logDir))throw Error('服务日志必须使用完整目录路径');
+    this.registryFile=registryFile;this.logDir=logDir;this.policyFile=policyFile;this.pending=new Map();this.errors=new Map();
   }
   config(id){
     const base=defaults();let custom={};if(fs.existsSync(this.registryFile))custom=JSON.parse(fs.readFileSync(this.registryFile,'utf8'));
@@ -86,7 +87,7 @@ export class ServiceManager{
         const mobilePort=c.mobilePort||Number(process.env.PURCHASE_MOBILE_PORT)||17869;
         if(id==='purchase'&&await portOpen(mobilePort))throw Error(`采购手机入口端口 ${mobilePort} 已被其他程序占用，已停止启动`);
         {
-          log=fs.openSync(path.join(c.dataDir,'integration-service.log'),'a');
+          log=this.logDir?fs.openSync(path.join(this.logDir,id+'-integration-service.log'),'a',0o600):fs.openSync(path.join(c.dataDir,'integration-service.log'),'a');
           env={...process.env,...this.environment,[c.env]:String(c.port),PURCHASE_DATA_DIR:id==='purchase'?c.dataDir:process.env.PURCHASE_DATA_DIR||'',SALES_DATA_DIR:id==='sales'?c.dataDir:process.env.SALES_DATA_DIR||'',OVERVIEW_DATA_DIR:id==='overview'?c.dataDir:process.env.OVERVIEW_DATA_DIR||'',LINGTU_REGISTRY_PATH:this.registryFile,...(this.policyFile?{LINGTU_WORKBENCH_POLICY_FILE:this.policyFile}:{})};
           env.LINGTU_MAINTENANCE=c.maintenance?'1':'0';
           if(id==='purchase')env.PURCHASE_MOBILE_PORT=String(mobilePort);
@@ -118,8 +119,8 @@ export class ServiceManager{
           const registry=JSON.parse(fs.readFileSync(this.registryFile,'utf8'));
           if(registry[id]?.root!==c.root)throw Error('启动期间模块配置发生变化');
           registry[id].allowInitialize=false;
-          const temp=this.registryFile+'.'+process.pid+'.tmp';
-          fs.writeFileSync(temp,JSON.stringify(registry,null,2));fs.renameSync(temp,this.registryFile);
+          const temp=this.registryFile+'.'+randomUUID()+'.tmp';
+          try{fs.writeFileSync(temp,JSON.stringify(registry,null,2),{flag:'wx',mode:0o600});fs.renameSync(temp,this.registryFile);}finally{fs.rmSync(temp,{force:true});}
         }
         return cap;
       }

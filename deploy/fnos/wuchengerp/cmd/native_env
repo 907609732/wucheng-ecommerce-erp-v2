@@ -1,0 +1,126 @@
+#!/bin/sh
+# Only short-lived preparation may be root. Every Node service runs as package.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fail() {
+ printf '%s\n' "$1" >&2
+ if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; fi
+ exit 1
+}
+[ -n "${TRIM_APPDEST_VOL:-}" ] || fail 'ERP 缺少持久存储卷 TRIM_APPDEST_VOL。'
+VOLUME=$(CDPATH= cd -P "$TRIM_APPDEST_VOL" 2>/dev/null && pwd -P) || fail 'ERP 存储卷无法解析。'
+BASE="$VOLUME/@wuchengerp-data"
+DATA="$BASE/erp"
+CONFIG="$DATA/config/web.json"
+# Pre-upgrade and inactive stop/status can inspect retained state before the
+# replaceable payload is available. Call only when an action needs that payload.
+resolve_payload() {
+ [ -n "${TRIM_APPDEST:-}" ] || fail 'ERP 缺少 TRIM_APPDEST。'
+ TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" 2>/dev/null && pwd -P) || fail "ERP target 无法解析（uid=$(id -u) hook=$(basename "$0") action=${1:--} path=$TRIM_APPDEST）。"
+ PAYLOAD="$TARGET"
+ if [ ! -d "$PAYLOAD/erp" ] && [ -d "$TARGET/app/erp" ]; then PAYLOAD="$TARGET/app"; fi
+ NODE="$PAYLOAD/runtime/node/bin/node"
+ CHILD_LIB_PATH="$PAYLOAD/runtime/sysroot/usr/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/usr/lib:$PAYLOAD/runtime/sysroot/lib"
+ LIFECYCLE="$PAYLOAD/erp/server/fnos-native/lifecycle.mjs"
+ ERP_NATIVE_RELEASE="$PAYLOAD/erp"
+ ERP_NATIVE_DATA="$DATA"
+ ERP_NATIVE_SOCKET="$TARGET/app.sock"
+ ERP_NATIVE_PACKAGE=1
+ export ERP_NATIVE_RELEASE ERP_NATIVE_DATA ERP_NATIVE_SOCKET ERP_NATIVE_PACKAGE
+ case "$DATA/" in "$TARGET/"*) fail 'ERP 持久数据不能位于可替换 target 内。';; esac
+}
+as_package() {
+ SYSTEM_COMMAND=0
+ if [ "${1:-}" = --system ]; then SYSTEM_COMMAND=1; shift; fi
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+  PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+  [ "$PACKAGE_UID" != 0 ] || fail 'ERP 长期服务不能以 root 运行。'
+  command -v runuser >/dev/null 2>&1 || fail 'ERP 需要系统 runuser 降权。'
+  if [ "$SYSTEM_COMMAND" = 1 ]; then runuser -u "$TRIM_USERNAME" -- env -u LD_LIBRARY_PATH "$@"
+  else runuser -u "$TRIM_USERNAME" -- env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
+ else
+  if [ "$SYSTEM_COMMAND" = 1 ]; then env -u LD_LIBRARY_PATH "$@"
+  else env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
+ fi
+}
+prepare_runtime() {
+ # fnOS creates VAR and may expose it through a logical application symlink.
+ # Resolve that platform path once; our private child must never be a link.
+ [ -n "${TRIM_PKGVAR:-}" ] || fail 'ERP 缺少应用运行目录 TRIM_PKGVAR。'
+ RUNTIME_BASE=$(CDPATH= cd -P "$TRIM_PKGVAR" 2>/dev/null && pwd -P) || fail 'ERP 应用 VAR 无法解析。'
+ ERP_NATIVE_RUNTIME_DIR="$RUNTIME_BASE/runtime"
+ as_package --system /bin/sh -eu -c '
+  runtime=$1
+  [ ! -L "$runtime" ] || exit 1
+  umask 077
+  mkdir -p "$runtime"
+  [ -d "$runtime" ] && [ "$(stat -c %u "$runtime")" = "$(id -u)" ] && [ "$(stat -c %a "$runtime")" = 700 ] || exit 1
+ ' sh "$ERP_NATIVE_RUNTIME_DIR" || fail 'ERP 私有 runtime 创建或属主校验失败。'
+ export ERP_NATIVE_RUNTIME_DIR
+}
+recover_retained() {
+ [ "$(id -u)" = 0 ] || return 0
+ [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+ PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+ PACKAGE_GID=$(id -g "$TRIM_USERNAME")
+ [ "$PACKAGE_UID" != 0 ] || fail 'ERP package 用户不能为 root。'
+ # Only root-owned appcenter hooks are trusted here, never target payload code.
+ TRUSTED="$SELF/retained_recovery.py"
+ [ -f "$TRUSTED" ] && [ ! -L "$TRUSTED" ] || fail 'ERP 缺少可信的保留数据恢复钩子。'
+ while :; do
+  [ "$(stat -c %u "$TRUSTED")" = 0 ] || fail 'ERP 恢复钩子及父目录必须由 root 所有。'
+  RIGHTS=$(stat -c %a "$TRUSTED")
+  [ "$((0$RIGHTS & 022))" = 0 ] || fail 'ERP 恢复钩子路径不能被非 root 写入。'
+  [ "$TRUSTED" != / ] || break
+  TRUSTED=$(dirname "$TRUSTED")
+ done
+ [ -x /usr/bin/python3 ] || fail '保留数据恢复需要可信系统 /usr/bin/python3；请管理员通过已审核的官方系统方式安装 python3 后重试，不能使用 target 内运行时替代。'
+ RECOVERY_ERROR=$(/usr/bin/python3 -I -B "$SELF/retained_recovery.py" "$VOLUME" "$PACKAGE_UID" "$PACKAGE_GID" 2>&1) || fail "保留账本恢复被阻止；请先确认旧服务完全停止并检查物理保留目录。$RECOVERY_ERROR"
+}
+prepare_base() {
+ [ ! -L "$BASE" ] && [ ! -L "$DATA" ] || fail 'ERP 持久目录不能是符号链接。'
+ # Root prepares only exact app-owned directories. All recursive copying is
+ # performed by the package process into a new isolated instance directory.
+ if [ "$(id -u)" = 0 ]; then
+  [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'
+  PACKAGE_UID=$(id -u "$TRIM_USERNAME") || fail 'ERP package 用户不存在。'
+  [ "$PACKAGE_UID" != 0 ] || fail 'ERP package 用户不能为 root。'
+  PACKAGE_GID=$(id -g "$TRIM_USERNAME")
+  mkdir -p "$BASE"
+  chown "$PACKAGE_UID:$PACKAGE_GID" "$BASE"
+  chmod 700 "$BASE"
+ else
+  mkdir -p "$BASE"
+ fi
+}
+prepare() {
+ prepare_base
+ # Only post-deployment callers have resolved an existing target payload.
+ if [ "$(id -u)" = 0 ]; then
+  chown "$PACKAGE_UID:$PACKAGE_GID" "$TARGET"
+  chmod go-w "$TARGET"
+ fi
+ prepare_runtime
+}
+provision_uvcs() {
+ case "${wizard_uvcs_install:-0}" in
+  0|'') return 0;;
+  1)
+   [ "$(id -u)" = 0 ] || fail '安装可选 UVCS 需要应用生命周期准备权限。'
+   [ -f "$SELF/provision_uvcs" ] && [ ! -L "$SELF/provision_uvcs" ] || fail '当前 FPK 未包含可选 UVCS 安装脚本。'
+   # The app payload target is package-owned; only appcenter cmd is trusted root code.
+   TRUSTED="$SELF/provision_uvcs"
+   while :; do
+    [ "$(stat -c %u "$TRUSTED")" = 0 ] || fail 'UVCS 准备脚本及父目录必须由 root 所有。'
+    RIGHTS=$(stat -c %a "$TRUSTED")
+    [ "$((0$RIGHTS & 022))" = 0 ] || fail 'UVCS 准备路径不能被非 root 用户写入。'
+    [ "$TRUSTED" != / ] || break
+    TRUSTED=$(dirname "$TRUSTED")
+   done
+   /bin/sh "$SELF/provision_uvcs" || fail '系统 UVCS 安装失败，保留原账本和托管队列。'
+   ERP_NATIVE_CM_PATH=/usr/bin/cm
+   export ERP_NATIVE_CM_PATH;;
+  *) fail 'UVCS 安装选项只允许 0 或 1。';;
+ esac
+}

@@ -1,3 +1,9 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
-exit 0
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/native_env"
+resolve_payload
+if [ -f "$CONFIG" ]; then
+ as_package "$NODE" "$LIFECYCLE" stop --config "$CONFIG" || fail 'ERP 未能安全停写，已阻止卸载。'
+fi
+printf '%s\n' "ERP 账本保留位置：$DATA。卸载只移除应用程序。"

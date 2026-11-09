@@ -1,3 +1,10 @@
 #!/bin/sh
-# Entry lifecycle only; ERP owns its runtime, socket and data.
-exit 0
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/native_env"
+resolve_payload
+recover_retained
+prepare
+provision_uvcs
+if [ -f "$CONFIG" ]; then erp_mode=existing; export erp_mode; fi
+as_package "$NODE" "$LIFECYCLE" configure || fail 'ERP 新程序配置失败；保留现有账本及升级前备份供回退。'

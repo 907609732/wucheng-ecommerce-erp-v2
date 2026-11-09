@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
+. "$SELF/diag_env"
+if [ "${1:-}" = stop ] && [ "$(id -u)" = 0 ]; then as_package /bin/sh "$SELF/main" stop; exit 0; fi
+case "${1:-}" in
+ status) if current_config && [ -f "$CONFIG" ]; then as_package "$NODE" "$PAYLOAD/erp/server/fnos-native/lifecycle.mjs" status --config "$CONFIG"; else exit 3; fi;;
+ stop) stop_acceptance;;
+ start) fail '一次性诊断在安装时执行，完成后保持停止；命令行可通过 cmd/acceptance 重试。';;
+ *) exit 1;;
+esac

@@ -5,6 +5,7 @@ const ids = ["purchase", "sales", "freight", "overview", "data-versions"],
   frame = document.querySelector("#workspace"),
   retry = document.querySelector("#retry");
 let connected = false;
+let nativeBrowserEnabled=false;
 let retryPage = false;
 const hostingStatus = document.querySelector("#hosting-status");
 let hostingTimer, hostingController, disposed = false;
@@ -39,12 +40,12 @@ function select() {
   if (!connected) return;
   retryPage = false;
   retry.hidden = true;
-  const id = ids.includes(location.hash.slice(1))
+  const id = (ids.includes(location.hash.slice(1))||nativeBrowserEnabled&&location.hash.slice(1)==='native-browser')
     ? location.hash.slice(1)
     : "purchase";
   for (const a of document.querySelectorAll("nav a"))
     a.setAttribute("aria-current", a.hash === "#" + id ? "page" : "false");
-  const next = publicPrefix + (id === "freight" ? "/apps/sales/?workspace=freight#freight?section=center" : id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/");
+  const next = publicPrefix + (id === "freight" ? "/apps/sales/?workspace=freight#freight?section=center" : id === "native-browser" ? "/web/native-browser.html" : id === "data-versions" ? "/web/data-versions.html" : "/apps/" + id + "/");
   frame.title = id === "data-versions" ? "数据版本" : "业务工作区";
   if (frame.getAttribute("src") !== next) frame.src = next;
   frame.hidden = false;
@@ -56,6 +57,9 @@ async function connect() {
       s = await r.json();
     if (!r.ok) throw Error(s.error || "连接失败");
     connected = true;
+    nativeBrowserEnabled=s.nativeBrowser?.enabled===true;
+    const browserEntry=document.querySelector('#native-browser-entry');
+    if(browserEntry)browserEntry.hidden=!nativeBrowserEnabled;
     status.textContent =
       s.actor.login === "local-development"
         ? "开发模式 · 隔离数据"

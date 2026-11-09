@@ -96,7 +96,7 @@ export async function prepareRelease(target, { install = true } = {}) {
       Object.entries(original.scripts).filter(([k]) => k.startsWith("web:")),
     ),
     dependencies: Object.fromEntries(
-      ["fastify", "@fastify/cookie", "@fastify/reply-from"].map((k) => [
+      ["fastify", "@fastify/cookie", "@fastify/reply-from", "@fastify/http-proxy", "ws"].map((k) => [
         k,
         original.dependencies[k],
       ]),

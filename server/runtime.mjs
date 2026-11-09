@@ -1,9 +1,10 @@
 import fs from "node:fs";
+import {registerNativeBrowserRoutes} from './fnos-native/browser-routes.mjs';
 import path from "node:path";
 import net from "node:net";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createWorkbenchGateway } from "./gateway/gateway.mjs";
-import { validateConfig, moduleIds } from "./config.mjs";
+import { validateConfig, moduleIds, ensureNativeRuntimeDirectory } from "./config.mjs";
 import { createSourceServices } from "./services.mjs";
 import { controlEndpoint } from "./control.mjs";
 import { verifyServices } from "./readiness.mjs";
@@ -11,6 +12,15 @@ import { createDataVersionWorker } from "./data-version/worker.mjs";
 import { registerDataVersionRoutes } from "./data-version/routes.mjs";
 import { createLogger } from "./log.mjs";
 const publicDir = path.join(import.meta.dirname, "public");
+function publishControlRecord(file, value) {
+  const temporary = file + "." + randomUUID() + ".tmp";
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(value), {flag: "wx", mode: 0o600});
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, {force: true});
+  }
+}
 const assetVersion = () =>
   createHash("sha256")
     .update(fs.readFileSync(path.join(publicDir, "shell.js")))
@@ -31,11 +41,14 @@ export async function createWebRuntime(
   } = {},
 ) {
   const config = validateConfig(input);
+  ensureNativeRuntimeDirectory(config);
+  const logDir = path.join(config.native?.runtimeDir || config.stateDir, "logs");
+  if (config.native?.runtimeDir) fs.mkdirSync(logDir, {recursive: true, mode: 0o700});
   const logger =
     providedLogger ||
     createLogger({
       level: logLevel || process.env.ERP_LOG_LEVEL || "info",
-      file: logFile || path.join(config.stateDir, "logs", "web.log"),
+      file: logFile || path.join(logDir, "web.log"),
       scope: "host",
     });
   let gateway,
@@ -82,11 +95,14 @@ export async function createWebRuntime(
       storeDir: path.join(config.stateDir, "gateway"),
       publicOrigin: config.publicOrigin,
       fnos: config.fnos,
+      tcpEnabled: config.tcpEnabled,
       port: config.port,
       moduleIds,
       cacheStaticAssets: config.mode === "production",
       localDevelopment: config.mode === "development",
+      nativeBrowserEnabled: config.native?.browser?.enabled===true,
       registerRoutes: async (app, context) => {
+        await registerNativeBrowserRoutes(app,context,config);
         registerDataVersionRoutes(app, context, dataVersions);
         app.addHook("onRequest", async (req, reply) => {
           if (!["GET", "HEAD"].includes(req.method)) {
@@ -211,21 +227,20 @@ export async function createWebRuntime(
         url: config.publicOrigin,
         pid: process.pid,
       });
-      fs.writeFileSync(
+      publishControlRecord(
         path.join(config.stateDir, "web-control.json"),
-        JSON.stringify({ token }),
-        { mode: 0o600 },
+        { token },
       );
-      fs.writeFileSync(
+      publishControlRecord(
         path.join(config.stateDir, "web-runtime.json"),
-        JSON.stringify({
+        {
           pid: process.pid,
           releaseRoot: path.resolve(import.meta.dirname, ".."),
           mode: config.mode,
           publicOrigin: config.publicOrigin,
           port: config.port,
           startedAt: new Date().toISOString(),
-        }),
+        },
       );
       timer = setInterval(async () => {
         if (supervising || stopped) return;

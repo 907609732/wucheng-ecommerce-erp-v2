@@ -1,0 +1,25 @@
+[Unit]
+Description=Wucheng ERP native environment
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wuchengerp
+Group=wuchengerp
+WorkingDirectory=/opt/wuchengerp/erp
+Environment=HOME=/var/lib/wuchengerp-env/data/uvcs-home
+ExecStart=/opt/wuchengerp/erp.sh serve --config /var/lib/wuchengerp-env/data/config/web.json
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=100s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/wuchengerp-env
+
+[Install]
+WantedBy=multi-user.target
