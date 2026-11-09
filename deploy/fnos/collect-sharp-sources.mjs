@@ -5,26 +5,41 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {pathToFileURL} from 'node:url';
 const curl=promisify(execFile);
-const [stage,work]=process.argv.slice(2),dest=path.join(work,'sources/sharp-libvips');fs.mkdirSync(dest,{recursive:true});
-const pkg=JSON.parse(fs.readFileSync(path.join(stage,'app/erp/apps/purchase/node_modules/@img/sharp-libvips-linux-x64/package.json'),'utf8'));
-if(pkg.version!=='1.3.4')throw Error('Review libvips corresponding-source inputs for changed npm binary');
-const records=[];
 const sha=b=>createHash('sha256').update(b).digest('hex');
-async function download(url,name,expected){
- const file=path.join(dest,name);let bytes;
- if(fs.existsSync(file))bytes=fs.readFileSync(file);
+export const libffiSource=Object.freeze({url:'https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz',assetURL:'https://api.github.com/repos/libffi/libffi/releases/assets/506805115',sha256:'7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4',bytes:1581626});
+export async function downloadSharpSource({dest,records,runCurl=curl},url,name,expected,expectedBytes){
+ const file=path.join(dest,name),partial=file+'.partial',cached=fs.existsSync(file);let bytes,usedURL=url;
+ try{
+ if(cached)bytes=fs.readFileSync(file);
  else{
   // Actual CI hit TLS ECONNRESET mid-source transfer. Standard curl supplies
   // bounded retries, including connection resets, without weakening TLS/SHA.
-  const partial=file+'.partial';
-  try{await curl('curl',['--silent','--show-error','--fail','--location','--proto','=https','--tlsv1.2','--retry','3','--retry-all-errors','--retry-delay','1','--connect-timeout','15','--max-time','120','--output',partial,url],{maxBuffer:1024*1024});bytes=fs.readFileSync(partial);}
+  const transfer=target=>runCurl('curl',['--silent','--show-error','--fail','--location','--proto','=https','--proto-redir','=https','--tlsv1.2','--retry','3','--retry-all-errors','--retry-delay','1','--connect-timeout','15','--max-time','120',...(target===libffiSource.assetURL?['--header','Accept: application/octet-stream','--header','X-GitHub-Api-Version: 2022-11-28']:[]),'--output',partial,target],{maxBuffer:1024*1024});
+  try{
+   try{await transfer(url);}catch(error){
+    if(url!==libffiSource.url)throw error;
+    // Same official release asset, independently pinned to the accepted bytes.
+    // Never mix a failed transfer's partial bytes into the fallback response.
+    fs.rmSync(partial,{force:true});usedURL=libffiSource.assetURL;await transfer(usedURL);
+   }
+   bytes=fs.readFileSync(partial);
+  }
   catch(error){throw Error('Source download failed '+url,{cause:error});}
-  finally{fs.rmSync(partial,{force:true});}
  }
+ if(expectedBytes!==undefined&&bytes.length!==expectedBytes)throw Error('Source size mismatch '+name);
  const digest=sha(bytes);if(expected&&digest!==expected)throw Error('Source checksum mismatch '+name);
- fs.writeFileSync(file,bytes);records.push({file:name,url,sha256:digest,bytes:bytes.length,verification:expected?'pinned SHA256':'HTTPS upstream source; calculated SHA256 (not detached signature)'});return file;
+ if(!cached)fs.renameSync(partial,file);
+ records.push({file:name,url:cached&&url===libffiSource.url?null:usedURL,...(url===libffiSource.url?{sourceURL:url,...(cached?{fromCache:true}:{})}:{}),sha256:digest,bytes:bytes.length,verification:expected?'pinned SHA256':'HTTPS upstream source; calculated SHA256 (not detached signature)'});return file;
+ }finally{fs.rmSync(partial,{force:true});}
 }
+export async function collectSharpSources(stage,work){
+const dest=path.join(work,'sources/sharp-libvips');fs.mkdirSync(dest,{recursive:true});
+const pkg=JSON.parse(fs.readFileSync(path.join(stage,'app/erp/apps/purchase/node_modules/@img/sharp-libvips-linux-x64/package.json'),'utf8'));
+if(pkg.version!=='1.3.4')throw Error('Review libvips corresponding-source inputs for changed npm binary');
+const records=[];
+const download=(url,name,expected)=>downloadSharpSource({dest,records},url,name,url===libffiSource.url?libffiSource.sha256:expected,url===libffiSource.url?libffiSource.bytes:undefined);
 const recipe=await download('https://codeload.github.com/lovell/sharp-libvips/tar.gz/refs/tags/v1.3.4','sharp-libvips-v1.3.4.tar.gz','a8e96acb479c9bc1a5b7950f8f25aa6c8e1ef3a19755b45cf2f00d506aeaccc0');
 const readRecipe=p=>execFileSync('tar',['-xOf',recipe,'sharp-libvips-1.3.4/'+p],{encoding:'utf8'});
 const versions=Object.fromEntries(readRecipe('versions.properties').trim().split('\n').map(l=>l.split('=')));
@@ -57,3 +72,6 @@ let next=0;await Promise.all(Array.from({length:6},async()=>{while(next<crates.l
 fs.writeFileSync(path.join(dest,'SOURCE-INPUTS.json'),JSON.stringify({npmPackage:pkg.name,npmVersion:pkg.version,versions,archivesAndPatches:urls.length,rustCrates:crates.length,records},null,2)+'\n');
 fs.copyFileSync(path.join(dest,'SOURCE-INPUTS.json'),path.join(work,'sharp-source-inputs.json'));
 console.log(JSON.stringify({libvipsSourceInputs:records.length}));
+
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)await collectSharpSources(...process.argv.slice(2));

@@ -12,6 +12,7 @@ import {nativeLifecycle} from '../server/fnos-native/lifecycle.mjs';
 import {startNativeCollector,deadline} from '../server/fnos-native/supervisor.mjs';
 import {loadConfig,validateConfig,developmentConfig,databases} from '../server/config.mjs';
 import {fnosIdentity} from '../server/gateway/fnos.mjs';
+import {captureNativeSetupFailure} from './fnos-native-setup-diagnostics.mjs';
 const releaseRoot=path.resolve(import.meta.dirname,'..');
 const origin='https://nas.example.com:5667';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -254,7 +255,8 @@ test('Linux package user: Unix-only native instance reports real identity over p
  await nativeLifecycle('stop',file);assert.equal((await nativeLifecycle('status',file)).status,'stopped');
 });
 test('missing required browsers fail startup instead of a false ready status',async t=>{
- const dir=fixture(t),file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
+ const dir=fixture(t);captureNativeSetupFailure(t,path.join(dir,'data'));
+ const file=await configureNative(options(path.join(dir,'data'))),c=loadConfig(file);
  c.fnos={enabled:false};c.tcpEnabled=true;c.native.requireBrowsers=true;fs.writeFileSync(file,JSON.stringify(c));
  await assert.rejects(nativeLifecycle('start',file),/启动失败/);
  assert.equal((await nativeLifecycle('status',file)).ok,false);

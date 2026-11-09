@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import {configureNative} from '../server/fnos-native/configure.mjs';
 import {nativeRequest} from '../server/fnos-native/supervisor.mjs';
 import {loadConfig} from '../server/config.mjs';
+import {captureNativeSetupFailure} from './fnos-native-setup-diagnostics.mjs';
 
 const moduleUrl=file=>pathToFileURL(path.resolve(file)).href;
 const bounded=(promise,ms)=>Promise.race([promise,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('synthetic child timed out')),ms);timer.unref();})]);
@@ -22,6 +23,7 @@ for(const phase of ['drain','startup'])test(`native collector heartbeat failure 
     }
     fs.rmSync(dir,{recursive:true,force:true});
   });
+  captureNativeSetupFailure(t,path.join(dir,'data'));
   file=await configureNative({mode:'fresh',dataRoot:path.join(dir,'data'),releaseRoot:path.resolve('.'),publicOrigin:'https://nas.example.com:5667',allowedOrigins:['https://nas.example.com:5667'],allowedUids:['1000']});
   const config=loadConfig(file);config.fnos={enabled:false};config.tcpEnabled=true;
   fs.writeFileSync(file,JSON.stringify(config));
