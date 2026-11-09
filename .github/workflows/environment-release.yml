@@ -68,6 +68,7 @@ jobs:
     with:
       check_scope: full
       build_linux: true
+      build_trial: ${{ github.ref == 'refs/heads/codex/fnos-native' }}
     permissions:
       contents: read
   delivery-gate:

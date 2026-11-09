@@ -29,6 +29,14 @@ export VK_DRIVER_FILES=/usr/share/vulkan/icd.d VK_ICD_FILENAMES=/usr/share/vulka
 export VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d VK_IMPLICIT_LAYER_PATH=/usr/share/vulkan/implicit_layer.d
 export LIBVA_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri
 runuser -u erpbuild -- env LD_LIBRARY_PATH="$libs" "$app/runtime/node/bin/node" /src/deploy/fnos/smoke-native.mjs --app-root "$app" --data-root "$work/clean-fixture/data" --evidence-dir /output/release/clean-runtime-evidence --port-offset 1000
+if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
+ trial="$work/trial-packed/app"
+ mkdir -p /var/apps/wuchengerptrial "$work/clean-trial-fixture" /output/release/clean-trial-evidence
+ ln -s "$trial" /var/apps/wuchengerptrial/target
+ chown erpbuild:erpbuild "$trial" "$work/clean-trial-fixture" /output/release/clean-trial-evidence
+ triallibs="$trial/runtime/sysroot/usr/lib/x86_64-linux-gnu:$trial/runtime/sysroot/lib/x86_64-linux-gnu:$trial/runtime/sysroot/usr/lib:$trial/runtime/sysroot/lib"
+ runuser -u erpbuild -- env ERP_NATIVE_BASE_PREFIX=/app/wuchengerptrial LD_LIBRARY_PATH="$triallibs" "$trial/runtime/node/bin/node" /src/deploy/fnos/smoke-native.mjs --app-root /var/apps/wuchengerptrial/target --data-root "$work/clean-trial-fixture/data" --evidence-dir /output/release/clean-trial-evidence --port-offset 10000
+fi
 mkdir -p "$work/clean-dv"
 export TRIM_APPDEST=/var/apps/wuchengerpdiag/target TRIM_APPDEST_VOL="$work/clean-dv" TRIM_USERNAME=erpdiag TRIM_APPNAME=wuchengerpdiag
 /bin/sh "$work/unpacked-diag/cmd/install_callback"

@@ -12,7 +12,7 @@ export function validateFnos(value){
   if(!value||typeof value.enabled!=='boolean')throw Error('飞牛入口配置无效');
   if(!value.enabled)return {enabled:false};
   const c=structuredClone(value);
-  if(typeof c.instanceId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(c.instanceId)||!path.isAbsolute(c.socketPath||'')||c.basePrefix!=='/app/wuchengerp')throw Error('飞牛入口需要实例、完整socket路径和固定应用前缀');
+  if(typeof c.instanceId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(c.instanceId)||!path.isAbsolute(c.socketPath||'')||!['/app/wuchengerp','/app/wuchengerptrial'].includes(c.basePrefix))throw Error('飞牛入口需要实例、完整socket路径和受控应用前缀');
   if(!Array.isArray(c.allowedUids)||!c.allowedUids.length||c.allowedUids.some(u=>typeof u!=='string'||!/^(?:0|[1-9]\d{0,9})$/.test(u)))throw Error('飞牛入口需要显式UID名单');
   if(!Array.isArray(c.allowedOrigins)||!c.allowedOrigins.length)throw Error('飞牛入口需要显式允许源');
   c.allowedOrigins=c.allowedOrigins.map(value=>{const u=new URL(value);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||!(u.protocol==='https:'||u.protocol==='http:'&&lan(u.hostname)))throw Error('飞牛外网入口必须HTTPS，HTTP仅限明确局域网地址');return u.origin;});

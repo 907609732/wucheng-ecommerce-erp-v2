@@ -19,7 +19,7 @@ export function nativeBrowserSpecs(config){
  for(const [index,id] of ids.entries()){
   const custom=browser.instances?.[id]||{};
   if(Object.keys(custom).some(k=>!['cdpPort','vncPort','display'].includes(k)))throw Error('浏览器仅允许受控端口和 display 配置');
-  const cdpPort=custom.cdpPort??19222+index,vncPort=custom.vncPort??19322+index,display=custom.display??122+index;
+  const trial=config.fnos?.basePrefix==='/app/wuchengerptrial',cdpPort=custom.cdpPort??(trial?31222:19222)+index,vncPort=custom.vncPort??(trial?31322:19322)+index,display=custom.display??(trial?322:122)+index;
   for(const port of [cdpPort,vncPort]){if(!Number.isInteger(port)||port<1024||port>65535||ports.has(port))throw Error('原生浏览器端口无效或冲突');ports.add(port);}
   if(!Number.isInteger(display)||display<100||display>999||displays.has(display))throw Error('原生浏览器 display 无效或冲突');displays.add(display);
   result[id]={id,display,cdpPort,vncPort,cdpEndpoint:'http://127.0.0.1:'+cdpPort,vncEndpoint:'http://127.0.0.1:'+vncPort,profile:path.join(config.native.dataRoot,'browser-profiles',id)};

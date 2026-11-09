@@ -187,6 +187,7 @@ async function checkUvcs(c){
 }
 export async function configureNative(o={}){
  if(!['fresh','migrate','existing'].includes(o.mode))throw Error('必须显式指定 mode fresh、migrate 或 existing 模式');
+ if(o.basePrefix!==undefined&&!['/app/wuchengerp','/app/wuchengerptrial'].includes(o.basePrefix))throw Error('原生应用前缀仅允许受控主包或试装前缀');
  if(o.entry!==undefined&&!['fnos','tailscale'].includes(o.entry))throw Error('入口必须为 fnos 或 tailscale');
  if(o.requireBrowsers!==undefined&&typeof o.requireBrowsers!=='boolean')throw Error('原生浏览器要求必须为布尔值');
  const releaseRoot=physicalPath(o.releaseRoot),dataRoot=physicalPath(o.dataRoot);
@@ -201,7 +202,7 @@ export async function configureNative(o={}){
   c.publicOrigin=u.origin;c.mode='production';c.releaseRoot=releaseRoot;c.tcpEnabled=tailscale;
   for(const id of moduleIds)c.modules[id].dataDir=path.join(dataRoot,'data',id);
   const allowedOrigins=Array.isArray(o.allowedOrigins)?[...new Set([...o.allowedOrigins,u.origin])]:o.allowedOrigins;
-  c.fnos=tailscale?{enabled:false}:{enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins,allowedUids:o.allowedUids,hostAliases:{localhost:u.origin}};
+  c.fnos=tailscale?{enabled:false}:{enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:o.basePrefix||'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins,allowedUids:o.allowedUids,hostAliases:{localhost:u.origin}};
   c.native={dataRoot,home:path.join(dataRoot,'uvcs-home'),nodePath:process.execPath,...(o.browser?{browser:o.browser}:{}),...(o.requireBrowsers!==undefined?{requireBrowsers:o.requireBrowsers}:{}),...(o.runtimeDir!==undefined?{runtimeDir:physicalPath(o.runtimeDir)}:{})};
   const {validateFnos}=await import('../gateway/fnos.mjs');validateFnos(c.fnos);
   if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('HTTPS 地址必须为源地址');
@@ -214,6 +215,7 @@ export async function configureNative(o={}){
     try{ownership.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');}catch{throw Error('原生 supervisor 正在运行或启动，拒绝配置更新 (ownership)');}
     // Reload and merge only after both lifecycle and generation ownership are held.
     c=JSON.parse(fs.readFileSync(configFileAt(dataRoot),'utf8'));assertStopped(dataRoot);c=rebaseConfig(c,dataRoot,releaseRoot).config;
+    if(o.basePrefix!==undefined&&c.fnos?.enabled&&o.basePrefix!==c.fnos.basePrefix)throw Error('existing 模式不能通过前缀变更既有身份');
     if(o.entry!==undefined&&((o.entry==='tailscale')===Boolean(c.fnos?.enabled)))throw Error('existing 模式不能切换现有身份入口');
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
     if(o.publicOrigin&&c.tcpEnabled===false){
@@ -266,6 +268,7 @@ export async function configureNative(o={}){
    fs.cpSync(source,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});verifySource(source);
    restoreStagedDatabaseModes(stage);
    const old=JSON.parse(fs.readFileSync(configFileAt(stage),'utf8')),rebased=rebaseConfig(old,dataRoot,releaseRoot);c=rebased.config;
+   if(o.basePrefix!==undefined&&c.fnos?.enabled&&o.basePrefix!==c.fnos.basePrefix)throw Error('migrate 模式不能通过前缀变更既有身份');
    if(c.dataVersion?.enabled){c.native.uvcsIdentity=trustedIdentity(manifest.uvcs?.identity,c.dataVersion.repository);c.native.uvcsSourceMetadataHash=manifest.uvcs?.metadataSha256;if(metadataFingerprint(path.join(stage,path.relative(dataRoot,c.dataVersion.workspace)))!==c.native.uvcsSourceMetadataHash)throw Error('UVCS_METADATA_CHANGED');markNativeUvcsPending(c,path.join(stage,'state'));}
    if(o.entry!==undefined&&((o.entry==='tailscale')===Boolean(c.fnos?.enabled)))throw Error('迁移源与目标身份入口不同，拒绝切换');
    if(c.fnos?.enabled&&!c.fnos.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');

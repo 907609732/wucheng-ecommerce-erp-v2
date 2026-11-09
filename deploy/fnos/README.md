@@ -18,6 +18,8 @@ Ubuntu 24.04 runner 还需按 [Chromium 官方说明](https://chromium.googlesou
 
 产物包括 `wuchengerp.fpk`、独立测试包 `wuchengerpdiag.fpk`、`SHA256SUMS.txt`、逐文件 payload 校验清单、`THIRD-PARTY.json`、对应源码 companion、编译参数及合成验收 JSON/截图。下载后先用 SHA256 验证；源码伴随包必须和对应 FPK 一并保存，未来再分发时一并提供。GitHub workflow artifacts 默认保留 14 天，不是长期公开源码下载服务。
 
+在 `codex/fnos-native` 的环境发布工作流中，可选构建 `wuchengerptrial.fpk` 隔离试装包。它使用独立 appID、账本目录、Xvfb 构建前缀和浏览器端口，向导仅允许创建合成账本或沿用本试装数据；安装及升级钩子拒绝迁移。trial 有单独的 `fnos-trial-<sha>-<run>` artifact 和 `trial-source-companion.txt`；源码包本身随同次 `fnos-corresponding-source-<sha>-<run>` artifact 提供。分发时需同时保存这两个 artifact，并按引用文件校验源码包 SHA256。默认构建关闭此试装入口，常规三端交付不变。
+
 可在专用临时 Debian 12 amd64 构建机执行：
 
 ```sh

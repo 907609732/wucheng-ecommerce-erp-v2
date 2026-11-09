@@ -51,6 +51,15 @@ build_xvfb() {
 }
 build_xvfb wuchengerp "$xorg/build-native"
 build_xvfb wuchengerpdiag "$xorg/build-diag"
+if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
+ build_xvfb wuchengerptrial "$xorg/build-trial" /var/apps/wuchengerptrial/target/runtime
+ mkdir -p "$work/trial-xvfb"
+ install -m755 "$xorg/build-trial/hw/vfb/Xvfb" "$work/trial-xvfb/Xvfb"
+ cp "$xorg/build-trial/meson-info/intro-buildoptions.json" "$work/trial-xvfb/meson-buildoptions.json"
+ cp "$xorg/build-trial/meson-logs/meson-log.txt" "$work/trial-xvfb/meson-log.txt"
+ printf '%s\n' "source=xorg-server=$XORG_VERSION" 'repository=https://deb.debian.org/debian (Debian bookworm source package, apt signature checked)' 'prefix=/var/apps/wuchengerptrial/target/runtime' 'target=fnos-trial' > "$work/trial-xvfb/source-provenance.txt"
+ (cd "$work/trial-xvfb"; sha256sum Xvfb meson-buildoptions.json meson-log.txt source-provenance.txt > SHA256SUMS.txt)
+fi
 if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
  linux_work="$work/linux-xvfb"; mkdir -p "$linux_work"
  build_xvfb wuchengerp-linux "$xorg/build-linux" /opt/wuchengerp/runtime

@@ -49,6 +49,13 @@ test('fresh creates three real production books, no dev gateway identity, and ex
  assert.deepEqual(loadConfig(file2).fnos.allowedUids,['1001']);
  assert.equal(hash(path.join(c.modules.purchase.dataDir,databases.purchase)),before);
 });
+test('fresh accepts only the controlled trial prefix and existing cannot change its identity',async t=>{
+ const dir=fixture(t),data=path.join(dir,'trial'),trial=loadConfig(await configureNative({...options(data),basePrefix:'/app/wuchengerptrial'}));
+ assert.equal(trial.fnos.basePrefix,'/app/wuchengerptrial');
+ await assert.rejects(configureNative({...options(path.join(dir,'bad')),basePrefix:'/app/other'}),/前缀/);
+ await configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerptrial'});
+ await assert.rejects(configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerp'}),/前缀|身份/);
+});
 
 test('fresh resolves the exact localhost relay without Origin to the explicitly configured primary HTTPS entry',async t=>{
  const dir=fixture(t),data=path.join(dir,'fresh-relay'),secondary='https://secondary.example.com';
@@ -110,8 +117,9 @@ test('migration requires stopped verified complete source and preserves private 
  await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),/校验|manifest/);
  await sealStoppedSource(source);
  await assert.rejects(configureNative({...options(path.join(dir,'wrong-provider')),mode:'migrate',sourceRoot:source,entry:'tailscale'}),/身份入口|切换/);
+ await assert.rejects(configureNative({...options(path.join(dir,'wrong-prefix')),mode:'migrate',sourceRoot:source,basePrefix:'/app/wuchengerptrial'}),/前缀|身份/);
  const before=hash(file),admin=hash(path.join(source,'state','month-admin','secret.json'));
- const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source}));
+ const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source,basePrefix:'/app/wuchengerp'}));
  assert.equal(migrated.fnos.instanceId,c.fnos.instanceId);assert.equal(migrated.publicOrigin,c.publicOrigin);assert.equal(migrated.tcpEnabled,true);
  assert.deepEqual(migrated.fnos.allowedUids,c.fnos.allowedUids);
  assert.deepEqual(migrated.fnos.hostAliases,c.fnos.hostAliases,'migration retains original explicit relay aliases');

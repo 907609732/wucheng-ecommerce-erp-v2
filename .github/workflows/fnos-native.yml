@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_trial:
+        description: Also produce an isolated full-native trial FPK
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       check_scope:
@@ -20,6 +25,11 @@ on:
         type: choice
         options: [full, focused]
         default: full
+      build_trial:
+        description: Also produce an isolated full-native trial FPK
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -61,6 +71,7 @@ jobs:
             -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_WORK_ROOT=/build \
             -e ERP_CI_CHECK_SCOPE="${{ inputs.check_scope || 'focused' }}" \
             -e ERP_BUILD_LINUX="${{ inputs.build_linux && '1' || '0' }}" \
+            -e ERP_BUILD_TRIAL="${{ inputs.build_trial && '1' || '0' }}" \
             -e ERP_LINUX_OUTPUT=/output/linux-x64 \
             -v "$GITHUB_WORKSPACE:/src" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
@@ -70,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --init --privileged --security-opt apparmor=unconfined \
-            -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_LINUX="${{ inputs.build_linux && '1' || '0' }}" \
+            -e GITHUB_RUN_ID -e GITHUB_SHA -e ERP_BUILD_LINUX="${{ inputs.build_linux && '1' || '0' }}" -e ERP_BUILD_TRIAL="${{ inputs.build_trial && '1' || '0' }}" \
             -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/fnos-output:/output" \
             -v "$RUNNER_TEMP/fnos-work:/build" -w /src debian:12-slim \
             bash deploy/fnos/verify-clean-runtime.sh 2>&1 | tee "$RUNNER_TEMP/fnos-output/clean-runtime.log"
@@ -89,8 +100,42 @@ jobs:
           name: fnos-native-${{ github.sha }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/fnos-output/**
+            !${{ runner.temp }}/fnos-output/release/*wuchengerptrial*.fpk
+            !${{ runner.temp }}/fnos-output/release/trial-*
+            !${{ runner.temp }}/fnos-output/release/trial-runtime-evidence/**
+            !${{ runner.temp }}/fnos-output/release/clean-trial-evidence/**
+            !${{ runner.temp }}/fnos-output/release/trial-xvfb/**
+            !${{ runner.temp }}/fnos-output/meson-buildoptions.json
+            !${{ runner.temp }}/fnos-output/meson-log.txt
+            !${{ runner.temp }}/fnos-output/source-provenance.txt
+            !${{ runner.temp }}/fnos-output/SHA256SUMS.txt
             !${{ runner.temp }}/fnos-output/linux-x64/**
             !${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst
+          retention-days: 14
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload isolated trial FPK and evidence
+        if: always() && inputs.build_trial
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnos-trial-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fnos-output/release/*wuchengerptrial*.fpk
+            ${{ runner.temp }}/fnos-output/release/trial-SHA256SUMS.txt
+            ${{ runner.temp }}/fnos-output/release/trial-PAYLOAD-FILES.txt
+            ${{ runner.temp }}/fnos-output/release/trial-PAYLOAD-SHA256SUMS.txt
+            ${{ runner.temp }}/fnos-output/release/trial-PAYLOAD-SYMLINKS.txt
+            ${{ runner.temp }}/fnos-output/release/trial-artifact-verification.json
+            ${{ runner.temp }}/fnos-output/release/trial-packed-verification.json
+            ${{ runner.temp }}/fnos-output/release/trial-packed-manifest-verification.json
+            ${{ runner.temp }}/fnos-output/release/trial-packed-payload-check.log
+            ${{ runner.temp }}/fnos-output/release/trial-source-info.txt
+            ${{ runner.temp }}/fnos-output/release/trial-receipt.txt
+            ${{ runner.temp }}/fnos-output/release/trial-runtime-evidence/**
+            ${{ runner.temp }}/fnos-output/release/clean-trial-evidence/**
+            ${{ runner.temp }}/fnos-output/release/trial-MANIFEST-SOURCE.txt
+            ${{ runner.temp }}/fnos-output/release/trial-xvfb/**
+            ${{ runner.temp }}/fnos-output/release/trial-source-companion.txt
           retention-days: 14
           if-no-files-found: error
           compression-level: 0
@@ -101,6 +146,11 @@ jobs:
           name: fnos-native-${{ github.sha }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/fnos-output/**
+            !${{ runner.temp }}/fnos-output/release/*wuchengerptrial*.fpk
+            !${{ runner.temp }}/fnos-output/release/trial-*
+            !${{ runner.temp }}/fnos-output/release/trial-runtime-evidence/**
+            !${{ runner.temp }}/fnos-output/release/clean-trial-evidence/**
+            !${{ runner.temp }}/fnos-output/release/trial-xvfb/**
             !${{ runner.temp }}/fnos-output/linux-x64/**
             !${{ runner.temp }}/fnos-output/release/wuchengerp.fpk
             !${{ runner.temp }}/fnos-output/**/*corresponding-source.tar.zst

@@ -120,6 +120,10 @@ test('trusted fixture ports propagate and invalid or colliding browser targets f
  const {nativeBrowserSpecs}=await import('../server/fnos-native/browsers.mjs');const c=fixture(t);c.native.browser.instances={sales:{cdpPort:20222,vncPort:20322,display:222},overview:{cdpPort:20223,vncPort:20323,display:223}};assert.equal(nativeBrowserSpecs(c).sales.cdpEndpoint,'http://127.0.0.1:20222');
  for(const patch of [{vncPort:80},{display:0},{cdpPort:20223},{host:'evil.test'}]){c.native.browser.instances.sales={cdpPort:20222,vncPort:20322,display:222,...patch};assert.throws(()=>nativeBrowserSpecs(c));}
 });
+test('trial prefix selects its own fixed browser ports and display while primary defaults stay stable',async t=>{
+ const {nativeBrowserSpecs}=await import('../server/fnos-native/browsers.mjs');const c=fixture(t),main=nativeBrowserSpecs(c);assert.deepEqual([main.sales.cdpPort,main.sales.vncPort,main.sales.display,main.overview.cdpPort,main.overview.vncPort,main.overview.display],[19222,19322,122,19223,19323,123]);
+ c.fnos={enabled:true,basePrefix:'/app/wuchengerptrial'};const trial=nativeBrowserSpecs(c);assert.deepEqual([trial.sales.cdpPort,trial.sales.vncPort,trial.sales.display,trial.overview.cdpPort,trial.overview.vncPort,trial.overview.display],[31222,31322,322,31223,31323,323]);
+});
 test('browser manager can restart after stopping and refuses a crashed x11vnc',async t=>{
  const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs'),p=processes(),m=createNativeBrowsers(fixture(t),{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();await m.stop();await m.start();assert.equal(m.status().ready,true);
  const q=processes({fail:'x11vnc'}),bad=createNativeBrowsers(fixture(t),{spawnProcess:q.spawnProcess,probe:async()=>true,readinessTimeoutMs:20});await assert.rejects(bad.start(),/未就绪/);assert.equal(bad.status().state,'failed');
