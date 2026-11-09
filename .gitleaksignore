@@ -19,3 +19,7 @@ a9953146df59343969a08d62e4e7cf9bfa0da764:scripts/public-scan/scan-stage-public.m
 294d888580f60caa02fb6aec91b34d34b1666a82:scripts/agent-beta-stage.mjs:generic-api-key:26
 0189af372cf544145ec8a7b69d16e2b4a3b2f284:scripts/agent-beta-scan-classification.mjs:generic-api-key:24
 a9953146df59343969a08d62e4e7cf9bfa0da764:scripts/public-scan/gitleaks-v8.30.1.official.toml:aws-amazon-bedrock-api-key-short-lived:232
+
+# Reviewed public RFC 6455 WebSocket handshake nonce in a loopback-only auth test; not a credential.
+# Ignore only this historical commit/file/rule/line, preserving all other history scanning.
+594160a06902df05c004bd8fd3d2e9ac26423d16:tests/web-fnos-native-browser-auth.test.mjs:generic-api-key:26
