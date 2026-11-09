@@ -4,6 +4,15 @@ import { pathToFileURL } from "node:url";
 import { verifyRelease } from "../../server/release.mjs";
 import { buildMetadata } from "./metadata.mjs";
 
+function isVendorTestSubtree(relativePath) {
+  const normalized = relativePath.split(path.sep).join("/");
+  const marker = normalized.lastIndexOf("node_modules/");
+  if (marker < 0) return false;
+  const tail = normalized.slice(marker + "node_modules/".length).split("/");
+  const packageDepth = tail[0]?.startsWith("@") ? 2 : 1;
+  return tail.slice(packageDepth).some((segment) => ["test", "tests", "__tests__"].includes(segment));
+}
+
 function copyTree(source, target, stack = new Set(), boundary = undefined) {
   const realSource = fs.realpathSync(source);
   boundary ??= realSource;
@@ -18,6 +27,9 @@ function copyTree(source, target, stack = new Set(), boundary = undefined) {
       throw Error("拒绝复制可能含运行数据或缓存的路径：" + entry.name);
     const from = path.join(realSource, entry.name), to = path.join(target, entry.name);
     const stat = fs.lstatSync(from);
+    const relativeEntry = path.relative(boundary, from);
+    if (inDependencies && isVendorTestSubtree(relativeEntry) && (stat.isDirectory() || (stat.isSymbolicLink() && fs.statSync(from).isDirectory())))
+      continue;
     if (stat.isSymbolicLink()) {
       const link = fs.readlinkSync(from);
       if (path.isAbsolute(link)) throw Error("拒绝绝对链接：" + from);

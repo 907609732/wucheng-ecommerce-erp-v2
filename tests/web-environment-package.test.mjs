@@ -23,6 +23,16 @@ test("environment package binds accepted source, normalized digest, and isolated
   fs.writeFileSync(path.join(runtime, "LICENSE"), "test license");
   fs.mkdirSync(path.join(release, "node_modules", "fixture-dependency"), { recursive: true });
   fs.writeFileSync(path.join(release, "node_modules", "fixture-dependency", "index.js"), "export default 1;\n");
+  const vendor = path.join(release, "node_modules", "vendor-package");
+  fs.mkdirSync(path.join(vendor, "test", "fixtures"), { recursive: true });
+  fs.mkdirSync(path.join(vendor, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(vendor, "package.json"), JSON.stringify({ name: "vendor-package", version: "1.0.0" }));
+  fs.writeFileSync(path.join(vendor, "test", "fixtures", "fastify.key"), "public vendor test fixture key");
+  fs.writeFileSync(path.join(vendor, "lib", "runtime.js"), "export const runtime = true;\n");
+  for (const packageDir of [path.join(release, "node_modules", "test"), path.join(release, "node_modules", "@scope", "test")]) {
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({ name: "test", version: "1.0.0" }));
+  }
   const unlistedFile = path.join(release, "server", "unlisted.js");
   fs.writeFileSync(unlistedFile, "export const unexpected = true;\n");
   assert.throws(() => packageEnvironment({ target: "windows-x64", releaseRoot: release, runtimeRoot: runtime, outputRoot: path.join(parent, "unlisted-attempt"), commit: "a".repeat(40), runId: "123", nodeVersion: "24.22.2" }), /未登记文件/);
@@ -46,6 +56,10 @@ test("environment package binds accepted source, normalized digest, and isolated
   assert(fs.existsSync(path.join(output, "erp", "web-release.json")));
   assert(fs.existsSync(path.join(output, "runtime", "node", "node.exe")));
   assert.equal(fs.readFileSync(path.join(output, "erp", "node_modules", "fixture-dependency", "index.js"), "utf8"), "export default 1;\n");
+  assert.equal(fs.existsSync(path.join(output, "erp", "node_modules", "vendor-package", "test")), false);
+  assert.equal(fs.readFileSync(path.join(output, "erp", "node_modules", "vendor-package", "lib", "runtime.js"), "utf8"), "export const runtime = true;\n");
+  assert(fs.existsSync(path.join(output, "erp", "node_modules", "test", "package.json")));
+  assert(fs.existsSync(path.join(output, "erp", "node_modules", "@scope", "test", "package.json")));
   assert(fs.lstatSync(path.join(output, "runtime", "internal-links", "node.exe")).isSymbolicLink());
   assert.equal(fs.readlinkSync(path.join(output, "runtime", "internal-links", "node.exe")).replace(/\\/g, "/"), "../node/node.exe");
   assert.equal(JSON.parse(fs.readFileSync(path.join(output, "environment-build.json"))).commonSourceSHA256, digest);
@@ -54,6 +68,8 @@ test("environment package binds accepted source, normalized digest, and isolated
   fs.symlinkSync("../outside.key", outsideLink, "file");
   assert.throws(() => packageEnvironment({ target: "windows-x64", releaseRoot: release, runtimeRoot: runtime, outputRoot: path.join(parent, "escape-attempt"), commit: "a".repeat(40), runId: "123", nodeVersion: "24.22.2" }), /树外链接/);
   fs.rmSync(outsideLink);
+  fs.writeFileSync(path.join(vendor, "private.key"), "private key");
+  assert.throws(() => packageEnvironment({ target: "windows-x64", releaseRoot: release, runtimeRoot: runtime, outputRoot: path.join(parent, "private-key-attempt"), commit: "a".repeat(40), runId: "123", nodeVersion: "24.22.2" }), /凭据/);
 
   fs.appendFileSync(path.join(release, manifest.files[0].path), "changed");
   assert.throws(() => sourceDigest(release), /变化/);
