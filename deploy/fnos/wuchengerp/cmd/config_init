@@ -2,6 +2,7 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
+resolve_payload
 if [ -f "$CONFIG" ]; then
  as_package "$NODE" "$LIFECYCLE" stop --config "$CONFIG" || fail 'ERP 未能停写，已阻止配置更新。'
 fi

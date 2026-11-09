@@ -7,24 +7,28 @@ fail() {
  if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then printf '%s\n' "$1" > "$TRIM_TEMP_LOGFILE"; fi
  exit 1
 }
-[ -n "${TRIM_APPDEST:-}" ] || fail 'ERP 缺少 TRIM_APPDEST。'
-TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" 2>/dev/null && pwd -P) || fail 'ERP target 无法解析。'
 [ -n "${TRIM_APPDEST_VOL:-}" ] || fail 'ERP 缺少持久存储卷 TRIM_APPDEST_VOL。'
 VOLUME=$(CDPATH= cd -P "$TRIM_APPDEST_VOL" 2>/dev/null && pwd -P) || fail 'ERP 存储卷无法解析。'
 BASE="$VOLUME/@wuchengerp-data"
 DATA="$BASE/erp"
 CONFIG="$DATA/config/web.json"
-PAYLOAD="$TARGET"
-if [ ! -d "$PAYLOAD/erp" ] && [ -d "$TARGET/app/erp" ]; then PAYLOAD="$TARGET/app"; fi
-NODE="$PAYLOAD/runtime/node/bin/node"
-CHILD_LIB_PATH="$PAYLOAD/runtime/sysroot/usr/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/usr/lib:$PAYLOAD/runtime/sysroot/lib"
-LIFECYCLE="$PAYLOAD/erp/server/fnos-native/lifecycle.mjs"
-ERP_NATIVE_RELEASE="$PAYLOAD/erp"
-ERP_NATIVE_DATA="$DATA"
-ERP_NATIVE_SOCKET="$TARGET/app.sock"
-ERP_NATIVE_PACKAGE=1
-export ERP_NATIVE_RELEASE ERP_NATIVE_DATA ERP_NATIVE_SOCKET ERP_NATIVE_PACKAGE
-case "$DATA/" in "$TARGET/"*) fail 'ERP 持久数据不能位于可替换 target 内。';; esac
+# Pre-upgrade and inactive stop/status can inspect retained state before the
+# replaceable payload is available. Call only when an action needs that payload.
+resolve_payload() {
+ [ -n "${TRIM_APPDEST:-}" ] || fail 'ERP 缺少 TRIM_APPDEST。'
+ TARGET=$(CDPATH= cd -P "$TRIM_APPDEST" 2>/dev/null && pwd -P) || fail "ERP target 无法解析（uid=$(id -u) hook=$(basename "$0") action=${1:--} path=$TRIM_APPDEST）。"
+ PAYLOAD="$TARGET"
+ if [ ! -d "$PAYLOAD/erp" ] && [ -d "$TARGET/app/erp" ]; then PAYLOAD="$TARGET/app"; fi
+ NODE="$PAYLOAD/runtime/node/bin/node"
+ CHILD_LIB_PATH="$PAYLOAD/runtime/sysroot/usr/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/lib/x86_64-linux-gnu:$PAYLOAD/runtime/sysroot/usr/lib:$PAYLOAD/runtime/sysroot/lib"
+ LIFECYCLE="$PAYLOAD/erp/server/fnos-native/lifecycle.mjs"
+ ERP_NATIVE_RELEASE="$PAYLOAD/erp"
+ ERP_NATIVE_DATA="$DATA"
+ ERP_NATIVE_SOCKET="$TARGET/app.sock"
+ ERP_NATIVE_PACKAGE=1
+ export ERP_NATIVE_RELEASE ERP_NATIVE_DATA ERP_NATIVE_SOCKET ERP_NATIVE_PACKAGE
+ case "$DATA/" in "$TARGET/"*) fail 'ERP 持久数据不能位于可替换 target 内。';; esac
+}
 as_package() {
  if [ "$(id -u)" = 0 ]; then
   [ -n "${TRIM_USERNAME:-}" ] || fail 'ERP 未提供专用 package 用户。'

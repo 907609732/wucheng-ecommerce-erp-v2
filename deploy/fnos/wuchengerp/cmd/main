@@ -9,6 +9,7 @@ esac
 if [ ! -f "$CONFIG" ]; then
  case "$ACTION" in stop) exit 0;; status) exit 3;; *) fail 'ERP 尚未初始化，请选择新建或已校验的停写副本。';; esac
 fi
+resolve_payload "$ACTION"
 if [ ! -x "$NODE" ] || [ ! -f "$LIFECYCLE" ]; then
  [ "$ACTION" != status ] || exit 3
  fail 'ERP 原生运行文件不完整，请重新安装完整 FPK。'

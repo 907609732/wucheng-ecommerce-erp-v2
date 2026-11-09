@@ -59,6 +59,10 @@
 
 ## Review Focus
 
+2026-11-09 实机切换记录：5cb28ec 两份 FPK 已经局域网上传并由 NAS 侧重新核对全部字节大小和 SHA256。最终独立诊断 `run-20261109T085614Z-1761302` 为 ok/cleanupComplete/SQLite/sandbox=true、uid=945、两次启动、34 个进程 maps 通过，Cookie/localStorage 保留。迁移前重新校验封存副本全部 3516 文件及三主数据库与原始正式源一致。中转上传失败的两份约 232 MiB 临时文件不能用于安装，已改用局域网成功上传，待最后清理。
+
+主应用升级在数据迁移前被 `ERP target 无法解析。` 阻止；实查原生 DATA 仍不存在，官方应用中心仍记录旧薄入口 0.14.4。修复范围仅主包 shell 钩子：把需 payload 的路径解析与持久卷/CONFIG 检查分离；无原生配置的 pre-upgrade/stop/status 不再要求可替换 target，已有 CONFIG 时仍严格停写并验证完整备份，其他安装与配置钩子继续要求真实 payload。错误仅增加 UID、钩子、动作和 target 路径，不记录环境凭据。具体旧 target 的解析失败条件没有完整现场证据，不写成权限或平台时序已证明。官方生命周期参考 https://developer.fnnas.com/docs/core-concepts/framework/ ，参考现有项目 https://github.com/conversun/fnos-apps/blob/main/shared/cmd/common 的分层思路，未引入依赖或复制宽泛进程终止逻辑。
+
 2026-11-09 最终候选进展：04e12a2 原生 run42575086732、b492aa4 原生 run42578767463 均通过。04e12a2 两个 FPK 在 NAS 上传后逐字节 SHA256 与本地对应产物一致；官方应用中心安装隔离诊断后，`run-20261109T073615Z-1654596` 最终 acceptance 为 ok=true、cleanupComplete=true、uid=945、Node v24.22.2、SQLite=true、sandbox=true、successfulStarts=2、受控进程 maps 34 项。HTTPS、上游 MCP 输入和实际下载、上游 noVNC RFB 键鼠、持久 Cookie 与 localStorage 重启保留、三份 SQLite 完整性和停止清理全部通过，未迁入正式账本。完整精简回执保存在本机本次产物目录的 nas-04-diagnostic-complete.txt。
 
 Windows b492aa4 已捕获 fresh 随机临时端口的真实 EACCES。5cb28ec 复用 Node net.listen(0) 预约四个实际可绑定的临时端口，正式端口及外来占用拒绝策略不变、不增加依赖。三项新回归独立通过；本机窄组合仍有一项迁移目录 rename EPERM，原因未明，未降低断言或增加重试。精确候选的 native run42581070930、Windows run42581079418 均已通过；同次产物下载与完整本地校验正在进行，尚未安装正式主包。根代理另行独立复跑新增三项回归，3/3 通过。

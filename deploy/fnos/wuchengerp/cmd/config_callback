@@ -2,6 +2,7 @@
 set -eu
 SELF=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)
 . "$SELF/native_env"
+resolve_payload
 case "${wizard_uvcs_verify:-0}" in
  0|'') ;;
  1)
