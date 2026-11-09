@@ -98,9 +98,48 @@ test('host attachment ID flows through real chunk HTTP, reviewed import and regi
 test('sales host uploads a real 50MiB attachment with persisted resume after restart and rejects oversized files',async t=>{
  const f=await setup(t),filePath=path.join(f.dir,'central-source.csv'),size=50*1024*1024;fs.writeFileSync(filePath,Buffer.alloc(size,97));
  const sha256=createHash('sha256').update(fs.readFileSync(filePath)).digest('hex'),ctx={taskId:'task-sales',resolveAttachment:()=>({name:'large.csv',path:filePath,size,sha256})};
- let disconnect=true,indices=[];
- const transport=async(module,route,options)=>{if(route.endsWith('/part')){if(disconnect&&options.body.index===1){disconnect=false;throw Error('synthetic connection loss');}indices.push(options.body.index);}const response=await f.call(route.replace('/api/integration/v1/agent/',''),{method:options.method,body:options.body});assert.equal(response.status,200,await response.clone().text());return response.json();};
+ const partBytes=1024*1024,partHash=createHash('sha256').update(Buffer.alloc(partBytes,97)).digest('hex'),began=Date.now(),received=[],acknowledged=[];
+ let disconnect=true,indices=[],generation=0;
+ const persisted=()=>{
+  const rows=f.app.store.db.prepare('SELECT upload_id,part_index,bytes,sha256 FROM agent_upload_parts ORDER BY part_index').all(),first=rows.find(row=>row.part_index===0);
+  if(!first)return {indices:rows.map(row=>row.part_index)};
+  const target=path.join(f.dir,'agent-upload-parts',first.upload_id,'0'),bytes=fs.existsSync(target)?fs.readFileSync(target):null;
+  return {indices:rows.map(row=>row.part_index),recordBytes:first.bytes,recordHashMatches:first.sha256===partHash,diskBytes:bytes?.length??null,diskHashMatches:bytes?createHash('sha256').update(bytes).digest('hex')===partHash:false};
+ };
+ const observe=()=>{
+  const app=f.app.app,handle=app.handle,current=++generation;
+  app.handle=function(request,response,...args){
+   const endpoint=request.url?.match(/^\/api\/integration\/v1\/agent\/files\/upload\/(start|part|finish)$/)?.[1];
+   if(endpoint){
+    const event={generation:current,endpoint,finished:false,closed:false};received.push(event);if(received.length>4)received.shift();
+    response.once('finish',()=>{event.finished=true;event.status=response.statusCode;if(Number.isInteger(request.body?.index))event.index=request.body.index;});
+    response.once('close',()=>{event.closed=true;event.aborted=request.aborted;});
+   }
+   return Reflect.apply(handle,this,[request,response,...args]);
+  };
+ };observe();
+ const transport=async(module,route,options)=>{
+  const endpoint=route.split('/').at(-1),index=options.body.index;
+  if(endpoint==='part'){
+   if(disconnect&&index===1){
+    assert.deepEqual(persisted(),{indices:[0],recordBytes:partBytes,recordHashMatches:true,diskBytes:partBytes,diskHashMatches:true},'part 0 must be persisted before the injected disconnect');
+    disconnect=false;throw Error('synthetic connection loss');
+   }
+   indices.push(index);
+  }
+  try{
+   const response=await f.call(route.replace('/api/integration/v1/agent/',''),{method:options.method,body:options.body});assert.equal(response.status,200,await response.clone().text());
+   const result=await response.json();acknowledged.push({generation,endpoint,...(Number.isInteger(index)?{index}:{})});return result;
+  }catch(error){
+   try{
+    const code=value=>typeof value==='string'&&/^[A-Z][A-Z0-9_]{0,63}$/.test(value)?value:null;
+    let stored;try{stored=persisted();}catch(failure){stored={unavailable:code(failure.code)};}
+    console.error('[sales upload fixture failure]',JSON.stringify({ms:Date.now()-began,generation,endpoint,...(Number.isInteger(index)?{index}:{}),code:code(error.code),cause:code(error.cause?.code),acknowledged:acknowledged.slice(-4),received,persisted:stored}));
+   }catch{} // Observation must not replace the original transport failure.
+   throw error;
+  }
+ };
  const adapter=createSalesAgentAdapter({transport});await assert.rejects(adapter.prepare('sales.files.stage',{attachmentId:'large-original'},ctx),/connection loss/);assert.deepEqual(indices,[0]);
- await f.restart();indices=[];const output=await adapter.prepare('sales.files.stage',{attachmentId:'large-original'},ctx),file=output.blocks[0].rows[0];assert.equal(file.bytes,size);assert.equal(file.sha256,sha256);assert.deepEqual(indices,Array.from({length:49},(_,i)=>i+1));assert.equal(f.app.store.get('SELECT COUNT(*) n FROM agent_artifacts').n,1);
+ await f.restart();observe();indices=[];const output=await adapter.prepare('sales.files.stage',{attachmentId:'large-original'},ctx),file=output.blocks[0].rows[0];assert.equal(file.bytes,size);assert.equal(file.sha256,sha256);assert.deepEqual(indices,Array.from({length:49},(_,i)=>i+1));assert.equal(f.app.store.get('SELECT COUNT(*) n FROM agent_artifacts').n,1);
  const replay=await adapter.prepare('sales.files.stage',{attachmentId:'large-original'},ctx);assert.equal(replay.blocks[0].rows[0].id,file.id);fs.truncateSync(filePath,size+1);await assert.rejects(adapter.prepare('sales.files.stage',{attachmentId:'too-large'},ctx),{code:'AGENT_ATTACHMENT_SIZE'});
 });
