@@ -141,6 +141,10 @@ test('enabled migration requires trusted identity, registers only final workspac
 
 test('migration persists official VAR runtime independently without changing readonly source logs or financial modes',async t=>{
  const {dir,source}=await fixture(t,{capture:false}),target=path.join(dir,'target'),runtimeDir=path.join(dir,'official-var/runtime');
+ // Actual financial inputs already have owner-write; VAR routing must preserve
+ // their modes while leaving historical readonly logs untouched.
+ for(const [id,name]of Object.entries(databases))fs.chmodSync(path.join(source,'data',id,name),0o600);
+ fs.chmodSync(path.join(source,'state/month-admin/month-admin.sqlite'),0o600);
  for(const id of Object.keys(databases)){const log=path.join(source,'data',id,'integration-service.log');fs.writeFileSync(log,'retained historical log\n');fs.chmodSync(log,0o400);}
  await sealStoppedSource(source);const before=files(source),modes=new Map(before.map(([p])=>[p,fs.statSync(path.join(source,p)).mode&0o777]));
  const file=await configureNative({...options(target),mode:'migrate',sourceRoot:source,runtimeDir}),config=JSON.parse(fs.readFileSync(file));
@@ -178,4 +182,65 @@ test('Linux native runtime guard rejects broad permissions and foreign ownership
  // or traversal into it is needed to establish the ownership rejection.
  const foreign='/root',before=fs.lstatSync(foreign);assert.notEqual(before.uid,process.getuid());
  config.native.runtimeDir=foreign;assert.throws(()=>validateConfig(config),/runtime/);assert.throws(()=>ensureNativeRuntimeDirectory(config),/runtime/);assert.equal(fs.lstatSync(foreign).mode,before.mode);
+});
+
+test('migration restores readonly month administrator only in private stage and purchase starts twice with retained password and locks',async t=>{
+ const {dir,source}=await fixture(t),target=path.join(dir,'target'),runtimeDir=path.join(dir,'var/runtime'),adminRelative='state/month-admin/month-admin.sqlite';
+ const retained=[adminRelative,'state/gateway/identity.json','data/purchase/originals/sample.txt'];
+ for(const id of Object.keys(databases)){const relative='data/'+id+'/integration-service.log';fs.writeFileSync(path.join(source,relative),'retained readonly log');retained.push(relative);}
+ for(const relative of retained)fs.chmodSync(path.join(source,relative),0o400);
+ await sealStoppedSource(source);const before=files(source),modes=new Map(before.map(([p])=>[p,fs.statSync(path.join(source,p)).mode&0o777]));
+ const configFile=await configureNative({...options(target),mode:'migrate',sourceRoot:source,runtimeDir}),config=JSON.parse(fs.readFileSync(configFile));
+ for(const [relative,digest]of before)if(relative!==path.join('config','web.json'))assert.equal(hash(path.join(target,relative)),digest,'pre-start bytes '+relative);
+ const net=await import('node:net'),reservations=[];
+ try{for(let i=0;i<2;i++){const socket=net.createServer();reservations.push(socket);await new Promise((resolve,reject)=>socket.once('error',reject).listen(0,'127.0.0.1',resolve));}config.modules.purchase.port=reservations[0].address().port;config.modules.purchase.mobilePort=reservations[1].address().port;}
+ finally{await Promise.all(reservations.map(socket=>new Promise(resolve=>socket.close(resolve))));}
+ const {createSourceServices}=await import('../server/services.mjs'),pids=[];
+ for(let start=0;start<2;start++){
+  const services=await createSourceServices(config);
+  try{let cap;try{cap=await services.ensure('purchase');}catch(error){throw new Error(error.message+'\n'+fs.readFileSync(path.join(runtimeDir,'logs/purchase-integration-service.log'),'utf8').slice(-5000),{cause:error});}pids.push(cap.pid);assert.equal(cap.dataDir,path.join(target,'data/purchase'));assert.equal(cap.root,config.modules.purchase.root);}
+  finally{await services.stopOwned();}
+  assert.equal(await services.capabilities('purchase'),null);
+ }
+ assert.notEqual(pids[0],pids[1]);assert.ok(fs.statSync(path.join(target,adminRelative)).mode&0o200);
+ const {openMonthAdmin}=await import('../shared/month-admin.mjs'),admin=openMonthAdmin({dataDir:path.join(target,'state/month-admin')});try{assert.equal(await admin.verify('retained-password'),true);}finally{admin.close();}
+ const db=new DatabaseSync(path.join(target,'data/sales/sales.sqlite'),{readOnly:true});try{assert.equal(db.prepare('SELECT count(*) n FROM reconciliation_locks').get().n,1);assert.equal(db.prepare('SELECT count(*) n FROM month_locks').get().n,1);}finally{db.close();}
+ for(const [relative,digest]of before)if(relative.includes('events'+path.sep)||relative.includes('blobs'+path.sep)||retained.includes(relative.replaceAll(path.sep,'/'))&&relative!==path.normalize(adminRelative)){assert.equal(hash(path.join(target,relative)),digest);assert.equal(fs.statSync(path.join(target,relative)).mode&0o777,modes.get(relative));}
+ assert.deepEqual(files(source),before);for(const [p,mode]of modes)assert.equal(fs.statSync(path.join(source,p)).mode&0o777,mode,'source mode '+p);
+ fs.chmodSync(path.join(target,adminRelative),0o400);await configureNative({...options(target),mode:'existing'});assert.equal(fs.statSync(path.join(target,adminRelative)).mode&0o200,0,'existing reconfiguration must not silently repair database permissions');
+});
+
+test('migration restores only exact active SQLite and existing sidecars without changing bytes before SQLite validation',async t=>{
+ const {dir,source}=await fixture(t),target=path.join(dir,'target');
+ const active=[...Object.entries(databases).map(([id,name])=>'data/'+id+'/'+name),'state/gateway/gateway.sqlite','state/gateway/gateway-ownership.sqlite','state/month-admin/month-admin.sqlite','state/native-lifecycle.sqlite','state/native-ownership.sqlite','data-version/queue.sqlite'];
+ const selected=[];
+ for(const relative of active){const file=path.join(source,relative);fs.mkdirSync(path.dirname(file),{recursive:true});if(!fs.existsSync(file)){const db=new DatabaseSync(file);db.exec('CREATE TABLE retained(value TEXT)');db.close();}selected.push(relative);for(const suffix of ['-wal','-shm','-journal']){fs.writeFileSync(file+suffix,'');selected.push(relative+suffix);}}
+ const decoys=['data/purchase/originals/month-admin.sqlite-wal','data-version/events/not-an-active-db.sqlite'];
+ fs.writeFileSync(path.join(source,decoys[0]),'immutable filename lookalike');fs.copyFileSync(path.join(source,active[0]),path.join(source,decoys[1]));
+ for(const relative of [...selected,...decoys])fs.chmodSync(path.join(source,relative),0o400);
+ await sealStoppedSource(source);const before=files(source),modes=new Map(before.map(([p])=>[p,fs.statSync(path.join(source,p)).mode&0o777]));
+ // Observe the private copy before SQLite can consume/recover its sidecars.
+ // Empty sidecars exercise the path/mode policy, not WAL recovery semantics.
+ const boundary=Error('private mode census complete'),read=fs.readFileSync;let checked=false;
+ t.mock.method(fs,'readFileSync',(file,...args)=>{
+  if(!checked&&String(file).startsWith(target+'.staging-')&&String(file).endsWith(path.join('config','web.json'))){
+   checked=true;const stage=path.dirname(path.dirname(String(file)));
+   for(const [relative,digest]of before)assert.equal(hash(path.join(stage,relative)),digest,relative);
+   for(const relative of selected){const mode=fs.statSync(path.join(stage,relative)).mode&0o777;assert.ok(mode&0o200,relative);if(process.platform!=='win32')assert.equal(mode,0o600,relative);}
+   for(const relative of decoys)assert.equal(fs.statSync(path.join(stage,relative)).mode&0o200,0,relative);
+   throw boundary;
+  }
+  return read(file,...args);
+ });
+ await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),error=>error===boundary);
+ assert.equal(checked,true);assert.equal(fs.existsSync(target),false);
+ assert.deepEqual(files(source),before);for(const [p,mode]of modes)assert.equal(fs.statSync(path.join(source,p)).mode&0o777,mode,p);
+});
+
+for(const attack of ['hardlink','symlink'])test('migration refuses a substituted stage SQLite '+attack+' without changing its source',async t=>{
+ const {dir,source}=await fixture(t,{capture:false}),target=path.join(dir,'target'),relative='state/month-admin/month-admin.sqlite',input=path.join(source,relative);
+ fs.chmodSync(input,0o400);await sealStoppedSource(source);const before=files(source),mode=fs.statSync(input).mode,copy=fs.cpSync;
+ t.mock.method(fs,'cpSync',(from,to,options)=>{const result=copy(from,to,options);if(String(to).startsWith(target+'.staging-')){const selected=path.join(to,relative);fs.rmSync(selected,{force:true});if(attack==='hardlink')fs.linkSync(input,selected);else fs.symlinkSync(path.dirname(input),selected,process.platform==='win32'?'junction':'dir');}return result;});
+ await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),/SQLite|符号链接/);
+ assert.equal(fs.existsSync(target),false);assert.equal(fs.statSync(input).mode,mode);assert.equal(fs.statSync(input).nlink,1);assert.deepEqual(files(source),before);
 });

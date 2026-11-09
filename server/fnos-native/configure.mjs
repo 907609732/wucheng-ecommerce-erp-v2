@@ -90,6 +90,27 @@ function complete(root){
  for(const name of ['data','state','data-version'])if(!fs.statSync(path.join(root,name)).isDirectory())throw Error('源副本不完整');
  for(const id of moduleIds)if(!fs.existsSync(path.join(root,'data',id,databases[id])))throw Error(id+' 原账本不存在，已阻止创建空账本');
 }
+function restoreStagedDatabaseModes(stage){
+ // A working SQLite database needs owner-write even when its sealed input was
+ // readonly. Never apply this to originals, snapshots, backups or existing DATA.
+ const active=[...moduleIds.map(id=>path.join('data',id,databases[id])),
+  'state/gateway/gateway.sqlite','state/gateway/gateway-ownership.sqlite',
+  'state/month-admin/month-admin.sqlite','state/native-lifecycle.sqlite',
+  'state/native-ownership.sqlite','data-version/queue.sqlite'];
+ for(const relative of active)for(const suffix of ['','-wal','-shm','-journal']){
+  const file=physicalPath(path.join(stage,relative+suffix));let before;
+  try{before=fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')continue;throw error;}
+  const owned=st=>st.isFile()&&!st.isSymbolicLink()&&st.nlink===1&&(process.platform==='win32'||st.uid===process.getuid());
+  const same=st=>owned(st)&&st.dev===before.dev&&st.ino===before.ino&&st.size===before.size&&st.mtimeMs===before.mtimeMs;
+  if(!owned(before))throw Error('迁移活动 SQLite 必须为当前用户独占的普通文件：'+relative+suffix);
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+  try{
+   if(!same(fs.fstatSync(fd))||!same(fs.lstatSync(file)))throw Error('迁移活动 SQLite inode 已改变');
+   fs.fchmodSync(fd,0o600);
+   if(!same(fs.fstatSync(fd))||!same(fs.lstatSync(file)))throw Error('迁移活动 SQLite inode 已改变');
+  }finally{fs.closeSync(fd);}
+ }
+}
 function integrity(root){for(const entry of tree(root).filter(e=>e.path.endsWith('.sqlite'))){
  const db=new DatabaseSync(path.join(root,entry.path),{readOnly:true});
  try{if(db.prepare('PRAGMA integrity_check').all().some(row=>Object.values(row)[0]!=='ok'))throw Error('账本完整性校验失败：'+entry.path);}finally{db.close();}
@@ -240,6 +261,7 @@ export async function configureNative(o={}){
   }else{
    const source=physicalPath(o.sourceRoot);if(within(dataRoot,source)||within(source,dataRoot))throw Error('迁移目标不能覆盖源副本');const manifest=verifySource(source);
    fs.cpSync(source,stage,{recursive:true,filter:src=>!fs.lstatSync(src).isSocket()});verifySource(source);
+   restoreStagedDatabaseModes(stage);
    const old=JSON.parse(fs.readFileSync(configFileAt(stage),'utf8')),rebased=rebaseConfig(old,dataRoot,releaseRoot);c=rebased.config;
    if(c.dataVersion?.enabled){c.native.uvcsIdentity=trustedIdentity(manifest.uvcs?.identity,c.dataVersion.repository);c.native.uvcsSourceMetadataHash=manifest.uvcs?.metadataSha256;if(metadataFingerprint(path.join(stage,path.relative(dataRoot,c.dataVersion.workspace)))!==c.native.uvcsSourceMetadataHash)throw Error('UVCS_METADATA_CHANGED');markNativeUvcsPending(c,path.join(stage,'state'));}
    if(!c.fnos?.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
