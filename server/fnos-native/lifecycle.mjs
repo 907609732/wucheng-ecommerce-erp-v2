@@ -32,8 +32,9 @@ async function status(c,file){
   return result;
  }catch(error){return {ok:false,status:'unavailable',error:error.message};}
 }
-export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,cancellationTimeoutMs=85000}={}){
+export async function nativeLifecycle(action,configFile,{startupTimeoutMs,cancellationTimeoutMs=85000}={}){
  if(!['start','stop','status'].includes(action))throw Error('未知原生生命周期操作');
+ if(startupTimeoutMs===undefined)startupTimeoutMs=loadConfig(physicalPath(configFile)).fnos?.basePrefix==='/app/wuchengerptrial'?240000:90000;
  if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>300000||!Number.isInteger(cancellationTimeoutMs)||cancellationTimeoutMs<1||cancellationTimeoutMs>100000)throw Error('生命周期等待时间必须有界');
  configFile=physicalPath(configFile);let c=loadConfig(configFile);
  if(action==='status')return status(c,configFile);
@@ -88,7 +89,7 @@ export async function main(argv=process.argv.slice(2)){
   const requested=o.config?loadConfig(physicalPath(o.config)):undefined;
   const releaseRoot=o.release||process.env.ERP_NATIVE_RELEASE||requested?.releaseRoot,appRoot=path.dirname(releaseRoot||'');
   const split=value=>value?value.split(/[\s,]+/).filter(Boolean):undefined;
-  const file=await configureNative({releaseRoot,dataRoot:o.data||process.env.ERP_NATIVE_DATA||requested?.native?.dataRoot,mode:o.mode||process.env.erp_mode||(requested?'existing':undefined),sourceRoot:o.source||process.env.erp_source,publicOrigin:o.origin||process.env.erp_origin,allowedOrigins:split(o.origins||process.env.erp_origins),allowedUids:split(o.uids||process.env.erp_uids),socketPath:o.socket||process.env.ERP_NATIVE_SOCKET,cmPath:o['cm-path']||process.env.ERP_NATIVE_CM_PATH,runtimeDir:o['runtime-dir']||process.env.ERP_NATIVE_RUNTIME_DIR,requireBrowsers:process.env.ERP_NATIVE_PACKAGE==='1'?true:undefined,browser:process.env.ERP_NATIVE_PACKAGE==='1'?{enabled:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined});
+  const file=await configureNative({releaseRoot,dataRoot:o.data||process.env.ERP_NATIVE_DATA||requested?.native?.dataRoot,mode:o.mode||process.env.erp_mode||(requested?'existing':undefined),sourceRoot:o.source||process.env.erp_source,publicOrigin:o.origin||process.env.erp_origin,allowedOrigins:split(o.origins||process.env.erp_origins),allowedUids:split(o.uids||process.env.erp_uids),socketPath:o.socket||process.env.ERP_NATIVE_SOCKET,basePrefix:process.env.ERP_NATIVE_BASE_PREFIX,cmPath:o['cm-path']||process.env.ERP_NATIVE_CM_PATH,runtimeDir:o['runtime-dir']||process.env.ERP_NATIVE_RUNTIME_DIR,requireBrowsers:process.env.ERP_NATIVE_PACKAGE==='1'?true:undefined,browser:process.env.ERP_NATIVE_PACKAGE==='1'?{enabled:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined});
   return {ok:true,config:file};
  }
  const r=await nativeLifecycle(action,o.config);if(action==='status'&&!r.ok)process.exitCode=3;return r;

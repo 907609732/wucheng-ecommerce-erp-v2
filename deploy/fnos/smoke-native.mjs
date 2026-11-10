@@ -136,8 +136,10 @@ try{
   c.mode='production';c.releaseRoot=release;c.tcpEnabled=true;c.fnos={enabled:false};c.publicOrigin='https://native-acceptance.example.com';c.dataVersion={enabled:false};
   c.native={dataRoot:data,home:path.join(data,'uvcs-home'),nodePath:process.execPath,requireBrowsers:true,browser:browserConfig};fs.mkdirSync(c.native.home,{mode:0o700});
   await checkpoint('before-config');fs.mkdirSync(path.join(data,'config'),{mode:0o700});configFile=path.join(data,'config/web.json');fs.writeFileSync(configFile,JSON.stringify(validateConfig(c)),{mode:0o600});
- }else configFile=await configureNative({releaseRoot:release,dataRoot:data,mode:'fresh',publicOrigin:'https://native-acceptance.example.com',allowedUids:['23001'],allowedOrigins:['https://native-acceptance.example.com'],socketPath:path.join(app,'app.sock'),requireBrowsers:true,browser:browserConfig});
- const c=loadConfig(configFile);c.port=diagnostic?29430:28430+offset;
+ }else configFile=await configureNative({releaseRoot:release,dataRoot:data,mode:'fresh',publicOrigin:'https://native-acceptance.example.com',allowedUids:['23001'],allowedOrigins:['https://native-acceptance.example.com'],socketPath:path.join(app,'app.sock'),requireBrowsers:true,browser:browserConfig,...(process.env.ERP_NATIVE_BASE_PREFIX?{basePrefix:process.env.ERP_NATIVE_BASE_PREFIX}:{})});
+ const c=loadConfig(configFile);
+ if(!diagnostic&&process.env.ERP_NATIVE_BASE_PREFIX)assert.equal(c.fnos?.basePrefix,process.env.ERP_NATIVE_BASE_PREFIX,'Configured fnOS base prefix did not match the isolated runtime prefix');
+ c.port=diagnostic?29430:28430+offset;
  // lifecycle sets HOME only in its supervisor child. This smoke process also
  // launches MCP, whose SDK inherits HOME and whose Playwright cache needs it.
  // Match the managed home already created in this isolated synthetic data root;

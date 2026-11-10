@@ -49,6 +49,24 @@ test('fresh creates three real production books, no dev gateway identity, and ex
  assert.deepEqual(loadConfig(file2).fnos.allowedUids,['1001']);
  assert.equal(hash(path.join(c.modules.purchase.dataDir,databases.purchase)),before);
 });
+test('fresh accepts only the controlled trial prefix and existing cannot change its identity',async t=>{
+ const dir=fixture(t),data=path.join(dir,'trial'),trial=loadConfig(await configureNative({...options(data),basePrefix:'/app/wuchengerptrial'}));
+ assert.equal(trial.fnos.basePrefix,'/app/wuchengerptrial');
+ assert.deepEqual([trial.modules.purchase.port,trial.modules.purchase.mobilePort,trial.modules.sales.port,trial.modules.overview.port],[29431,29434,29432,29433]);
+ const trialFile=path.join(data,'config','web.json');
+ const legacy=JSON.parse(fs.readFileSync(trialFile,'utf8'));
+ legacy.port-=1000;
+ for(const module of Object.values(legacy.modules)) module.port-=1000;
+ legacy.modules.purchase.mobilePort-=1000;
+ fs.writeFileSync(trialFile,JSON.stringify(legacy));
+
+ await assert.rejects(configureNative({...options(path.join(dir,'bad')),basePrefix:'/app/other'}),/前缀/);
+ await configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerptrial'});
+ assert.equal(loadConfig(trialFile).modules.purchase.port,29431);
+ assert.equal(loadConfig(trialFile).fnos.instanceId,trial.fnos.instanceId);
+
+ await assert.rejects(configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerp'}),/前缀|身份/);
+});
 
 test('fresh resolves the exact localhost relay without Origin to the explicitly configured primary HTTPS entry',async t=>{
  const dir=fixture(t),data=path.join(dir,'fresh-relay'),secondary='https://secondary.example.com';
@@ -110,8 +128,9 @@ test('migration requires stopped verified complete source and preserves private 
  await assert.rejects(configureNative({...options(target),mode:'migrate',sourceRoot:source}),/校验|manifest/);
  await sealStoppedSource(source);
  await assert.rejects(configureNative({...options(path.join(dir,'wrong-provider')),mode:'migrate',sourceRoot:source,entry:'tailscale'}),/身份入口|切换/);
+ await assert.rejects(configureNative({...options(path.join(dir,'wrong-prefix')),mode:'migrate',sourceRoot:source,basePrefix:'/app/wuchengerptrial'}),/前缀|身份/);
  const before=hash(file),admin=hash(path.join(source,'state','month-admin','secret.json'));
- const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source}));
+ const migrated=loadConfig(await configureNative({...options(target),mode:'migrate',sourceRoot:source,basePrefix:'/app/wuchengerp'}));
  assert.equal(migrated.fnos.instanceId,c.fnos.instanceId);assert.equal(migrated.publicOrigin,c.publicOrigin);assert.equal(migrated.tcpEnabled,true);
  assert.deepEqual(migrated.fnos.allowedUids,c.fnos.allowedUids);
  assert.deepEqual(migrated.fnos.hostAliases,c.fnos.hostAliases,'migration retains original explicit relay aliases');
@@ -263,6 +282,11 @@ test('Linux package user: Unix-only native instance reports real identity over p
  const dir=fixture(t);file=await configureNative(options(path.join(dir,'instance')));const c=loadConfig(file);
  c.port=49000+Math.floor(Math.random()*1000);for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(file,JSON.stringify(c));
+ const staleSocket=path.join(c.stateDir,'web.sock');
+ const child=spawn(process.execPath,['-e',"require('net').createServer().listen(process.argv[1],()=>process.send('ready'))",staleSocket],{stdio:['ignore','ignore','ignore','ipc']});
+ await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('fixture exited '+code)));});
+ child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+ assert.equal(fs.lstatSync(staleSocket).isSocket(),true);
  const ready=await nativeLifecycle('start',file),identity=JSON.parse(fs.readFileSync(path.join(c.stateDir,'gateway','identity.json')));
  assert.equal(ready.serverId,identity.serverId);assert.equal(ready.dataSetId,identity.dataSetId);assert.equal(ready.fnos.state,'ready');
  await assert.rejects(fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health',{signal:AbortSignal.timeout(1000)}));

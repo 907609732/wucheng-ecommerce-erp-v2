@@ -44,19 +44,75 @@ as_package() {
   else env LD_LIBRARY_PATH="$CHILD_LIB_PATH" "$@"; fi
  fi
 }
-prepare_runtime() {
- # fnOS creates VAR and may expose it through a logical application symlink.
- # Resolve that platform path once; our private child must never be a link.
- [ -n "${TRIM_PKGVAR:-}" ] || fail 'ERP 缺少应用运行目录 TRIM_PKGVAR。'
- RUNTIME_BASE=$(CDPATH= cd -P "$TRIM_PKGVAR" 2>/dev/null && pwd -P) || fail 'ERP 应用 VAR 无法解析。'
- ERP_NATIVE_RUNTIME_DIR="$RUNTIME_BASE/runtime"
+prepare_root_var() (
+ # A thin-app upgrade can recreate this platform directory as root:root 0770.
+ # Only repair our exact physical VAR and an empty root-owned placeholder.
+ APP_DIR=${BASE##*/}
+ APP_DIR=${APP_DIR#@}
+ APP_DIR=${APP_DIR%-data}
+ [ "$RUNTIME_BASE" = "$VOLUME/@appdata/$APP_DIR" ] || return 1
+ PARENT="$VOLUME/@appdata"
+ while :; do
+  [ ! -L "$PARENT" ] && [ "$(stat -c %u "$PARENT")" = 0 ] || return 1
+  RIGHTS=$(stat -c %a "$PARENT") || return 1
+  [ "$((0$RIGHTS & 022))" = 0 ] || return 1
+  [ "$PARENT" != / ] || break
+  PARENT=${PARENT%/*}
+  PARENT=${PARENT:-/}
+ done
+ not_mountpoint() {
+  if mountpoint -q "$1"; then return 1; else [ "$?" = 32 ]; fi
+ }
+ not_mountpoint "$VOLUME/@appdata" && not_mountpoint "$RUNTIME_BASE" || return 1
+ exec 9<"$RUNTIME_BASE" || return 1
+ flock -w 5 9 || return 1
+ [ -n "${TRIM_USERNAME:-}" ] || return 1
+ VAR_UID=$(id -u "$TRIM_USERNAME") && VAR_GID=$(id -g "$TRIM_USERNAME") || return 1
+ [ "$VAR_UID" != 0 ] && [ "$VAR_GID" != 0 ] || return 1
+ case "$(stat -c '%u:%g:%a' "$RUNTIME_BASE")" in
+  "0:$VAR_GID:710") return 0;;
+  0:0:770) PRIOR_MODE=0770;;
+  0:0:710) PRIOR_MODE=0710;;
+  *) return 1;;
+ esac
+ # Restrict the ACL mask before inspecting or creating the child as root.
+ chmod 0710 "$RUNTIME_BASE" || return 1
+ if ! (
+  RUNTIME="$ERP_NATIVE_RUNTIME_DIR"
+  [ ! -L "$RUNTIME" ] || exit 1
+  if [ ! -e "$RUNTIME" ]; then mkdir -m 0700 "$RUNTIME" || exit 1; fi
+  [ -d "$RUNTIME" ] && not_mountpoint "$RUNTIME" || exit 1
+  case "$(stat -c '%u:%g:%a' "$RUNTIME")" in
+   "$VAR_UID:$VAR_GID:700") ;;
+   0:0:700)
+    CONTENTS=$(find "$RUNTIME" -mindepth 1 -maxdepth 1 -print -quit) || exit 1
+    [ -z "$CONTENTS" ] && chown "$VAR_UID:$VAR_GID" "$RUNTIME" || exit 1;;
+   *) exit 1;;
+  esac
+ ); then
+  chmod "$PRIOR_MODE" "$RUNTIME_BASE"
+  return 1
+ fi
+ chgrp "$VAR_GID" "$RUNTIME_BASE" || { chmod "$PRIOR_MODE" "$RUNTIME_BASE"; return 1; }
+)
+prepare_runtime_as_package() {
  as_package --system /bin/sh -eu -c '
   runtime=$1
   [ ! -L "$runtime" ] || exit 1
   umask 077
   mkdir -p "$runtime"
   [ -d "$runtime" ] && [ "$(stat -c %u "$runtime")" = "$(id -u)" ] && [ "$(stat -c %a "$runtime")" = 700 ] || exit 1
- ' sh "$ERP_NATIVE_RUNTIME_DIR" || fail 'ERP 私有 runtime 创建或属主校验失败。'
+ ' sh "$ERP_NATIVE_RUNTIME_DIR"
+}
+prepare_runtime() {
+ # fnOS creates VAR and may expose it through a logical application symlink.
+ # Resolve that platform path once; our private child must never be a link.
+ [ -n "${TRIM_PKGVAR:-}" ] || fail 'ERP 缺少应用运行目录 TRIM_PKGVAR。'
+ RUNTIME_BASE=$(CDPATH= cd -P "$TRIM_PKGVAR" 2>/dev/null && pwd -P) || fail 'ERP 应用 VAR 无法解析。'
+ ERP_NATIVE_RUNTIME_DIR="$RUNTIME_BASE/runtime"
+ if ! prepare_runtime_as_package 2>/dev/null; then
+  [ "$(id -u)" = 0 ] && prepare_root_var && prepare_runtime_as_package || fail 'ERP 私有 runtime 创建或属主校验失败。'
+ fi
  export ERP_NATIVE_RUNTIME_DIR
 }
 recover_retained() {

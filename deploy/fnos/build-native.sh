@@ -168,12 +168,20 @@ if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
  cp "$work/linux-xvfb/meson-buildoptions.json" "$work/linux-xvfb/source-provenance.txt" "$work/sources/native-build/linux-xvfb/"
  (cd "$work/sources/native-build/linux-xvfb"; sha256sum meson-buildoptions.json source-provenance.txt > SHA256SUMS.txt)
 fi
+if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
+ bash "$helper/build-trial.sh" "$stage" "$work" "$out" "$version"
+fi
 (cd "$work/sources"; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$out/SOURCE-SHA256SUMS.txt")
 tar --zstd -cf "$out/wuchengerp-$version-corresponding-source.tar.zst" -C "$work/sources" .
 zstd --test "$out/wuchengerp-$version-corresponding-source.tar.zst"
 tar --zstd -tf "$out/wuchengerp-$version-corresponding-source.tar.zst" | grep -v '/$' | LC_ALL=C sort > "$out/SOURCE-FILES.txt"
 diff -u <(awk '{ print substr($0,67) }' "$out/SOURCE-SHA256SUMS.txt") "$out/SOURCE-FILES.txt"
 sha256sum "wuchengerp-$version-corresponding-source.tar.zst" >> SHA256SUMS.txt
+if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
+ companion="wuchengerp-$version-corresponding-source.tar.zst"
+ companion_sha=$(sha256sum "$companion" | cut -d' ' -f1)
+ printf '%s\n' "filename=$companion" "sha256=$companion_sha" "commit=$(git -C "$repo" rev-parse HEAD)" "run_id=${GITHUB_RUN_ID:-local}" > trial-source-companion.txt
+fi
 printf '%s\n' "version=$version" "commit=$(git -C "$repo" rev-parse HEAD)" "run_id=${GITHUB_RUN_ID:-local}" 'platform=linux/amd64' 'libc=host glibc 2.36' > BUILD-INFO.txt
 if [[ ${ERP_BUILD_LINUX:-0} == 1 ]]; then
  [[ -n ${ERP_LINUX_OUTPUT:-} ]] || { echo 'ERP_BUILD_LINUX=1 requires a separate ERP_LINUX_OUTPUT directory.' >&2; exit 1; }
