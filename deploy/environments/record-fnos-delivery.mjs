@@ -30,7 +30,7 @@ for (const name of ['artifact-verification.json', 'packed-manifest-verification.
   file(p);
   if (name.endsWith('.json') && json(p).ok !== true) throw new Error(`${name} did not report successful structural acceptance`);
 }
-const fpkNames = fs.readdirSync(releaseOut).filter((x) => /^wuchengerp.*\.fpk$/.test(x) && !/diag/i.test(x));
+const fpkNames = fs.readdirSync(releaseOut).filter((x) => /^wuchengerp.*\.fpk$/.test(x) && !/diag/i.test(x) && x !== 'wuchengerptrial.fpk');
 if (fpkNames.length !== 1) throw new Error('Expected exactly one main fnOS FPK');
 const packageName = fpkNames[0], packagePath = file(path.join(releaseOut, packageName));
 const sourceName = fs.readdirSync(releaseOut).find((x) => /corresponding-source\.tar\.zst$/.test(x));

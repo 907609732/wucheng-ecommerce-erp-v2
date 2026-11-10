@@ -12,16 +12,22 @@ test('本地分派兼容与真实签名成员同等访问，身份不可由表�
  integration.attach(server);await new Promise(resolve=>server.once('listening',resolve));
  t.after(async()=>{await new Promise(resolve=>server.close(resolve));store.close();fs.rmSync(dir,{recursive:true,force:true});});
  const base='http://127.0.0.1:'+server.address().port,month='2020-01';
- const {token}=await(await fetch(base+'/api/bootstrap')).json();
- assert.equal((await(await fetch(base+'/api/bootstrap')).json()).pendingEditsCount,0);
+ // Each assertion uses a fresh loopback connection, independent of idle socket timing.
+ async function fetchRoute(route,options={}){
+  const headers=new Headers(options.headers);headers.set('Connection','close');
+  try{return await fetch(base+route,{...options,headers});}
+  catch(error){throw new Error((options.method??'GET')+' '+route+' failed',{cause:error});}
+ }
+ const {token}=await(await fetchRoute('/api/bootstrap')).json();
+ assert.equal((await(await fetchRoute('/api/bootstrap')).json()).pendingEditsCount,0);
  const insertDraft=store.db.prepare('INSERT INTO integration_edit_drafts(id,type,target,before_json,proposed_json,reason,revision,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)');
  insertDraft.run('pending-old','order','fixture','{}','{}','旧待确认记录','fixture','draft','2020-01-01');
  for(let i=0;i<105;i++)insertDraft.run('completed-'+i,'order','fixture','{}','{}','已完成记录','fixture','committed','2026-10-27');
- assert.equal((await(await fetch(base+'/api/bootstrap')).json()).pendingEditsCount,1,'超过100条已完成历史不能掩盖仍待确认的旧草稿');
+ assert.equal((await(await fetchRoute('/api/bootstrap')).json()).pendingEditsCount,1,'超过100条已完成历史不能掩盖仍待确认的旧草稿');
  store.db.prepare("UPDATE integration_edit_drafts SET state='committed' WHERE id='pending-old'").run();
- assert.equal((await(await fetch(base+'/api/bootstrap')).json()).pendingEditsCount,0,'确认完毕后入口应隐藏，历史记录仍保留');
+ assert.equal((await(await fetchRoute('/api/bootstrap')).json()).pendingEditsCount,0,'确认完毕后入口应隐藏，历史记录仍保留');
  async function request(route,body,cookie='',authorized=true){
-  const res=await fetch(base+route,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(authorized?{'X-Purchase-Token':token}:{}),...(cookie?{Cookie:cookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetchRoute(route,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(authorized?{'X-Purchase-Token':token}:{}),...(cookie?{Cookie:cookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   return {status:res.status,data:await res.json(),cookie:res.headers.get('set-cookie')?.split(';')[0]};
  }
  assert.equal((await request('/api/personnel/session',{role:'boss'},'',false)).status,403);
@@ -54,7 +60,7 @@ test('本地分派兼容与真实签名成员同等访问，身份不可由表�
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim();
  async function remote(route,{role='editor',id='tailscale:alice',body,actorPatch={}}={}){
   const method=body===undefined?'GET':'POST',now=Date.now(),actor={v:1,id,login:id.slice(9),role,modules:['purchase'],canRunTasks:true,sessionId:'remote-test',channel:'ui',requestId:randomUUID(),issuedAt:now,expiresAt:now+30000,module:'purchase',method,path:route};
-  const res=await fetch(base+route,{method,headers:{...signWorkbenchActor({...actor,...actorPatch},key),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetchRoute(route,{method,headers:{...signWorkbenchActor({...actor,...actorPatch},key),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
   return {status:res.status,data:res.headers.get('content-type')?.includes('json')?await res.json():await res.text()};
  }
  assert.equal((await remote('/task-cards.js')).status,200);
