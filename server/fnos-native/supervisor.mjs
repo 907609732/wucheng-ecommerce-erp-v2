@@ -7,6 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {pathToFileURL} from 'node:url';
 import {loadConfig,moduleIds} from '../config.mjs';
 import {createWebRuntime} from '../runtime.mjs';
+import {controlEndpoint} from '../control.mjs';
 import {startCollector} from '../collector.mjs';
 import {atomicJson,physicalPath} from './configure.mjs';
 import {nativeBrowserSpecs} from './browsers.mjs';
@@ -111,6 +112,8 @@ export async function runSupervisor(configFile,{createRuntime=createWebRuntime}=
   await assertNativeUvcsRegistration(config,{signal:cancellation.signal});
   checkCancellation();
   await cleanEndpoint(endpoint);
+  // The ownership transaction is held while checking the web control socket.
+  await cleanEndpoint(controlEndpoint(config.stateDir));
   checkCancellation();
   runtime=await createRuntime(config,{watch:false,superviseMs:5000,signal:cancellation.signal});
   checkCancellation();

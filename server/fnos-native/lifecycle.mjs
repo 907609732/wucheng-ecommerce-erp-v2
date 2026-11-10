@@ -32,8 +32,9 @@ async function status(c,file){
   return result;
  }catch(error){return {ok:false,status:'unavailable',error:error.message};}
 }
-export async function nativeLifecycle(action,configFile,{startupTimeoutMs=90000,cancellationTimeoutMs=85000}={}){
+export async function nativeLifecycle(action,configFile,{startupTimeoutMs,cancellationTimeoutMs=85000}={}){
  if(!['start','stop','status'].includes(action))throw Error('未知原生生命周期操作');
+ if(startupTimeoutMs===undefined)startupTimeoutMs=loadConfig(physicalPath(configFile)).fnos?.basePrefix==='/app/wuchengerptrial'?240000:90000;
  if(!Number.isInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>300000||!Number.isInteger(cancellationTimeoutMs)||cancellationTimeoutMs<1||cancellationTimeoutMs>100000)throw Error('生命周期等待时间必须有界');
  configFile=physicalPath(configFile);let c=loadConfig(configFile);
  if(action==='status')return status(c,configFile);

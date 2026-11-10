@@ -282,6 +282,11 @@ test('Linux package user: Unix-only native instance reports real identity over p
  const dir=fixture(t);file=await configureNative(options(path.join(dir,'instance')));const c=loadConfig(file);
  c.port=49000+Math.floor(Math.random()*1000);for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(file,JSON.stringify(c));
+ const staleSocket=path.join(c.stateDir,'web.sock');
+ const child=spawn(process.execPath,['-e',"require('net').createServer().listen(process.argv[1],()=>process.send('ready'))",staleSocket],{stdio:['ignore','ignore','ignore','ipc']});
+ await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('fixture exited '+code)));});
+ child.kill('SIGKILL');await new Promise(resolve=>child.once('exit',resolve));
+ assert.equal(fs.lstatSync(staleSocket).isSocket(),true);
  const ready=await nativeLifecycle('start',file),identity=JSON.parse(fs.readFileSync(path.join(c.stateDir,'gateway','identity.json')));
  assert.equal(ready.serverId,identity.serverId);assert.equal(ready.dataSetId,identity.dataSetId);assert.equal(ready.fnos.state,'ready');
  await assert.rejects(fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health',{signal:AbortSignal.timeout(1000)}));
