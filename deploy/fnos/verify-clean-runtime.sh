@@ -46,7 +46,7 @@ if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
    TRIM_APPDEST_VOL="$trial_install/volume" TRIM_PKGVAR="$trial_install/var" \
    TRIM_USERNAME=erpbuild TRIM_APPNAME=wuchengerptrial \
    erp_mode=fresh erp_origin=https://192.168.1.100:5667 \
-   erp_origins=http://192.168.1.100:5666,https://192.168.1.100:5667 erp_uids=1000 \
+   erp_origins=http://192.168.1.100:5666,https://192.168.1.100:5667 \
    wizard_uvcs_install=0 /bin/sh "$trial_cmd/install_callback"
  [[ -f "$trial_install/volume/@wuchengerptrial-data/erp/config/web.json" ]]
  [[ ! -e "$trial_install/volume/@wuchengerp-data" ]]

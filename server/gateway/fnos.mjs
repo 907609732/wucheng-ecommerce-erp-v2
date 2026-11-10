@@ -13,7 +13,8 @@ export function validateFnos(value){
   if(!value.enabled)return {enabled:false};
   const c=structuredClone(value);
   if(typeof c.instanceId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(c.instanceId)||!path.isAbsolute(c.socketPath||'')||!['/app/wuchengerp','/app/wuchengerptrial'].includes(c.basePrefix))throw Error('飞牛入口需要实例、完整socket路径和受控应用前缀');
-  if(!Array.isArray(c.allowedUids)||!c.allowedUids.length||c.allowedUids.some(u=>typeof u!=='string'||!/^(?:0|[1-9]\d{0,9})$/.test(u)))throw Error('飞牛入口需要显式UID名单');
+  if(c.accessPolicy!==undefined&&c.accessPolicy!=='fnos')throw Error('飞牛入口访问策略无效');
+  if(c.accessPolicy!=='fnos'&&(!Array.isArray(c.allowedUids)||!c.allowedUids.length||c.allowedUids.some(u=>typeof u!=='string'||!/^(?:0|[1-9]\d{0,9})$/.test(u))))throw Error('飞牛入口需要显式UID名单');
   if(!Array.isArray(c.allowedOrigins)||!c.allowedOrigins.length)throw Error('飞牛入口需要显式允许源');
   c.allowedOrigins=c.allowedOrigins.map(value=>{const u=new URL(value);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||!(u.protocol==='https:'||u.protocol==='http:'&&lan(u.hostname)))throw Error('飞牛外网入口必须HTTPS，HTTP仅限明确局域网地址');return u.origin;});
   if(c.hostAliases===undefined)c.hostAliases={};
@@ -37,7 +38,7 @@ export function fnosIdentity(request,c){
   const entryOrigin=origin||matches[0];
   const one=name=>{const count=(request.raw.rawHeaders||[]).filter((v,i)=>i%2===0&&v.toLowerCase()===name).length;const value=request.headers[name];if(count!==1||typeof value!=='string'||!value||/[\r\n,]/.test(value))throw deny(401,'FNOS_IDENTITY_REQUIRED','缺少唯一飞牛身份');return value;};
   const uid=one('x-trim-userid'),label=one('x-trim-username');
-  if(!/^(?:0|[1-9]\d{0,9})$/.test(uid)||label.length>254||/[\x00-\x1f\x7f]/.test(label)||!c.allowedUids.includes(uid))throw deny(403,'FNOS_USER_DENIED','此飞牛用户未获授权');
+  if(!/^(?:0|[1-9]\d{0,9})$/.test(uid)||label.length>254||/[\x00-\x1f\x7f]/.test(label)||(c.accessPolicy!=='fnos'&&!c.allowedUids.includes(uid)))throw deny(403,'FNOS_USER_DENIED','此飞牛用户未获授权');
   return {id:'fnos:'+c.instanceId+':'+uid,login:label,label,provider:'fnos',publicPrefix:c.basePrefix,origin:entryOrigin,secure:entryOrigin.startsWith('https:'),cookie:'workbench-fnos-'+c.instanceId+'-'+createHash('sha256').update(entryOrigin).digest('hex').slice(0,12)};
 }
 const sameInode=(a,b)=>a.ino===b.ino&&a.dev===b.dev;

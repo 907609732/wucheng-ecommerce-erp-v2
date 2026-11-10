@@ -196,6 +196,7 @@ test('direct supervisor reloads the access configuration after claiming its init
 });
 test('real package configure CLI preserves independent updates with one serialized browser-required commit',async t=>{
  const dir=fixtureDirectory(t,'fnative-package-race-'),data=path.join(dir,'data'),file=await configureNative(options(data));
+ const initialInstanceId=loadConfig(file).fnos.instanceId;
  const committed=path.join(dir,'committed'),resume=path.join(dir,'resume'),hook=path.join(dir,'hook.mjs');
  const source=`import fs from 'node:fs';import path from 'node:path';const target=${JSON.stringify(file)},commit=${JSON.stringify(committed)},resume=${JSON.stringify(resume)},read=fs.readFileSync,rename=fs.renameSync;let writes=0,held=false;fs.renameSync=function(from,to){const result=rename.call(this,from,to);if(path.resolve(to)===target){writes++;fs.writeFileSync(commit,String(writes));}return result;};fs.readFileSync=function(p,...args){const value=read.call(this,p,...args);if(writes&&path.resolve(String(p))===target&&!held){held=true;while(!fs.existsSync(resume))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}return value;};`;
  fs.writeFileSync(hook,source);
@@ -210,6 +211,7 @@ test('real package configure CLI preserves independent updates with one serializ
  const firstCode=await deadline(first.closed,10000,'first package configure failed to finish');
  assert.equal(firstCode,0);assert.equal(secondCode,0);
  const result=loadConfig(file);assert.deepEqual(result.fnos.allowedUids,['3003']);assert.deepEqual(result.fnos.allowedOrigins,[origin,'https://second-nas.example.com']);
+ assert.equal(result.fnos.accessPolicy,'fnos');assert.equal(result.fnos.instanceId,initialInstanceId);
  assert.equal(result.native.requireBrowsers,true);assert.equal(Number(fs.readFileSync(committed,'utf8')),1,'package requirement belongs to the serialized commit');
 });
 test('interrupting a blocked startup drains its already-owned module before supervisor exit',async t=>{

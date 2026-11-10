@@ -26,6 +26,24 @@ import {DatabaseSync} from 'node:sqlite';
 import {readCompanyMembers} from '../server/gateway/company-access.mjs';
 function identity(headers={}){const h={host:'192.168.1.100','x-trim-userid':'1000','x-trim-username':'907609732',...headers};return {headers:h,raw:{rawHeaders:Object.entries(h).flat()}};}
 test('fnOS header parser preserves UID and disambiguates only configured origins',()=>{const c=validateFnos(config(os.tmpdir()));const a=fnosIdentity(identity(),c),b=fnosIdentity(identity({'x-trim-username':'renamed'}),c);assert.equal(a.id,b.id);assert.equal(b.label,'renamed');assert.equal(a.origin,'http://192.168.1.100:5666');assert.equal(a.secure,false);const secure=fnosIdentity(identity({host:'nas.example.test',origin:'https://nas.example.test'}),c);assert.equal(secure.secure,true);assert.notEqual(a.cookie,secure.cookie);for(const headers of [{origin:'http://192.168.1.100:1234'},{host:'192.168.1.100.evil.test'},{'x-trim-userid':'01000'},{'x-trim-userid':'1000,1000'},{'x-trim-userid':'1001'},{'x-trim-username':'bad\nname'}])assert.throws(()=>fnosIdentity(identity(headers),c));const duplicate=identity();duplicate.raw.rawHeaders.push('X-Trim-Userid','1000');assert.throws(()=>fnosIdentity(duplicate,c));});
+test('fnOS-managed access admits authenticated gateway users without an ERP UID list',()=>{
+ const c=validateFnos({...config(os.tmpdir()),accessPolicy:'fnos',allowedUids:undefined});
+ assert.equal(fnosIdentity(identity({'x-trim-userid':'1001','x-trim-username':'ordinary'}),c).id,'fnos:nas1:1001');
+ assert.throws(()=>validateFnos({...config(os.tmpdir()),accessPolicy:'open'}));
+ for(const patch of [{'x-trim-userid':''},{'x-trim-userid':'01001'},{'x-trim-username':''},{origin:'https://untrusted.test'}]){
+  assert.throws(()=>fnosIdentity(identity(patch),c));
+ }
+ const duplicate=identity();duplicate.raw.rawHeaders.push('X-Trim-Userid','1001');
+ assert.throws(()=>fnosIdentity(duplicate,c));
+});
+test('fnOS-managed access trusts only the Unix gateway for an ordinary NAS user',{skip:process.platform==='win32'},async t=>{
+ const {g,dir}=await gateway(t,{accessPolicy:'fnos'});await g.start();
+ const user={'x-trim-userid':'1001','x-trim-username':'ordinary'};
+ const session=await unix(path.join(dir,'app.sock'),undefined,user);
+ assert.equal(session.statusCode,200,session.body);
+ assert.equal(session.json().actor.id,'fnos:nas1:1001');
+ assert.equal((await g.app.inject({url:'/api/workbench/v1/session',headers:{host:'erp.example.test',...user}})).statusCode,400);
+});
 test('trial prefix validation keeps primary and trial session cookies instance-isolated',()=>{const main=validateFnos(config(os.tmpdir())),trial=validateFnos({...config(os.tmpdir()),instanceId:'trial-instance',basePrefix:'/app/wuchengerptrial'});const primaryCookie=fnosIdentity(identity(),main).cookie,trialCookie=fnosIdentity(identity(),trial).cookie;assert.notEqual(primaryCookie,trialCookie);assert.throws(()=>validateFnos({...config(os.tmpdir()),basePrefix:'/app/other'}),/前缀/);});
 test('session migration retains old Tailscale identity and provider members stay distinct',t=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fnos-migration-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const old=new DatabaseSync(path.join(dir,'gateway.sqlite'));old.exec('CREATE TABLE sessions(token_hash TEXT PRIMARY KEY,session_id TEXT NOT NULL,login TEXT NOT NULL,channel TEXT NOT NULL,csrf TEXT NOT NULL,expires_at INTEGER NOT NULL);CREATE TABLE company_members(login TEXT PRIMARY KEY,label TEXT NOT NULL,first_seen INTEGER NOT NULL,last_seen INTEGER NOT NULL);');old.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?)').run(digest('old-token'),'old-session','907609732','ui','csrf',Date.now()+60000);old.prepare('INSERT INTO company_members VALUES(?,?,?,?)').run('907609732','old label',1,2);old.close();const store=createGatewayStore(dir);try{assert.equal(store.session('old-token').actor_id,'tailscale:907609732');store.observeIdentity({id:'fnos:nas1:1000',provider:'fnos',login:'907609732',label:'907609732'});store.observeIdentity({id:'fnos:nas1:1000',provider:'fnos',login:'renamed',label:'renamed'});const members=readCompanyMembers(dir);assert.deepEqual(members.map(m=>m.id),['tailscale:907609732','fnos:nas1:1000']);assert.equal(members[0].label,'old label');assert.equal(members[1].label,'renamed');assert.throws(()=>createGatewayStore(dir),{code:'GATEWAY_STORE_BUSY'});}finally{store.close();}const reopened=createGatewayStore(dir);reopened.close();});
 

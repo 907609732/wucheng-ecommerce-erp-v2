@@ -36,7 +36,7 @@ Chromium 156 的 GPU pre-sandbox hook 会直接预加载硬件 Vulkan 库，绕�
 ## 安装前提与正式切换
 
 - 系统必须为实测兼容的 x86_64 / glibc 2.36，并支持非 root Chromium namespace sandbox；禁止添加 `--no-sandbox` 绕过。系统需有 `runuser`、标准 POSIX/Linux 工具和可信 `/usr/bin/python3`。安装钩子使用系统 Python 进行保留目录的安全属主恢复；包内 Python 或 python312 应用不能替代这个可信路径。缺少时安装明确失败，管理员应通过另行审核的官方系统安装方案准备 Python，然后重试；FPK 不自动修改 NAS apt 环境。
-- 新建安装显式选择 fresh，填写真实 NAS HTTPS 主地址、允许 UID 和附加 Origin；不带开发用户、真实地址或默认密码。账本保存在安装卷物理目录的 `@wuchengerp-data/erp`，不在可替换 target 内，卸载保留。
+- 新建安装显式选择 fresh，填写真实 NAS HTTPS 主地址和附加 Origin。通过飞牛「系统设置 → 应用 → 五成ERP → 常规 → 桌面访问」管理应用入口。选择「设备内所有用户」会允许该设备的所有飞牛账号使用 ERP。账本保存在安装卷物理目录的 `@wuchengerp-data/erp`，卸载时保留。
 - 现有实例迁移先停写、完整备份并恢复验证，再选择 migrate 和已经校验的停写副本。禁止旧容器和原生服务同时写入。保留原身份、锁、密码、历史和 UVCS 队列；不支持的原件绝对路径必须阻止切换。
 - 当前实例已启用 UVCS 时，必须验证原生 cm 可执行及原 HOME/认证/队列，不能关闭托管以通过迁移。UVCS 不随 FPK 再分发；向导可明确选择由 root-owned appcenter 钩子安装固定官方 11.0.16.10616-1 amd64 deb，核对大小/SHA256/包字段后安装，禁止升级/移除无关软件。不设置认证，不携带私有凭据。
 - 生命周期只在短暂准备阶段使用 root，Node/collector/两套浏览器全部使用专用 package 用户。长服务由已有 supervisor 管理，启停核对 generation、真实命令和账本身份；失败明确暴露。

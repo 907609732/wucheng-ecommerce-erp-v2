@@ -205,7 +205,7 @@ export async function configureNative(o={}){
   c.publicOrigin=u.origin;c.mode='production';c.releaseRoot=releaseRoot;c.tcpEnabled=tailscale;
   for(const id of moduleIds)c.modules[id].dataDir=path.join(dataRoot,'data',id);
   const allowedOrigins=Array.isArray(o.allowedOrigins)?[...new Set([...o.allowedOrigins,u.origin])]:o.allowedOrigins;
-  c.fnos=tailscale?{enabled:false}:{enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:o.basePrefix||'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins,allowedUids:o.allowedUids,hostAliases:{localhost:u.origin}};
+  c.fnos=tailscale?{enabled:false}:{enabled:true,instanceId:o.instanceId||randomUUID(),basePrefix:o.basePrefix||'/app/wuchengerp',socketPath:o.socketPath||path.join(dataRoot,'socket','app.sock'),allowedOrigins,allowedUids:o.allowedUids,accessPolicy:o.accessPolicy,hostAliases:{localhost:u.origin}};
   c.native={dataRoot,home:path.join(dataRoot,'uvcs-home'),nodePath:process.execPath,...(o.browser?{browser:o.browser}:{}),...(o.requireBrowsers!==undefined?{requireBrowsers:o.requireBrowsers}:{}),...(o.runtimeDir!==undefined?{runtimeDir:physicalPath(o.runtimeDir)}:{})};
   const {validateFnos}=await import('../gateway/fnos.mjs');validateFnos(c.fnos);
   if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw Error('HTTPS 地址必须为源地址');
@@ -230,6 +230,7 @@ export async function configureNative(o={}){
      c.modules.purchase.mobilePort=trial.modules.purchase.mobilePort;
     }
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
+    if(o.accessPolicy!==undefined&&c.fnos?.enabled)c.fnos.accessPolicy=o.accessPolicy;
     if(o.publicOrigin&&c.tcpEnabled===false){
      const u=new URL(o.publicOrigin);
      if(u.protocol!=='https:'||/\.invalid$|\.example\.ts\.net$/.test(u.hostname))throw Error('必须配置真实 NAS HTTPS 地址');
@@ -284,6 +285,7 @@ export async function configureNative(o={}){
    if(c.dataVersion?.enabled){c.native.uvcsIdentity=trustedIdentity(manifest.uvcs?.identity,c.dataVersion.repository);c.native.uvcsSourceMetadataHash=manifest.uvcs?.metadataSha256;if(metadataFingerprint(path.join(stage,path.relative(dataRoot,c.dataVersion.workspace)))!==c.native.uvcsSourceMetadataHash)throw Error('UVCS_METADATA_CHANGED');markNativeUvcsPending(c,path.join(stage,'state'));}
    if(o.entry!==undefined&&((o.entry==='tailscale')===Boolean(c.fnos?.enabled)))throw Error('迁移源与目标身份入口不同，拒绝切换');
    if(c.fnos?.enabled&&!c.fnos.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
+   if(o.accessPolicy!==undefined&&c.fnos?.enabled)c.fnos.accessPolicy=o.accessPolicy;
    c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
    validateReferences(stage);
