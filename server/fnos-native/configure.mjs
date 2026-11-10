@@ -185,6 +185,9 @@ async function checkUvcs(c){
  c.dataVersion.cmPath=resolveNativeCmPath(c.dataVersion.cmPath,{allowSymlink:true});
  await nativeCm(c,{timeoutMs:10000}).version();
 }
+const trialBasePrefix='/app/wuchengerptrial';
+const trialGatewayPort=29430;
+
 export async function configureNative(o={}){
  if(!['fresh','migrate','existing'].includes(o.mode))throw Error('必须显式指定 mode fresh、migrate 或 existing 模式');
  if(o.basePrefix!==undefined&&!['/app/wuchengerp','/app/wuchengerptrial'].includes(o.basePrefix))throw Error('原生应用前缀仅允许受控主包或试装前缀');
@@ -198,7 +201,7 @@ export async function configureNative(o={}){
   const tailscale=o.entry==='tailscale';
   if(!o.publicOrigin)throw Error('新建必须配置真实 HTTPS 地址');
   const u=new URL(o.publicOrigin);if(u.protocol!=='https:'||/\.invalid$|\.example\.ts\.net$/.test(u.hostname))throw Error('新建必须配置真实 HTTPS 地址');
-  c=developmentConfig({root:releaseRoot,stateDir:path.join(dataRoot,'state')});
+  c=developmentConfig({root:releaseRoot,stateDir:path.join(dataRoot,'state'),port:o.basePrefix===trialBasePrefix?trialGatewayPort:undefined});
   c.publicOrigin=u.origin;c.mode='production';c.releaseRoot=releaseRoot;c.tcpEnabled=tailscale;
   for(const id of moduleIds)c.modules[id].dataDir=path.join(dataRoot,'data',id);
   const allowedOrigins=Array.isArray(o.allowedOrigins)?[...new Set([...o.allowedOrigins,u.origin])]:o.allowedOrigins;
@@ -217,6 +220,15 @@ export async function configureNative(o={}){
     c=JSON.parse(fs.readFileSync(configFileAt(dataRoot),'utf8'));assertStopped(dataRoot);c=rebaseConfig(c,dataRoot,releaseRoot).config;
     if(o.basePrefix!==undefined&&c.fnos?.enabled&&o.basePrefix!==c.fnos.basePrefix)throw Error('existing 模式不能通过前缀变更既有身份');
     if(o.entry!==undefined&&((o.entry==='tailscale')===Boolean(c.fnos?.enabled)))throw Error('existing 模式不能切换现有身份入口');
+    // Early trial builds inherited the formal module ports. Move only that
+    // exact default layout, while holding both existing lifecycle locks.
+    if(c.fnos?.basePrefix===trialBasePrefix&&c.port===28430&&
+       moduleIds.every((id,index)=>c.modules[id].port===28431+index)&&c.modules.purchase.mobilePort===28434){
+     const trial=developmentConfig({root:releaseRoot,stateDir:c.stateDir,port:trialGatewayPort});
+     c.port=trial.port;
+     for(const id of moduleIds)c.modules[id].port=trial.modules[id].port;
+     c.modules.purchase.mobilePort=trial.modules.purchase.mobilePort;
+    }
     if(o.allowedOrigins)c.fnos.allowedOrigins=o.allowedOrigins;if(o.allowedUids)c.fnos.allowedUids=o.allowedUids;
     if(o.publicOrigin&&c.tcpEnabled===false){
      const u=new URL(o.publicOrigin);

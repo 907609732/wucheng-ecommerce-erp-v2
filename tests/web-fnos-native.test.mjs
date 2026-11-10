@@ -52,8 +52,19 @@ test('fresh creates three real production books, no dev gateway identity, and ex
 test('fresh accepts only the controlled trial prefix and existing cannot change its identity',async t=>{
  const dir=fixture(t),data=path.join(dir,'trial'),trial=loadConfig(await configureNative({...options(data),basePrefix:'/app/wuchengerptrial'}));
  assert.equal(trial.fnos.basePrefix,'/app/wuchengerptrial');
+ assert.deepEqual([trial.modules.purchase.port,trial.modules.purchase.mobilePort,trial.modules.sales.port,trial.modules.overview.port],[29431,29434,29432,29433]);
+ const trialFile=path.join(data,'config','web.json');
+ const legacy=JSON.parse(fs.readFileSync(trialFile,'utf8'));
+ legacy.port-=1000;
+ for(const module of Object.values(legacy.modules)) module.port-=1000;
+ legacy.modules.purchase.mobilePort-=1000;
+ fs.writeFileSync(trialFile,JSON.stringify(legacy));
+
  await assert.rejects(configureNative({...options(path.join(dir,'bad')),basePrefix:'/app/other'}),/前缀/);
  await configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerptrial'});
+ assert.equal(loadConfig(trialFile).modules.purchase.port,29431);
+ assert.equal(loadConfig(trialFile).fnos.instanceId,trial.fnos.instanceId);
+
  await assert.rejects(configureNative({...options(data),mode:'existing',basePrefix:'/app/wuchengerp'}),/前缀|身份/);
 });
 
