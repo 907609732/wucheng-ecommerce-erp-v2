@@ -34,6 +34,11 @@ if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
  mkdir -p /var/apps/wuchengerptrial "$work/clean-trial-fixture" /output/release/clean-trial-evidence
  ln -s "$trial" /var/apps/wuchengerptrial/target
  chown erpbuild:erpbuild "$trial" "$work/clean-trial-fixture" /output/release/clean-trial-evidence
+ trial_cmd=/var/apps/wuchengerptrial/cmd
+ install -d -m755 "$trial_cmd"
+ for hook in install_callback native_env retained_recovery.py; do
+  install -m755 "$work/trial-packed/cmd/$hook" "$trial_cmd/$hook"
+ done
  trial_install="$work/clean-trial-install"
  mkdir -p "$trial_install/volume" "$trial_install/var"
  chown erpbuild:erpbuild "$trial_install/var"
@@ -42,7 +47,7 @@ if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
    TRIM_USERNAME=erpbuild TRIM_APPNAME=wuchengerptrial \
    erp_mode=fresh erp_origin=https://192.168.1.100:5667 \
    erp_origins=http://192.168.1.100:5666,https://192.168.1.100:5667 erp_uids=1000 \
-   wizard_uvcs_install=0 /bin/sh "$work/trial-packed/cmd/install_callback"
+   wizard_uvcs_install=0 /bin/sh "$trial_cmd/install_callback"
  [[ -f "$trial_install/volume/@wuchengerptrial-data/erp/config/web.json" ]]
  [[ ! -e "$trial_install/volume/@wuchengerp-data" ]]
  triallibs="$trial/runtime/sysroot/usr/lib/x86_64-linux-gnu:$trial/runtime/sysroot/lib/x86_64-linux-gnu:$trial/runtime/sysroot/usr/lib:$trial/runtime/sysroot/lib"
