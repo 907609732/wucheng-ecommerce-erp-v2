@@ -35,6 +35,9 @@ test('generated trial stage owns its app, UI, data and safe synthetic-only wizar
  const recovery=fs.readFileSync(path.join(trial,'cmd/retained_recovery.py'),'utf8');
  assert.equal((recovery.match(/'@wuchengerptrial-data'/g)||[]).length,2);assert.doesNotMatch(recovery,/@wuchengerp-data/);
  for(const name of ['install_callback','upgrade_callback']) assert.match(fs.readFileSync(path.join(trial,'cmd',name),'utf8'),/erp_mode:-.*migrate.*fail/);
+ const trialInstall=fs.readFileSync(path.join(trial,'cmd/install_callback'),'utf8');
+ assert.match(trialInstall,/configure_error=\$\(as_package .* configure 2>&1\)/);
+ assert.match(trialInstall,/ERP 初始化失败.*\$detail/);
  const install=JSON.parse(fs.readFileSync(path.join(trial,'wizard/install'),'utf8'));
  const text=JSON.stringify(install);assert.match(text,/新建三个合成账本/);assert.match(text,/沿用本试装自身数据/);
  assert.equal(install.flatMap(page=>page.items||[]).flatMap(item=>item.options||[]).some(option=>option.value==='migrate'),false);

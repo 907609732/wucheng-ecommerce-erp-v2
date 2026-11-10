@@ -23,7 +23,19 @@ export function prepareTrialStage(main, trial) {
   for(const name of ['install_callback','upgrade_callback']) {
     const p=path.join(trial,'cmd',name); text=fs.readFileSync(p,'utf8');
     const marker='. "$SELF/native_env"\n'; if(!text.includes(marker)) throw Error(`Missing ${name} native env marker`);
-    fs.writeFileSync(p,text.replace(marker,marker+"[ \"${erp_mode:-}\" != migrate ] || fail '隔离试装禁止迁移正式或其他实例数据。'\n"));
+    text=text.replace(marker,marker+"[ \"${erp_mode:-}\" != migrate ] || fail '隔离试装禁止迁移正式或其他实例数据。'\n");
+    if(name==='install_callback'){
+      const configure='if ! as_package "$NODE" "$LIFECYCLE" configure;';
+      if(!text.includes(configure)) throw Error('Missing trial install configure marker');
+      text=text.slice(0,text.indexOf(configure))+[
+        'if ! configure_error=$(as_package "$NODE" "$LIFECYCLE" configure 2>&1); then',
+        ' detail=$(printf "%s" "$configure_error" | tail -c 2048 | tr -d "\\000-\\010\\013-\\037\\177")',
+        ' fail "ERP 初始化失败（隔离试装）：$detail"',
+        'fi',
+        '',
+      ].join('\n');
+    }
+    fs.writeFileSync(p,text);
   }
   const recovery=path.join(trial,'cmd/retained_recovery.py'); text=fs.readFileSync(recovery,'utf8');
   const old="'@wuchengerp-data'"; if(text.split(old).length!==3) throw Error('Trial recovery data base source markers mismatch');

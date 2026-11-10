@@ -34,6 +34,17 @@ if [[ ${ERP_BUILD_TRIAL:-0} == 1 ]]; then
  mkdir -p /var/apps/wuchengerptrial "$work/clean-trial-fixture" /output/release/clean-trial-evidence
  ln -s "$trial" /var/apps/wuchengerptrial/target
  chown erpbuild:erpbuild "$trial" "$work/clean-trial-fixture" /output/release/clean-trial-evidence
+ trial_install="$work/clean-trial-install"
+ mkdir -p "$trial_install/volume" "$trial_install/var"
+ chown erpbuild:erpbuild "$trial_install/var"
+ env TRIM_APPDEST=/var/apps/wuchengerptrial/target \
+   TRIM_APPDEST_VOL="$trial_install/volume" TRIM_PKGVAR="$trial_install/var" \
+   TRIM_USERNAME=erpbuild TRIM_APPNAME=wuchengerptrial \
+   erp_mode=fresh erp_origin=https://192.168.1.100:5667 \
+   erp_origins=http://192.168.1.100:5666,https://192.168.1.100:5667 erp_uids=1000 \
+   wizard_uvcs_install=0 /bin/sh "$work/trial-packed/cmd/install_callback"
+ [[ -f "$trial_install/volume/@wuchengerptrial-data/erp/config/web.json" ]]
+ [[ ! -e "$trial_install/volume/@wuchengerp-data" ]]
  triallibs="$trial/runtime/sysroot/usr/lib/x86_64-linux-gnu:$trial/runtime/sysroot/lib/x86_64-linux-gnu:$trial/runtime/sysroot/usr/lib:$trial/runtime/sysroot/lib"
  runuser -u erpbuild -- env ERP_NATIVE_BASE_PREFIX=/app/wuchengerptrial LD_LIBRARY_PATH="$triallibs" "$trial/runtime/node/bin/node" /src/deploy/fnos/smoke-native.mjs --app-root /var/apps/wuchengerptrial/target --data-root "$work/clean-trial-fixture/data" --evidence-dir /output/release/clean-trial-evidence --port-offset 10000
 fi
