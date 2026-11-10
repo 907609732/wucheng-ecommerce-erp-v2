@@ -139,6 +139,63 @@ class Recovery(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(runtime.stat().st_uid, 0, 'never take over a foreign runtime directory')
 
+    def test_thin_upgrade_prepares_root_owned_official_var_and_empty_runtime(self):
+        _, _, package, env = self.install_hook()
+        volume = Path(tempfile.mkdtemp(prefix='fnos-thin-upgrade-', dir='/run'))
+        self.addCleanup(shutil.rmtree, volume)
+        volume.chmod(0o755)
+        var = volume / '@appdata' / 'wuchengerp'
+        var.mkdir(parents=True)
+        var.chmod(0o770)
+        runtime = var / 'runtime'
+        runtime.mkdir(mode=0o700)
+        evidence = var / 'prior-acceptance'
+        evidence.write_text('leave prior evidence alone')
+        before = evidence.stat()
+        logical = self.root / 'official-var'
+        logical.symlink_to(var, target_is_directory=True)
+        env.update(TRIM_APPDEST_VOL=str(volume), TRIM_PKGVAR=str(logical))
+        script = '. "$1"; prepare_runtime'
+        def run():
+            return subprocess.run(
+                ['/bin/sh', '-eu', '-c', script, 'test', str(self.root / 'cmd/native_env')],
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+        result = run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((var.stat().st_uid, var.stat().st_gid, var.stat().st_mode & 0o777), (0, package.pw_gid, 0o710))
+        self.assertEqual((runtime.stat().st_uid, runtime.stat().st_gid, runtime.stat().st_mode & 0o777), (package.pw_uid, package.pw_gid, 0o700))
+        self.assertEqual((evidence.stat().st_uid, evidence.stat().st_gid, evidence.stat().st_mode), (before.st_uid, before.st_gid, before.st_mode))
+        self.assertEqual(evidence.read_text(), 'leave prior evidence alone')
+        self.assertEqual(run().returncode, 0, 'repeating the hook preserves the prepared runtime')
+
+        os.chown(var, 0, 0)
+        var.chmod(0o770)
+        runtime.rmdir()
+        runtime.symlink_to(self.outside)
+        self.assertNotEqual(run().returncode, 0)
+        self.assertTrue(runtime.is_symlink())
+        self.assertEqual(var.stat().st_mode & 0o777, 0o770)
+        runtime.unlink()
+        runtime.mkdir(mode=0o700)
+        previous = runtime / 'keep'
+        previous.write_text('previous runtime file')
+        self.assertNotEqual(run().returncode, 0)
+        self.assertEqual(runtime.stat().st_uid, 0)
+        self.assertEqual(previous.read_text(), 'previous runtime file')
+
+        previous.unlink()
+        for transferred in [False, True]:
+            with self.subTest(transferred=transferred):
+                os.chown(var, 0, 0)
+                var.chmod(0o710)
+                owner = (package.pw_uid, package.pw_gid) if transferred else (0, 0)
+                os.chown(runtime, *owner)
+                result = run()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((var.stat().st_gid, var.stat().st_mode & 0o777), (package.pw_gid, 0o710))
+                self.assertEqual(runtime.stat().st_uid, package.pw_uid)
+
     def test_install_init_refuses_unsafe_retained_then_recovers_without_payload(self):
         run, target, package, env = self.install_hook()
         log = self.root / 'install-error.log'
