@@ -9,13 +9,19 @@ async function setup(t){
  const key=fs.readFileSync(path.join(dir,'.workbench-key'),'utf8').trim();
  const call=async(route,{method='GET',body,actor='boss',role='admin',headers={}}={})=>{const url='/api/integration/v1/agent/'+route,at=Date.now();return fetch('http://127.0.0.1:'+server.address().port+url,{method,headers:{...signWorkbenchActor({v:1,id:actor,login:actor,role,channel:'mcp',modules:['sales'],module:'sales',canRunTasks:true,sessionId:'test-session',requestId:randomUUID(),issuedAt:at,expiresAt:at+60000,method,path:url},key),'Content-Type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});};
  const prepare=async(capabilityId,input,options={})=>{const binding=await(await call('binding',options)).json(),response=await call('prepare',{...options,method:'POST',body:{taskId:'task-sales',capabilityId,input}});assert.equal(response.status,200,await response.clone().text());return {binding,capabilityId,input,...await response.json()};};
- const proof=(p,k,extra={})=>signAgentApproval({v:1,approvalId:'review-sales',actorId:'boss',module:'sales',capabilityId:p.capabilityId,taskId:'task-sales',resultId:'result-sales',resultVersion:1,...p.binding,changeDigest:agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes}),idempotencyKey:k,issuedAt:Date.now(),expiresAt:Date.now()+60000,...extra},key);
+ const proof=(p,k,extra={})=>{const issuedAt=Date.now();return signAgentApproval({v:1,approvalId:'review-sales',actorId:'boss',module:'sales',capabilityId:p.capabilityId,taskId:'task-sales',resultId:'result-sales',resultVersion:1,...p.binding,changeDigest:agentDigest({capabilityId:p.capabilityId,input:p.input,commitData:p.commitData,changes:p.changes}),idempotencyKey:k,issuedAt,expiresAt:issuedAt+60000,...extra},key)};
  const commit=(p,k,options={})=>call('commit',{method:'POST',body:{prepared:p},...options,headers:{'Idempotency-Key':k,...approvalHeaders(proof(p,k)),...options.headers}});
  const restart=async()=>{await new Promise(r=>server.close(r));app.store.close();app=createApp({dataDir:dir,port:0,demo:true});server=await listenForFetch(app.app);};
  t.after(async()=>{await new Promise(r=>server.close(r));app.store.close();assert.ok(dir.startsWith(path.join(os.tmpdir(),'sales-agent-http-')));fs.rmSync(dir,{recursive:true,force:true});});
  return {dir,key,call,prepare,proof,commit,restart,get app(){return app;},get base(){return 'http://127.0.0.1:'+server.address().port;}};
 }
 const freight={channel:'warehouse',entry_mode:'month',period:'2026-06',shipping:'1051.20',materials:'25.01',other:'-232.32',other_note:'服务费扣除已确认赔付',bill_no:'CAINIAO-BIZ-2026-06'};
+
+test('approval fixture keeps its lifetime at 60000 ms across a clock tick',async t=>{
+ const f=await setup(t),prepared={capabilityId:'sales.freight-create',input:{},binding:{dataSetId:'test-data',revision:0}};
+ let now=Date.now();const clock=t.mock.method(Date,'now',()=>now++);
+ try{const signed=f.proof(prepared,'clock-tick'),claims=JSON.parse(Buffer.from(signed.payload,'base64url').toString('utf8'));assert.equal(claims.expiresAt-claims.issuedAt,60000);}finally{clock.mock.restore();}
+});
 
 test('central review books real compensated freight exactly once, persists receipt and rejects unsigned/forged/crossactor/stale writes',async t=>{
  const f=await setup(t);
