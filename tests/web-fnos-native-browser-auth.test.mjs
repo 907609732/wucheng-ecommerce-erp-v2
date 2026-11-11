@@ -11,11 +11,11 @@ import {WebSocket,WebSocketServer} from 'ws';
 import {createWorkbenchGateway} from '../server/gateway/gateway.mjs';
 const api='/api/workbench/v1',prefix='/app/wuchengerp';
 const tail={host:'erp.example.test','tailscale-user-login':'a@example.test'},fn={host:'nas.example.test','x-trim-userid':'1000','x-trim-username':'person'};
-async function setup(t,{enabled=true,tcpEnabled=true,novncHtml='UPSTREAM noVNC'}={}){
+async function setup(t,{enabled=true,tcpEnabled=true,novncHtml='UPSTREAM noVNC',requireUpstreamOrigin=true}={}){
  const {registerNativeBrowserRoutes}=await import('../server/fnos-native/browser-routes.mjs');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-auth-'));fs.chmodSync(dir,0o700);
  const root=path.join(dir,'novnc');fs.mkdirSync(root);fs.writeFileSync(path.join(root,'vnc.html'),novncHtml);fs.mkdirSync(path.join(root,'core'));fs.writeFileSync(path.join(root,'core/rfb.js'),'upstream module');
- const seen=[],upstreams=[];for(const id of ['sales','overview']){const server=http.createServer(),wss=new WebSocketServer({server});wss.on('connection',(ws,req)=>{ws.on('error',()=>{});seen.push({id,url:req.url,headers:req.headers});ws.on('message',(data,binary)=>ws.send(data,{binary}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));upstreams.push({server,wss});}
+ const seen=[],upstreams=[];for(const id of ['sales','overview']){const server=http.createServer(),wss=new WebSocketServer({server,verifyClient:info=>!requireUpstreamOrigin||info.origin==='http://127.0.0.1:'+server.address().port});wss.on('connection',(ws,req)=>{ws.on('error',()=>{});seen.push({id,url:req.url,headers:req.headers});ws.on('message',(data,binary)=>ws.send(data,{binary}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));upstreams.push({server,wss});}
  const config={native:{dataRoot:dir,browser:{enabled,novncRoot:root,instances:{sales:{cdpPort:20222,vncPort:upstreams[0].server.address().port,display:222},overview:{cdpPort:20223,vncPort:upstreams[1].server.address().port,display:223}}}}};
  const gateway=await createWorkbenchGateway({services:{config:()=>({}),capabilities:async()=>null},storeDir:path.join(dir,'gateway'),publicOrigin:'https://erp.example.test',port:0,tcpEnabled,nativeBrowserEnabled:enabled,fnos:{enabled:true,instanceId:'auth',socketPath:path.join(dir,'app.sock'),basePrefix:prefix,allowedOrigins:['https://nas.example.test'],allowedUids:['1000']},registerRoutes:async(app,context)=>registerNativeBrowserRoutes(app,context,config)});
  await gateway.start();
@@ -31,6 +31,19 @@ function wsConnect(port,headers,url=api+'/native-browser/sales/websockify',socke
  ws.on('unexpected-response',(_req,res)=>{clearTimeout(timer);res.resume();resolve({status:res.statusCode});});ws.on('error',error=>{clearTimeout(timer);reject(Object.assign(error,{message:error.message+' '+url+' '+JSON.stringify(headers)}));});
  ws.on('open',()=>{ws.send(Buffer.from([0,1,2,255]));});ws.on('message',(data,binary)=>{clearTimeout(timer);ws.close();resolve({status:101,data:Buffer.from(data),binary});});
 });}
+test('VNC proxy supplies its fixed loopback Origin without forwarding browser credentials',async t=>{
+ const {port,seen}=await setup(t,{requireUpstreamOrigin:true}),s=await get(port,tail),auth={...tail,cookie:s.cookie,origin:'https://erp.example.test',authorization:'Bearer must-not-reach-vnc','x-client-private':'must-not-reach-vnc'};
+ for(const id of ['sales','overview']){
+  const r=await wsConnect(port,auth,api+'/native-browser/'+id+'/websockify');
+  assert.equal(r.status,101);assert.deepEqual(r.data,Buffer.from([0,1,2,255]));assert.equal(r.binary,true);
+ }
+ assert.equal(seen.length,2);
+ for(const request of seen){
+  assert.equal(request.headers.origin,'http://'+request.headers.host);
+  assert.equal(request.headers['sec-websocket-protocol'],'binary');
+  for(const name of ['cookie','authorization','tailscale-user-login','x-trim-userid','x-trim-username','x-client-private'])assert.equal(request.headers[name],undefined,name+' must remain at the gateway');
+ }
+});
 test('real TCP upgrade requires bound session, single Origin and fixed registered path',async t=>{
  const {port,seen}=await setup(t),s=await get(port,tail),auth={...tail,cookie:s.cookie,origin:'https://erp.example.test'};
  assert.equal((await wsConnect(port,{...tail,origin:auth.origin})).status,401);

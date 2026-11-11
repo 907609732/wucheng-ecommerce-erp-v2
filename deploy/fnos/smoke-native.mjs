@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
@@ -27,6 +28,7 @@ const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelc
 // The pinned core entry is CommonJS with computed exports; use its public CJS
 // API rather than assuming Node synthesizes named ESM exports for it.
 const {chromium}=require('playwright-core');
+const WebSocket=createRequire(path.join(release,'package.json'))('ws');
 const report={ok:false,cleanupComplete:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,successfulStarts:0,checks:[],ports:{sales:19222+offset,overview:19223+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/download'){res.writeHead(200,{'content-type':'text/plain','content-disposition':'attachment; filename="native-acceptance.txt"'});res.end('native FPK download acceptance\n');return;}
@@ -91,6 +93,19 @@ async function connect(port){
  }catch(error){await c.close().catch(()=>{});await tr.close().catch(()=>{});throw error;}
  finally{if(pendingClient===c)pendingClient=null;if(pendingTransport===tr)pendingTransport=null;}
 }
+async function verifyNativeVncTunnel(c){
+ const origin=new URL(c.publicOrigin).origin,prefix=c.fnos.basePrefix;
+ const headers={host:new URL(origin).host,'x-trim-userid':c.fnos.allowedUids[0],'x-trim-username':'synthetic-native-acceptance'};
+ const cookie=await new Promise((resolve,reject)=>{http.get({socketPath:c.fnos.socketPath,path:prefix+'/api/workbench/v1/session',headers,signal:AbortSignal.timeout(10000)},res=>{res.resume();res.once('end',()=>{try{assert.equal(res.statusCode,200);const value=res.headers['set-cookie']?.map(v=>v.split(';')[0]).join('; ');assert(value,'Synthetic fnOS session cookie missing');resolve(value);}catch(e){reject(e);}});}).on('error',reject);});
+ for(const id of ['sales','overview'])await new Promise((resolve,reject)=>{
+  const ws=new WebSocket('ws://127.0.0.1'+prefix+'/api/workbench/v1/native-browser/'+id+'/websockify',['binary'],{createConnection:()=>net.createConnection(c.fnos.socketPath),headers:{...headers,origin,cookie}});
+  let finished=false;const timer=setTimeout(()=>finish(Error(id+' authenticated VNC tunnel timed out')),10000);
+  function finish(error){if(finished)return;finished=true;clearTimeout(timer);ws.terminate();error?reject(error):resolve();}
+  ws.once('message',(bytes,binary)=>{try{assert.equal(binary,true);assert.match(bytes.toString(),/^RFB 003\.\d{3}\n$/);finish();}catch(e){finish(e);}});
+  ws.once('error',finish);ws.once('close',(code)=>finish(Error(id+' authenticated VNC tunnel closed before RFB greeting: '+code)));
+ });
+ report.checks.push('both real x11vnc RFB greetings through authenticated fnOS Unix gateway and maintained WebSocket proxy');
+}
 async function tool(name,arguments_={}){
  checkCancellation();
  const r=await client.callTool({name,arguments:arguments_});const text=r.content?.filter(x=>x.type==='text').map(x=>x.text).join('\n')||'';
@@ -152,6 +167,7 @@ try{
  const identity={serverId:first.serverId,dataSetId:first.dataSetId};
  if(diagnostic){assert.equal((await fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health')).status,200);report.checks.push('synthetic loopback-only TCP / fnOS disabled / UVCS disabled');}
  else{assert.equal((fs.statSync(path.join(app,'app.sock')).mode&0o777),0o600);await assert.rejects(fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health',{signal:AbortSignal.timeout(1000)}));report.checks.push('Unix-only gateway / no TCP gateway');}
+ if(!diagnostic)await verifyNativeVncTunnel(c);
  ({client,transport}=await connect(19222+offset));
  await checkpoint('after-first-start');
  await tool('browser_navigate',{url:'chrome://sandbox/'});

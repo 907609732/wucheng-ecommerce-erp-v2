@@ -34,7 +34,9 @@ export async function registerNativeBrowserRoutes(app,context,config){
     if(request.raw.url!==prefix+'/websockify')throw fail(400,'BROWSER_TARGET_DENIED','浏览器只允许固定连接目标');
     if(request.headers.upgrade?.toLowerCase()!=='websocket')throw fail(426,'WEBSOCKET_REQUIRED','此地址仅接受浏览器 WebSocket');
    },
-   wsClientOptions:{rewriteRequestHeaders:()=>({})},replyOptions:{rewriteRequestHeaders:()=>({})}
+   // LibVNCServer requires an Origin even on the authenticated loopback hop.
+   // Supply only the fixed upstream origin; never forward client credentials.
+   wsClientOptions:{origin:spec.vncEndpoint,rewriteRequestHeaders:()=>({})},replyOptions:{rewriteRequestHeaders:()=>({})}
   });
  }
 }
