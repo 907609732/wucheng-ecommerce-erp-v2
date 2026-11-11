@@ -1,11 +1,11 @@
-# Native 0.15.0 third-party delivery
+# Native third-party delivery
 
-The FPK and its `wuchengerp-0.15.0-corresponding-source.tar.zst` companion form
+The FPK and its matching `wuchengerp-<version>-corresponding-source.tar.zst` companion form
 one distribution. Keep the matching source companion, `SOURCE-SHA256SUMS.txt`,
 `THIRD-PARTY.json`, and `SHA256SUMS.txt` available to recipients whenever the FPK
 is redistributed. Workflow artifacts expire after 14 days; archive both before
-expiry. A future public release must publish both. This task creates private
-workflow artifacts, not a public release or a written source offer.
+expiry. Every public release must publish both; private workflow artifacts
+alone are not a long-term source distribution or a written source offer.
 
 `THIRD-PARTY.json` records every shipped Debian binary package and exact source
 version plus npm versions/licenses. Debian copyright files and common GPL/LGPL

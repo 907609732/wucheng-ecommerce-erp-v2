@@ -1,4 +1,6 @@
-# 五成 ERP 完整原生 FPK 0.15.0
+# 五成 ERP 完整原生 FPK
+
+当前部署、访问范围与更新步骤见 [运行维护](../../docs/operations.md)。实际软件版本、源码提交和构建号以同次产物的 `BUILD-INFO.txt` 为准。
 
 构建目标是 Debian 12 / glibc 2.36 / x86_64 的飞牛 Native 应用。包内包含 Node 24.22.2、Linux 生产依赖、采购/销售/经营总览、Debian Chromium、Xvfb、x11vnc、XKB、中文字体及 noVNC 1.6.0；部署不使用 Docker。官方 fnpack 1.2.3 生成 FPK。实机安装、正式迁移与公网入口需要单独验收，CI 成功不代表这些已经完成。
 
@@ -42,7 +44,7 @@ Chromium 156 的 GPU pre-sandbox hook 会直接预加载硬件 Vulkan 库，绕�
 - 生命周期只在短暂准备阶段使用 root，Node/collector/两套浏览器全部使用专用 package 用户。长服务由已有 supervisor 管理，启停核对 generation、真实命令和账本身份；失败明确暴露。
 - 运行目录使用飞牛提供的 `TRIM_PKGVAR`，先解析平台路径，再以 package 用户创建私有 `runtime` 子目录。日志、派生模块注册表和浏览器临时文件写入此处；账本、HOME、持久浏览器 profile、身份、密码、审计及权威控制/归属锁继续保存在 DATA。迁移不通过批量 chmod 旧业务文件解决日志写入问题。目录规范见[飞牛应用目录结构](https://developer.fnnas.com/docs/core-concepts/framework/)。
 
-完成隔离诊断后，正式切换仍须依次验证账本摘要、两种入口的相同 serverId/dataSetId、权限/匿名拒绝、真实浏览器登录、UVCS、停止原 ERP 容器后的原生重启，以及 NAS 重启。保留旧 Docker 停机配置和原备份用于回退，不修改其他业务。
+首次从 Docker 切换时，须依次验证账本摘要、两种入口的相同 serverId/dataSetId、权限/匿名拒绝、真实浏览器登录、UVCS，以及停掉旧 ERP 后的原生重启；NAS 整机重启另行安排，不能以应用启停代替。当前正式部署与已退役资源以运行维护文档为准，已清理的旧 Docker ERP 不再作为回退服务。保留原备份和已验证的原生回退包，不修改其他业务。
 
 ## 独立诊断包
 
