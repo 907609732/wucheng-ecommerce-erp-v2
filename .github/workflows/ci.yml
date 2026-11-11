@@ -4,12 +4,27 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      promote_run_id:
+        description: Existing successful native build to archive into an existing private release draft
+        type: string
+        required: true
+      promote_sha:
+        description: Exact commit of that build
+        type: string
+        required: true
+      promote_tag:
+        description: Existing private release draft tag
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -50,3 +65,72 @@ jobs:
           node --test --test-concurrency=2 $tests
           if ($LASTEXITCODE -ne 0) { throw 'Overview business tests failed' }
       - run: npm audit --omit=dev --audit-level=high
+  promote-native-draft:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: native-draft-${{ inputs.promote_tag }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_ID: ${{ inputs.promote_run_id }}
+      BUILD_SHA: ${{ inputs.promote_sha }}
+      RELEASE_TAG: ${{ inputs.promote_tag }}
+    steps:
+      - name: Require a successful build and matching existing private draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $BUILD_ID =~ ^[0-9]+$ && $BUILD_SHA =~ ^[a-f0-9]{40}$ && $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_ID" > "$RUNNER_TEMP/native-build.json"
+          jq -e --arg sha "$BUILD_SHA" --arg repo "$GH_REPO" '.head_sha == $sha and .head_repository.full_name == $repo and .status == "completed" and .conclusion == "success" and .path == ".github/workflows/fnos-native.yml"' "$RUNNER_TEMP/native-build.json"
+          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > "$RUNNER_TEMP/native-draft.json"
+          jq -e --arg sha "$BUILD_SHA" '.isDraft == true and .targetCommitish == $sha' "$RUNNER_TEMP/native-draft.json"
+      - uses: actions/download-artifact@v4
+        with:
+          name: fnos-native-${{ inputs.promote_sha }}-${{ inputs.promote_run_id }}
+          run-id: ${{ inputs.promote_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/draft-native
+      - uses: actions/download-artifact@v4
+        with:
+          name: fnos-corresponding-source-${{ inputs.promote_sha }}-${{ inputs.promote_run_id }}
+          run-id: ${{ inputs.promote_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/draft-source
+      - name: Verify and upload only the formal FPK and its matching source delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          native="$RUNNER_TEMP/draft-native/release"
+          companion="wuchengerp-${RELEASE_TAG#v}-corresponding-source.tar.zst"
+          for field in "version=${RELEASE_TAG#v}" "commit=$BUILD_SHA" "run_id=$BUILD_ID"; do grep -Fx "$field" "$native/BUILD-INFO.txt"; done
+          jq -e --arg sha "$BUILD_SHA" --arg version "${RELEASE_TAG#v}" --arg source "$companion" '.commit == $sha and .version == $version and .sourceCompanion == $source' "$native/THIRD-PARTY.json"
+          delivery="$RUNNER_TEMP/draft-delivery"
+          mkdir "$delivery"
+          cp "$native/wuchengerp.fpk" "$native/SOURCE-SHA256SUMS.txt" "$native/THIRD-PARTY.json" "$delivery/"
+          cp "$RUNNER_TEMP/draft-source/release/$companion" "$delivery/"
+          awk -v source="$companion" '$2 == "wuchengerp.fpk" || $2 == source' "$native/SHA256SUMS.txt" > "$delivery/SHA256SUMS.txt"
+          [[ $(wc -l < "$delivery/SHA256SUMS.txt") -eq 2 ]]
+          cd "$delivery"
+          sha256sum --check --strict SHA256SUMS.txt
+          zstd --test "$companion"
+          for file in wuchengerp.fpk "$companion" SHA256SUMS.txt SOURCE-SHA256SUMS.txt THIRD-PARTY.json; do
+            expected="sha256:$(sha256sum "$file" | cut -d ' ' -f1)"
+            bytes=$(stat -c %s "$file")
+            gh release view "$RELEASE_TAG" --json isDraft,targetCommitish,assets > "$RUNNER_TEMP/native-draft-assets.json"
+            jq -e --arg sha "$BUILD_SHA" '.isDraft == true and .targetCommitish == $sha' "$RUNNER_TEMP/native-draft-assets.json"
+            if jq -e --arg name "$file" '.assets[] | select(.name == $name)' "$RUNNER_TEMP/native-draft-assets.json" > /dev/null; then
+              jq -e --arg name "$file" --arg digest "$expected" --argjson bytes "$bytes" '.assets[] | select(.name == $name) | .state == "uploaded" and .digest == $digest and .size == $bytes' "$RUNNER_TEMP/native-draft-assets.json"
+            else
+              gh release upload "$RELEASE_TAG" "$file"
+            fi
+            gh release view "$RELEASE_TAG" --json assets --jq '.assets' > "$RUNNER_TEMP/native-draft-assets-after.json"
+            jq -e --arg name "$file" --arg digest "$expected" --argjson bytes "$bytes" '.[] | select(.name == $name) | .state == "uploaded" and .digest == $digest and .size == $bytes' "$RUNNER_TEMP/native-draft-assets-after.json"
+          done
+          echo 'Verified five matching assets in the private draft; no publication performed.' >> "$GITHUB_STEP_SUMMARY"
