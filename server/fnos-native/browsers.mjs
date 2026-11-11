@@ -3,7 +3,6 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn} from 'node:child_process';
 import {randomBytes,randomUUID} from 'node:crypto';
-import {createRequire} from 'node:module';
 import WebSocket from 'ws';
 import {ensureNativeRuntimeDirectory} from '../config.mjs';
 
@@ -33,20 +32,21 @@ async function available(port){
 function validBrowserSocket(value,port){
  try{const u=new URL(value);return u.protocol==='ws:'&&u.hostname==='127.0.0.1'&&Number(u.port)===port&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/devtools\/browser\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(u.pathname);}catch{return false;}
 }
-export async function closeNativeBrowser(config,spec,{connect,timeoutMs=2000}={}){
+export async function closeNativeBrowser(config,spec,{timeoutMs=10000}={}){
  if(!validBrowserSocket(spec.browserWebSocketUrl,spec.cdpPort))throw Error('缺少本代 Chromium 唯一调试地址，拒绝按端口重新发现');
- if(!connect){const require=createRequire(path.join(config.modules.sales.root,'package.json'));connect=(url,options)=>require('playwright-core').chromium.connectOverCDP(url,options);}
- // The stored UUID URL cannot attach to another Chromium which later reuses
- // this TCP port. Keep upstream defaults untouched and use its public CDP API.
- const browser=await connect(spec.browserWebSocketUrl,{noDefaults:true,timeout:Math.min(timeoutMs,1500)});let timer;
- try{await Promise.race([(async()=>{const session=await browser.newBrowserCDPSession();await session.send('Browser.close');})(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Chromium graceful close timeout')),timeoutMs);})]);}
- finally{
-  clearTimeout(timer);let disconnectTimer;
-  // Start the official disconnect immediately, but its WebSocket close handshake
-  // must not postpone the caller's identity-checked process cleanup. Any pending
-  // transport is tied to this old socket and ends when that owned Chrome exits.
-  try{await Promise.race([browser.close().catch(()=>{}),new Promise(resolve=>{disconnectTimer=setTimeout(resolve,100);})]);}finally{clearTimeout(disconnectTimer);}
- }
+ if(!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>10000)throw Error('Chromium 关闭等待时间必须有界');
+ // Browser.close is a browser-level CDP command. Attaching Playwright first
+ // initializes every page and can stall before sending it on a loaded NAS.
+ // Use the existing ws transport and saved generation UUID; never rediscover
+ // by port or follow a redirect to an unrelated browser.
+ await new Promise((resolve,reject)=>{
+  const socket=new WebSocket(spec.browserWebSocketUrl,{handshakeTimeout:timeoutMs,maxPayload:65536,followRedirects:false,perMessageDeflate:false});let settled=false;
+  const timer=setTimeout(()=>finish(Error('Chromium graceful close timeout')),timeoutMs);
+  function finish(error){if(settled)return;settled=true;clearTimeout(timer);socket.terminate();error?reject(error):resolve();}
+  socket.once('open',()=>socket.send(JSON.stringify({id:1,method:'Browser.close'}),error=>{if(error)finish(error);}));
+  socket.on('message',data=>{let response;try{response=JSON.parse(data.toString());if(!response||typeof response!=='object'||Array.isArray(response))throw Error();}catch{finish(Error('Chromium 关闭响应无效'));return;}if(response.id===1)finish(response.error||!response.result||typeof response.result!=='object'||Array.isArray(response.result)?Error('Chromium graceful close rejected'):undefined);});
+  socket.once('error',finish);socket.once('close',()=>finish(Error('Chromium closed before close acknowledgement')));
+ });
 }
 export async function probeNativeBrowserReady(kind,spec){
  try{

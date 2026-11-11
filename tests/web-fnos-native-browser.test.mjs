@@ -15,12 +15,46 @@ test('CDP readiness saves the unique loopback browser URL and refuses a differen
  endpoint=endpoint.replace(':'+spec.cdpPort+'/',':1/');assert.equal(await probeNativeBrowserReady('cdp',{...spec}),false);
 });
 
-test('graceful close uses the saved unique browser socket and disconnects on bounded command failure',async()=>{
- const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs');const endpoint='ws://127.0.0.1:19222/devtools/browser/01234567-89ab-cdef-0123-456789abcdef';let connected,command,closed=0;
- const connect=async (url,options)=>{connected=url;assert.equal(options.noDefaults,true);return {newBrowserCDPSession:async()=>({send:async name=>{command=name;}}),close:async()=>{closed++;}};};
- await closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{connect});assert.equal(connected,endpoint);assert.equal(command,'Browser.close');assert.equal(closed,1);
- await assert.rejects(closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{timeoutMs:20,connect:async()=>({newBrowserCDPSession:async()=>({send:()=>new Promise(()=>{})}),close:async()=>{closed++;}})}),/timeout|超时/);assert.equal(closed,2);
- const completed=await Promise.race([closeNativeBrowser({}, {cdpPort:19222,browserWebSocketUrl:endpoint},{connect:async()=>({newBrowserCDPSession:async()=>({send:async()=>{}}),close:()=>new Promise(()=>{})})}).then(()=>true),new Promise(r=>setTimeout(()=>r(false),300))]);assert.equal(completed,true,'disconnect handshake must not block owned-process cleanup');
+async function closeEndpoint(t,respond){
+ const server=new WebSocketServer({host:'127.0.0.1',port:0}),requests=[],commands=[];
+ await new Promise(r=>server.once('listening',r));
+ t.after(()=>{for(const client of server.clients)client.terminate();return new Promise(r=>server.close(r));});
+ server.on('connection',(socket,request)=>{requests.push(request.url);socket.on('message',data=>{const message=JSON.parse(data);commands.push(message);if(message.method!=='Browser.close')socket.send(JSON.stringify({id:message.id,error:{code:-32601,message:'Only Browser.close is supported; page initialization must be skipped'}}));else respond(socket,message);});});
+ const cdpPort=server.address().port,browserWebSocketUrl='ws://127.0.0.1:'+cdpPort+'/devtools/browser/01234567-89ab-cdef-0123-456789abcdef';
+ return {spec:{cdpPort,browserWebSocketUrl},requests,commands,config:{modules:{sales:{root:path.resolve(import.meta.dirname,'../apps/sales')}}}};
+}
+test('graceful close sends only Browser.close to the saved socket without initializing stalled pages',async t=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs');
+ const f=await closeEndpoint(t,(s,m)=>s.send(JSON.stringify({id:m.id,result:{}})));
+ await closeNativeBrowser(f.config,f.spec);
+ assert.deepEqual(f.commands,[{id:1,method:'Browser.close'}]);assert.deepEqual(f.requests,['/devtools/browser/01234567-89ab-cdef-0123-456789abcdef']);
+});
+test('graceful close allows a loaded browser longer than the former 1.5 second attach cap',async t=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs');
+ const f=await closeEndpoint(t,(s,m)=>{const timer=setTimeout(()=>s.send(JSON.stringify({id:m.id,result:{}})),1800);t.after(()=>clearTimeout(timer));});
+ await closeNativeBrowser(f.config,f.spec);assert.equal(f.commands.length,1);
+});
+test('graceful close refuses foreign endpoints and bounds a silent browser response',async t=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs'),f=await closeEndpoint(t,()=>{});
+ for(const browserWebSocketUrl of [f.spec.browserWebSocketUrl.replace('127.0.0.1','example.com'),f.spec.browserWebSocketUrl.replace(':'+f.spec.cdpPort+'/',':1/'),f.spec.browserWebSocketUrl+'?other=1'])await assert.rejects(closeNativeBrowser(f.config,{...f.spec,browserWebSocketUrl}),/唯一调试地址/);
+ assert.equal(f.requests.length,0);await assert.rejects(closeNativeBrowser(f.config,f.spec,{timeoutMs:40}),/timeout|超时/);
+ const unrelated=await closeEndpoint(t,s=>s.send(JSON.stringify({id:2,result:{}})));await assert.rejects(closeNativeBrowser(unrelated.config,unrelated.spec,{timeoutMs:40}),/timeout|超时/);
+});
+test('graceful close reports rejected commands and disconnected sockets instead of success',async t=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs');
+ const rejected=await closeEndpoint(t,(s,m)=>s.send(JSON.stringify({id:m.id,error:{message:'fixture refused'}})));
+ await assert.rejects(closeNativeBrowser(rejected.config,rejected.spec),/rejected|拒绝/);
+ const disconnected=await closeEndpoint(t,s=>s.terminate());await assert.rejects(closeNativeBrowser(disconnected.config,disconnected.spec),/closed|关闭/);
+ for(const body of ['null','[]']){const malformed=await closeEndpoint(t,s=>s.send(body));await assert.rejects(closeNativeBrowser(malformed.config,malformed.spec),/响应无效/);}
+});
+test('graceful close bounds a stalled handshake and never follows an HTTP redirect',async t=>{
+ const {closeNativeBrowser}=await import('../server/fnos-native/browsers.mjs'),target=await closeEndpoint(t,()=>{}),sockets=new Set();let redirect=false;
+ const server=http.createServer();server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
+ server.on('upgrade',(_request,socket)=>{if(redirect)socket.end('HTTP/1.1 302 Found\r\nLocation: '+target.spec.browserWebSocketUrl+'\r\nConnection: close\r\n\r\n');});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{for(const socket of sockets)socket.destroy();return new Promise(r=>server.close(r));});
+ const cdpPort=server.address().port,spec={cdpPort,browserWebSocketUrl:target.spec.browserWebSocketUrl.replace(':'+target.spec.cdpPort+'/',':'+cdpPort+'/')};
+ await assert.rejects(closeNativeBrowser({},spec,{timeoutMs:40}),/timeout|超时|timed out/);redirect=true;
+ await assert.rejects(closeNativeBrowser({},spec),/302/);assert.equal(target.requests.length,0);
 });
 
 test('native VNC readiness sends the Origin required by LibVNCServer',async t=>{
@@ -92,7 +126,7 @@ test('native stop closes owned Chromium before terminating its storage children 
  const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const config=fixture(t),p=processes(),events=[];
  const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true,gracefulClose:async spec=>{
   assert(p.calls.filter(c=>path.basename(c.file)==='Xvfb').every(c=>c.child.signalCode===null),'keep X displays alive while browsers flush');
-  events.push('close:'+spec.id);const c=p.calls.find(c=>c.args.includes('--remote-debugging-port='+spec.cdpPort));c.child.exitCode=0;c.child.emit('exit',0);
+  events.push('close:'+spec.id);const c=p.calls.find(c=>c.args.includes('--remote-debugging-port='+spec.cdpPort));setTimeout(()=>{assert(p.calls.filter(c=>path.basename(c.file)==='Xvfb').every(c=>c.child.signalCode===null),'a close ACK is not process exit; keep X alive until storage flush finishes');c.child.exitCode=0;c.child.emit('exit',0);},40);
  }});t.after(()=>manager.stop());await manager.start();
  for(const c of p.calls){const kill=c.child.kill;c.child.kill=signal=>{events.push('kill:'+path.basename(c.file));return kill(signal);};}
  await manager.stop();assert.deepEqual(events.slice(0,2).sort(),['close:overview','close:sales']);assert.equal(manager.status().ready,false);assert(p.calls.every(c=>c.child.exitCode!==null||c.child.signalCode!==null));
