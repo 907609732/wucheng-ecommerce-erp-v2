@@ -8,9 +8,10 @@ import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
 const curl=promisify(execFile);
 const sha=b=>createHash('sha256').update(b).digest('hex');
-// Exact GitHub release inputs of the pinned sharp-libvips v1.3.4 recipe.
-// Fixed SHA/size verified against official asset metadata and source bytes.
+// Exact upstream source inputs of the pinned sharp-libvips v1.3.4 recipe.
+// Fixed SHA/size verified against official metadata and prior verified source bytes.
 export const sharpReleaseSources=Object.freeze([
+ Object.freeze({"url":"https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz","mirrorURL":"https://download-cache.osgeo.org/libtiff/tiff-4.7.2.tar.gz","sha256":"672bd7d10aee4606171afb864f3570b83340f6a33e2c186dc0512f7145ffdf6a","bytes":4083368}),
  Object.freeze({"url":"https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz","assetURL":"https://api.github.com/repos/libffi/libffi/releases/assets/506805115","sha256":"7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4","bytes":1581626}),
  Object.freeze({"url":"https://github.com/libexif/libexif/releases/download/v0.6.26/libexif-0.6.26.tar.xz","assetURL":"https://api.github.com/repos/libexif/libexif/releases/assets/396064271","sha256":"4a055ed6575e61ca46c3172be3c753cc16c9becd0f99ec71d58dd0e471476c0c","bytes":1335488}),
  Object.freeze({"url":"https://github.com/mm2/Little-CMS/releases/download/lcms2.19.1/lcms2-2.19.1.tar.gz","assetURL":"https://api.github.com/repos/mm2/Little-CMS/releases/assets/413352057","sha256":"bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8","bytes":5728743}),
@@ -23,7 +24,7 @@ export const sharpReleaseSources=Object.freeze([
 export async function downloadSharpSource({dest,records,runCurl=curl},url,name,expected,expectedBytes){
  const pinned=sharpReleaseSources.find(source=>source.url===url);
  if(/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\//.test(url)&&!pinned)throw Error('Unreviewed GitHub release source '+url);
- const file=path.join(dest,name),partial=file+'.partial',cached=fs.existsSync(file);let bytes,usedURL=pinned?.assetURL||url;
+ const file=path.join(dest,name),partial=file+'.partial',cached=fs.existsSync(file);let bytes,usedURL=pinned?.assetURL||pinned?.mirrorURL||url;
  try{
  if(cached)bytes=fs.readFileSync(file);
  else{
@@ -33,7 +34,7 @@ export async function downloadSharpSource({dest,records,runCurl=curl},url,name,e
   try{
    try{await transfer(usedURL);}catch(error){
     if(!pinned)throw error;
-    // Only this pinned asset may fall back to its exact original release URL.
+    // Only this pinned source may fall back to its exact original URL.
     // Never mix a failed transfer's partial bytes into the fallback response.
     fs.rmSync(partial,{force:true});usedURL=url;await transfer(usedURL);
    }

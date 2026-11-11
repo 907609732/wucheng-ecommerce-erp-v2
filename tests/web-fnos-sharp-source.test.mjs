@@ -64,6 +64,21 @@ const additionalAssets=[
  ['https://github.com/fribidi/fribidi/releases/download/v1.0.17/fribidi-1.0.17.tar.xz','https://api.github.com/repos/fribidi/fribidi/releases/assets/576224505'],
  ['https://github.com/libvips/libvips/releases/download/v8.18.7/vips-8.18.7.tar.xz','https://api.github.com/repos/libvips/libvips/releases/assets/590538998'],
 ];
+const tiffSource='https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz';
+const tiffMirror='https://download-cache.osgeo.org/libtiff/tiff-4.7.2.tar.gz';
+test('libtiff uses the official OSGeo cache without GitHub headers',async t=>{
+ const f=fixture(t,async(url,file,args)=>{
+  assert.equal(url,tiffMirror);assert(!args.includes('Accept: application/octet-stream'));fs.writeFileSync(file,bytes);
+ });
+ await f.run(tiffSource);assert.equal(f.calls.length,1);assert.equal(f.records[0].url,tiffMirror);assert.equal(f.records[0].sourceURL,tiffSource);
+});
+test('libtiff cache failure removes partial bytes before the canonical fallback',async t=>{
+ const f=fixture(t,async(url,file)=>{
+  if(url===tiffMirror){fs.writeFileSync(file,'partial');throw Error('Timeout');}
+  assert.equal(url,tiffSource);assert(!fs.existsSync(file));fs.writeFileSync(file,bytes);
+ });
+ await f.run(tiffSource);assert.equal(f.calls.length,2);assert.equal(f.records[0].url,tiffSource);
+});
 for(const [original,api] of additionalAssets)test('fixed recipe asset preferred: '+new URL(original).pathname.split('/').at(-1),async t=>{
  const f=fixture(t,async(url,file,args)=>{assert.equal(url,api);assert(args.includes('Accept: application/octet-stream'));fs.writeFileSync(file,bytes);});
  await f.run(original);assert.equal(f.calls.length,1);assert.equal(f.records[0].url,api);assert.equal(f.records[0].sourceURL,original);
