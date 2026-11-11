@@ -1,4 +1,4 @@
-const publicPrefix = typeof location !== 'undefined' ? location.pathname.match(/^(\/app\/wuchengerp)\/web\//)?.[1] || '' : '';
+const publicPrefix = typeof location !== 'undefined' ? location.pathname.match(/^(\/app\/wuchengerp(?:trial)?)\/web\//)?.[1] || '' : '';
 const API = publicPrefix + '/api/workbench/v1/data-versions';
 const modules = { purchase: '采购', sales: '销售', overview: '经营总览' };
 

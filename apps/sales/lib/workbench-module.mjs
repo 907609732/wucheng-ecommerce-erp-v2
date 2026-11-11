@@ -34,7 +34,7 @@ export function installWorkbenchModule(app,router,{module,dataDir,root,state,pri
    if(!safe.has(q.method))r.once('finish',()=>{try{service.onAudit?.({actor,method:q.method,path:q.path,status:r.statusCode});}catch{}});
    r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','same-origin');r.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; frame-ancestors 'self'");
    const publicPrefix=actor.publicPrefix??'';
-   if(!['','/app/wuchengerp'].includes(publicPrefix)||localDesktop&&publicPrefix)throw Object.assign(Error('工作台公开路径无效'),{status:403});
+   if(!['','/app/wuchengerp','/app/wuchengerptrial'].includes(publicPrefix)||localDesktop&&publicPrefix)throw Object.assign(Error('工作台公开路径无效'),{status:403});
    const ui=localDesktop?'/':publicPrefix+'/apps/'+module+'/',api=localDesktop?'':publicPrefix+'/apps/'+module;
    // Never trust unbound forwarded prefix/header values.
    q.workbench={module,uiPrefix:ui,apiBase:api,localDesktop};
@@ -70,7 +70,7 @@ export function installWorkbenchAudit(integration,store){
  integration.workbench.finalize();
 }
 function remoteValue(value,{module,ui,api,localDesktop=false,privatePaths=[]}){
- const prefix=ui.match(/^(\/app\/wuchengerp)\/apps\//)?.[1]||'';
+ const prefix=ui.match(/^(\/app\/wuchengerp(?:trial)?)\/apps\//)?.[1]||'';
  // Only known host roots are sensitive; ordinary /api, /apps and asset URLs
  // retain their existing routing rules. Never infer a filesystem path from '/'.
  const hostPath=v=>typeof v==='string'&&(/^[A-Z]:[\\/]/i.test(v)||v.startsWith('\\\\')||privatePaths.some(p=>typeof p==='string'&&p.length>1&&(v===p||v.startsWith(p+'/')||v.startsWith(p+'\\'))));

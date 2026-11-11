@@ -1,4 +1,4 @@
-const publicPrefix=(document.currentScript?.src||'').match(/^(?:https?:\/\/[^/]+)?(\/app\/wuchengerp)\/web\//)?.[1]||'';
+const publicPrefix=(document.currentScript?.src||'').match(/^(?:https?:\/\/[^/]+)?(\/app\/wuchengerp(?:trial)?)\/web\//)?.[1]||'';
 const selected=new URLSearchParams(location.search).get('module')||'sales';
 const message=document.querySelector('#browser-message'),view=document.querySelector('#browser-view');
 async function openBrowser(){

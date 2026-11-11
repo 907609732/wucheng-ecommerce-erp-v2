@@ -1,4 +1,4 @@
-const publicPrefix = (document.currentScript?.src || '').match(/^(?:https?:\/\/[^/]+)?(\/app\/wuchengerp)\/web\//)?.[1] || '';
+const publicPrefix = (document.currentScript?.src || '').match(/^(?:https?:\/\/[^/]+)?(\/app\/wuchengerp(?:trial)?)\/web\//)?.[1] || '';
 const ids = ["purchase", "sales", "freight", "overview", "data-versions"],
   status = document.querySelector("#status"),
   message = document.querySelector("#message"),
