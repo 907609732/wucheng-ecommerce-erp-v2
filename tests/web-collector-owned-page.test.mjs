@@ -5,9 +5,32 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import {WebSocketServer} from 'ws';
-import {createOwnedTarget,closeOwnedTarget,observeTransport} from '../server/collector-owned-page.mjs';
+import {createOwnedTarget,closeOwnedTarget,ownedOperationCode,observeTransport} from '../server/collector-owned-page.mjs';
 import {CainiaoBrowser as SalesBrowser} from '../apps/sales/lib/agent-cainiao-browser.mjs';
 import {CainiaoBrowser as OverviewBrowser} from '../apps/overview/lib/cainiao-browser.mjs';
+
+test('owned operation waits for external CDP target registration without touching the MCP fallback tab',async()=>{
+ const owner={id:'late-owner',isClosed:()=>false},sibling={id:'sibling',isClosed:()=>false};let scans=0;
+ const context={pages:()=>++scans>=3?[sibling,owner]:[sibling],newCDPSession:async p=>({send:async()=>({targetInfo:{targetId:p.id}}),detach:async()=>{}})};
+ const fallback={context:()=>context};
+ const run=(0,eval)('('+ownedOperationCode(async page=>page.id,{},owner.id)+')');
+ assert.equal(await run(fallback),'late-owner');assert.ok(scans>=3);
+});
+test('owned operation tolerates transient target attachment failure within its registration window',async()=>{
+ const owner={id:'owner',isClosed:()=>false},sibling={id:'sibling',isClosed:()=>false};let attempts=0,detached=0;
+ const context={pages:()=>[sibling,owner],newCDPSession:async p=>{if(p===owner&&++attempts===1)throw Error('Target is initializing');return {send:async()=>({targetInfo:{targetId:p.id}}),detach:async()=>{detached++;}};}};
+ const fallback={context:()=>context};
+ const run=(0,eval)('('+ownedOperationCode(async page=>page.id,{},owner.id)+')');
+ assert.equal(await run(fallback),'owner');assert.equal(attempts,2);assert.ok(detached>=3);
+});
+test('a target that never registers fails within the bounded registration window and never executes business code',async()=>{
+ const sibling={id:'sibling',isClosed:()=>false};
+ const context={pages:()=>[sibling],newCDPSession:async p=>({send:async()=>({targetInfo:{targetId:p.id}}),detach:async()=>{}})};
+ const fallback={context:()=>context},started=Date.now();
+ const run=(0,eval)('('+ownedOperationCode(async page=>{page.wasBusinessRun=true;return page.id;},{},'missing-target')+')');
+ await assert.rejects(run(fallback),/BROWSER_PAGE_CLOSED/);
+ assert.ok(Date.now()-started<3500);assert.equal(fallback.wasBusinessRun,undefined);assert.equal(sibling.wasBusinessRun,undefined);
+});
 
 for (const [module, Browser] of [['sales',SalesBrowser],['overview',OverviewBrowser]]) {
  test(`${module}: native shared operations resolve their owned target instead of MCP current page`,async()=>{

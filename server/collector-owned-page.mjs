@@ -41,7 +41,11 @@ export async function closeOwnedTarget(target){
  }catch(error){throw isolationError(error.message);}
 }
 export function ownedOperationCode(operation,arg,targetId){
- return `async (page) => { const context=page.context(); let ownedPage; for (const candidate of context.pages()) { if(candidate.isClosed())continue; let session; try { session=await context.newCDPSession(candidate); const info=await session.send('Target.getTargetInfo'); if(info.targetInfo.targetId===${JSON.stringify(targetId)})ownedPage=candidate; } catch {} finally { await session?.detach().catch(()=>{}); } if(ownedPage)break; } if(!ownedPage||ownedPage.isClosed())throw Error('BROWSER_PAGE_CLOSED:当前采集页已关闭，请重新连接；已下载文件保留'); page=ownedPage; return await (${operation.toString()})(page, ${JSON.stringify(arg)}); }`;
+ // Target.createTarget and this MCP client's Playwright page registration use
+ // different CDP sessions. The command can finish before the page event (or
+ // attach readiness) reaches MCP. Re-scan briefly for the SAME identity only;
+ // an unrelated current page must never be used to bridge this race.
+ return `async (page) => { const context=page.context(), registrationDeadline=Date.now()+2000; let ownedPage; do { for (const candidate of context.pages()) { if(candidate.isClosed())continue; let session; try { session=await context.newCDPSession(candidate); const info=await session.send('Target.getTargetInfo'); if(info.targetInfo.targetId===${JSON.stringify(targetId)})ownedPage=candidate; } catch {} finally { await session?.detach().catch(()=>{}); } if(ownedPage)break; } if(ownedPage||Date.now()>=registrationDeadline)break; await new Promise(resolve=>setTimeout(resolve,25)); } while(true); if(!ownedPage||ownedPage.isClosed())throw Error('BROWSER_PAGE_CLOSED:当前采集页未就绪或已关闭，请重新连接；已下载文件保留'); page=ownedPage; return await (${operation.toString()})(page, ${JSON.stringify(arg)}); }`;
 }
 
 // MCP SDK close() can return just after SIGKILL. Observe the transport's public
