@@ -13,6 +13,7 @@ const versionParts=value=>String(value).match(/\d+(?:\.\d+){1,3}/)?.[0].split('.
 const newer=(left,right)=>{for(let i=0;i<4;i++){if((left[i]||0)!==(right[i]||0))return (left[i]||0)>(right[i]||0);}return false;};
 export function nativeBrowserSpecs(config){
  const browser=config.native?.browser;if(!browser?.enabled)return {};
+ if(browser.shared!==undefined&&typeof browser.shared!=='boolean')throw Error('原生浏览器 shared 共享设置必须为布尔值');
  const result={},ports=new Set(),displays=new Set();
  if(browser.instances&&Object.keys(browser.instances).some(id=>!ids.includes(id)))throw Error('原生浏览器目标未登记');
  for(const [index,id] of ids.entries()){
@@ -21,8 +22,11 @@ export function nativeBrowserSpecs(config){
   const trial=config.fnos?.basePrefix==='/app/wuchengerptrial',cdpPort=custom.cdpPort??(trial?31222:19222)+index,vncPort=custom.vncPort??(trial?31322:19322)+index,display=custom.display??(trial?322:122)+index;
   for(const port of [cdpPort,vncPort]){if(!Number.isInteger(port)||port<1024||port>65535||ports.has(port))throw Error('原生浏览器端口无效或冲突');ports.add(port);}
   if(!Number.isInteger(display)||display<100||display>999||displays.has(display))throw Error('原生浏览器 display 无效或冲突');displays.add(display);
-  result[id]={id,display,cdpPort,vncPort,cdpEndpoint:'http://127.0.0.1:'+cdpPort,vncEndpoint:'http://127.0.0.1:'+vncPort,profile:path.join(config.native.dataRoot,'browser-profiles',id)};
+  result[id]={id,physicalId:id,display,cdpPort,vncPort,cdpEndpoint:'http://127.0.0.1:'+cdpPort,vncEndpoint:'http://127.0.0.1:'+vncPort,profile:path.join(config.native.dataRoot,'browser-profiles',id)};
  }
+ // Validate legacy per-module configuration above, but select the shared
+ // instance explicitly. Coinciding ports never imply shared ownership.
+ if(browser.shared)result.overview={...result.sales,id:'overview',physicalId:'sales'};
  return result;
 }
 function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});if(fs.lstatSync(dir).isSymbolicLink())throw Error('浏览器私有目录不能是链接');fs.chmodSync(dir,0o700);}
@@ -58,7 +62,7 @@ export async function probeNativeBrowserReady(kind,spec){
  }catch{return false;}
 }
 export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=probeNativeBrowserReady,readinessTimeoutMs=20000,signal,gracefulClose}={}){
- const browser=config.native?.browser,specs=nativeBrowserSpecs(config),children=[],states={},owned={};
+ const browser=config.native?.browser,specs=nativeBrowserSpecs(config),physicalSpecs=Object.values(specs).filter(s=>s.id===s.physicalId),children=[],states={},owned={};
  let state='stopped',failure=null,starting,stopping,runDir,controller,startSignal;
  const checkCancellation=()=>startSignal?.throwIfAborted();
  const live=child=>child.exitCode===null&&child.signalCode===null&&!child.nativeExited;
@@ -152,7 +156,7 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
      for(const file of [browser.chromiumPath,...['Xvfb','x11vnc','xauth'].map(n=>path.join(bin,n)),path.join(browser.novncRoot,'vnc.html'),...['libvulkan.so.1','libvk_swiftshader.so','vk_swiftshader_icd.json'].map(n=>path.join(chromiumDir,n)),path.join(gioModules,'libdconfsettings.so')])if(!fs.statSync(file).isFile())throw Error('原生浏览器缺少运行文件 '+file);
      const icdLibrary=JSON.parse(fs.readFileSync(vulkanIcd,'utf8')).ICD?.library_path;
      if(typeof icdLibrary!=='string'||path.resolve(chromiumDir,icdLibrary)!==path.join(chromiumDir,'libvk_swiftshader.so'))throw Error('SwiftShader ICD 必须指向同包私有库');
-     for(const s of Object.values(specs)){await available(s.cdpPort);await available(s.vncPort);if(fs.existsSync('/tmp/.X'+s.display+'-lock')||fs.existsSync('/tmp/.X11-unix/X'+s.display))throw Error('原生 display 已占用，拒绝接管');}
+     for(const s of physicalSpecs){await available(s.cdpPort);await available(s.vncPort);if(fs.existsSync('/tmp/.X'+s.display+'-lock')||fs.existsSync('/tmp/.X11-unix/X'+s.display))throw Error('原生 display 已占用，拒绝接管');}
      const launchRoot=path.join(config.native.runtimeDir||config.stateDir,'native-browser');
      privateDir(path.join(config.native.dataRoot,'browser-profiles'));privateDir(launchRoot);
      runDir=path.join(launchRoot,randomUUID());privateDir(runDir);
@@ -163,7 +167,7 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
      // inherited desktop/plugin overrides from reopening host search paths.
      for(const key of ['GIO_EXTRA_MODULES','VK_ADD_DRIVER_FILES','VK_ADD_LAYER_PATH','VK_ADD_IMPLICIT_LAYER_PATH','VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_ALLOW','LIBVA_DRIVER_NAME'])delete baseEnv[key];
      const version=versionParts(await run(browser.chromiumPath,['--version'],baseEnv));if(!version)throw Error('无法确认 Chromium 版本');
-     for(const s of Object.values(specs)){
+     for(const s of physicalSpecs){
       let retainedProfile=null,login='unknown';
       if(fs.existsSync(s.profile)){
        if(fs.lstatSync(s.profile).isSymbolicLink())throw Error('浏览器 profile 不能是链接');
@@ -176,7 +180,9 @@ export function createNativeBrowsers(config,{logger,spawnProcess=spawn,probe=pro
       chrome.nativeBrowserSpec={...s};
       if(spawnProcess===spawn){chrome.nativeBrowserOwner=groupMembers(chrome).find(m=>m.pid===chrome.pid);if(!chrome.nativeBrowserOwner||!stillOwnedChrome(chrome))throw Error('无法确认本代 Chromium 进程身份');}
       const vnc=launch(path.join(bin,'x11vnc'),['-display',env.DISPLAY,'-auth',auth,'-listen','127.0.0.1','-localhost','-no6','-rfbport',String(s.vncPort),'-forever','-shared','-nopw','-noxdamage','-norc'],env);vnc.nativeLong=true;await wait('vnc',s,vnc);
-      owned[s.id]=[xvfb,chrome,vnc];states[s.id]={cdpEndpoint:s.cdpEndpoint,display:s.display,login,retainedProfile,ready:true};
+      for(const alias of Object.values(specs).filter(a=>a.physicalId===s.id)){
+       owned[alias.id]=[xvfb,chrome,vnc];states[alias.id]={physicalId:s.id,cdpEndpoint:s.cdpEndpoint,display:s.display,login,retainedProfile,ready:true};
+      }
      }
      state='running';return status();
     }catch(error){failure=error.message;state='failed';await stopChildren();throw error;}

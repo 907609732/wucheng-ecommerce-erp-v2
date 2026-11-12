@@ -19,6 +19,7 @@ export async function startNativeCollector(config,{onError}={}){
  const browserSpecs=nativeBrowserSpecs(config);
  process.env.LINGTU_SALES_CDP_ENDPOINT=browserSpecs.sales?.cdpEndpoint||'http://127.0.0.1:19222';
  process.env.LINGTU_OVERVIEW_CDP_ENDPOINT=browserSpecs.overview?.cdpEndpoint||'http://127.0.0.1:19223';
+ if(config.native?.browser?.shared===true)process.env.LINGTU_SHARED_BROWSER='1';else delete process.env.LINGTU_SHARED_BROWSER;
  // Module children use CollectorBrowser; the owner must instantiate the real
  // adapters with the inherited forwarding flag absent, avoiding self-recursion.
  delete process.env.LINGTU_WEB_COLLECTOR;

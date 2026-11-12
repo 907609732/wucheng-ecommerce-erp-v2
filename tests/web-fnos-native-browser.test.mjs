@@ -84,6 +84,25 @@ function processes({fail}={}){
   return child;
  };return {calls,spawnProcess};
 }
+test('explicit shared mode aliases module endpoints and owns one physical browser without touching overview profile',async t=>{
+ const {createNativeBrowsers,nativeBrowserSpecs}=await import('../server/fnos-native/browsers.mjs'),c=fixture(t),p=processes();c.native.browser.shared=true;
+ const old=path.join(c.native.dataRoot,'browser-profiles/overview');fs.mkdirSync(old,{recursive:true});fs.writeFileSync(path.join(old,'Last Version'),'999.0.0.0');fs.writeFileSync(path.join(old,'Cookies'),'OVERVIEW RETAINED');
+ const specs=nativeBrowserSpecs(c);assert.equal(specs.sales.physicalId,'sales');assert.equal(specs.overview.physicalId,'sales');assert.equal(specs.overview.cdpEndpoint,specs.sales.cdpEndpoint);assert.equal(specs.overview.vncEndpoint,specs.sales.vncEndpoint);assert.equal(specs.overview.profile,specs.sales.profile);
+ const m=createNativeBrowsers(c,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>m.stop());await m.start();
+ assert.equal(p.calls.filter(v=>v.file===c.native.browser.chromiumPath&&!v.args.includes('--version')).length,1);assert.equal(p.calls.filter(v=>path.basename(v.file)==='Xvfb').length,1);assert.equal(p.calls.filter(v=>path.basename(v.file)==='x11vnc').length,1);
+ assert.equal(fs.readFileSync(path.join(old,'Cookies'),'utf8'),'OVERVIEW RETAINED');assert.equal(fs.readFileSync(path.join(old,'Last Version'),'utf8'),'999.0.0.0');assert.equal(fs.readdirSync(path.dirname(old)).filter(n=>n.startsWith('overview.retained-')).length,0);
+ assert.equal(m.status().browsers.sales.cdpEndpoint,m.status().browsers.overview.cdpEndpoint);p.calls.find(v=>v.args.includes('--remote-debugging-port=19222')).child.kill('SIGTERM');assert.equal(m.status().browsers.sales.ready,false);assert.equal(m.status().browsers.overview.ready,false);
+});
+test('shared mode retains controlled sales overrides and validates legacy overview configuration',async t=>{
+ const {nativeBrowserSpecs}=await import('../server/fnos-native/browsers.mjs'),c=fixture(t);c.native.browser.shared=true;c.native.browser.instances={sales:{cdpPort:23222,vncPort:23322,display:422},overview:{cdpPort:23223,vncPort:23323,display:423}};
+ const specs=nativeBrowserSpecs(c);assert.deepEqual([specs.overview.cdpPort,specs.overview.vncPort,specs.overview.display],[23222,23322,422]);
+ c.native.browser.instances.overview={host:'foreign'};assert.throws(()=>nativeBrowserSpecs(c),/受控/);c.native.browser.instances.overview={display:0};assert.throws(()=>nativeBrowserSpecs(c),/display/);c.native.browser.instances.overview={};c.native.browser.shared='true';assert.throws(()=>nativeBrowserSpecs(c),/shared|共享/);
+});
+test('shared collector exports one endpoint and explicit coordination flag',async t=>{
+ const {startNativeCollector}=await import('../server/fnos-native/supervisor.mjs'),c=fixture(t),release=path.resolve(import.meta.dirname,'..');c.native.browser.shared=true;c.modules=Object.fromEntries(['sales','overview'].map(id=>[id,{root:path.join(release,'apps',id),dataDir:path.join(c.native.dataRoot,'data',id)}]));
+ const keys=['LINGTU_WEB_COLLECTOR','LINGTU_SHARED_BROWSER','LINGTU_SALES_CDP_ENDPOINT','LINGTU_OVERVIEW_CDP_ENDPOINT'],previous=Object.fromEntries(keys.map(k=>[k,process.env[k]]));let helper;
+ try{helper=await startNativeCollector(c);assert.equal(process.env.LINGTU_SHARED_BROWSER,'1');assert.equal(process.env.LINGTU_SALES_CDP_ENDPOINT,process.env.LINGTU_OVERVIEW_CDP_ENDPOINT);}finally{await helper?.stop();for(const k of keys)if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k];}
+});
 test('native browser manager owns two private loopback profiles and stops only its children',async t=>{
  const {createNativeBrowsers}=await import('../server/fnos-native/browsers.mjs');const config=fixture(t),p=processes();
  const manager=createNativeBrowsers(config,{spawnProcess:p.spawnProcess,probe:async()=>true});t.after(()=>manager.stop());

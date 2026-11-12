@@ -50,33 +50,37 @@ export class SalesCainiaoDownloads{
  }
  validateResume(jid){if(this.active||this.liveLock())throw fail('已有下载任务运行中',409);const job=this.get(jid);if(this.browser.status().status!=='connected'||this.browser.status().account!==job.account)throw fail('请连接此任务对应的菜鸟账户',409);return job;}
  resume(jid){const job=this.validateResume(jid);if(job.items.every(done))return job;this.launch(job);return this.get(jid);}
- cancel(jid){const job=this.get(jid);if(this.active?.id===jid){this.cancelled.add(jid);job.message='正在停止本地后续操作，平台已生成任务保留';}else{if(this.liveLock()?.jobId===jid)throw fail('该任务由另一个系统进程运行，请在其页面停止',409);job.status='cancelled';job.message='已停止，原件及平台任务保留，可继续';}this.save(job);return job;}
- launch(job){this.acquireLock(job);this.cancelled.delete(job.id);job.status='running';this.active=job;this.save(job);this.running=this.run(job).catch(e=>{job.status='paused';job.message=humanError(e);this.save(job);}).finally(()=>{this.releaseLock(job);this.active=null;});}
+ cancel(jid){const job=this.get(jid);if(this.active?.id===jid){this.cancelled.add(jid);this.submissionAbort?.abort();job.message='正在停止本地后续操作，平台已生成任务保留';}else{if(this.liveLock()?.jobId===jid)throw fail('该任务由另一个系统进程运行，请在其页面停止',409);job.status='cancelled';job.message='已停止，原件及平台任务保留，可继续';}this.save(job);return job;}
+ launch(job){this.acquireLock(job);this.cancelled.delete(job.id);this.submissionAbort=new AbortController();job.status='running';this.active=job;this.save(job);this.running=this.run(job).catch(e=>{job.status='paused';job.message=humanError(e);this.save(job);}).finally(()=>{this.releaseLock(job);this.active=null;});}
  check(job){if(this.cancelled.has(job.id))throw Object.assign(Error('已停止，已下载原件和平台任务保留'),{cancelled:true});}
  reusable(job,item){for(const prior of this.list()){if(prior.id===job.id||prior.account!==job.account)continue;const old=prior.items.find(i=>i.month===item.month&&i.type===item.type&&i.status==='completed');if(!old?.fileIds?.length)continue;const valid=old.fileIds.every(fid=>{const f=this.s.get('SELECT * FROM sales_cainiao_files WHERE id=?',fid);return f&&fs.existsSync(resolveArchive(this.s.dir,f.path))&&hash(fs.readFileSync(resolveArchive(this.s.dir,f.path)))===f.sha256;});if(valid)return old;}return null;}
  async run(job){
   for(const item of job.items){
    if(done(item))continue;
+   let releaseSubmission;
    try{
     this.check(job);job.message=item.month+' · '+REPORTS[item.type];item.error='';this.save(job);
     if(!job.force&&!item.submittedAt&&!job.interimMonths.includes(item.month)){const old=this.reusable(job,item);if(old){Object.assign(item,old,{reused:true});this.save(job);continue;}}
     const args={account:job.account,month:item.month,type:item.type,...monthDates(item.month),...(job.cutoffs?.[item.month]?{to:job.cutoffs[item.month]}:{})};
     if(item.downloadReady&&(!item.target||!fs.existsSync(item.target)))delete item.downloadReady;
+    if((item.remoteTask||item.downloadReady)&&this.browser.settleSubmission)await this.browser.settleSubmission({key:job.id+':'+item.month+':'+item.type,account:job.account,proof:item.remoteTask?'task-bound':'download-ready'});
+    if(!item.remoteTask&&!item.downloadReady&&this.browser.acquireSubmission){releaseSubmission=await this.browser.acquireSubmission({key:job.id+':'+item.month+':'+item.type,account:job.account,recovering:!!item.submittedAt,signal:this.submissionAbort?.signal});this.check(job);}
     if(!item.submittedAt){
      item.status='querying';this.save(job);const pageEvidence=await this.browser.run('prepare',args);if(pageEvidence.from!==args.from||pageEvidence.to!==args.to)throw fail('平台实际查询日期与下载范围不一致',409,'CAINIAO_PAGE_RANGE_MISMATCH');item.expected={...pageEvidence,queriedAt:now()};this.check(job);
      if(item.expected.count===0&&item.type!=='warehouse'){item.status='empty';item.reason='平台查询明确返回 0 条记录';this.save(job);continue;}
      const baseline=await this.browser.run('tasks',{account:job.account});this.check(job);
      item.baselineIds=baseline.map(t=>t.id);item.submittedAt=now();item.status='submitting';item.target=path.join(this.browser.dir,id()+'.part');this.save(job);
-     const result=await this.browser.run('submit',{...args,expected:item.expected,target:item.target});
+     const {queriedAt,...expected}=item.expected;
+     const result=await this.browser.run('submit',{...args,expected,target:item.target});
      if(result.empty||result.unavailable){item.status=result.empty?'empty':'unavailable';item.reason=result.reason;this.save(job);continue;}
-     if(result.direct){item.filename=result.filename;item.downloadReady=true;this.save(job);}
+     if(result.direct){item.filename=result.filename;item.downloadReady=true;this.save(job);if(releaseSubmission){await releaseSubmission();releaseSubmission=null;}}
     }
     this.check(job);
     if(!item.downloadReady){
      item.status='waiting';this.save(job);const deadline=Date.now()+this.waitMs;
      while(true){
       this.check(job);const tasks=await this.browser.run('tasks',{account:job.account});this.check(job);
-      if(!item.remoteTask){item.remoteTask=findNewTask(tasks,job,item);if(item.remoteTask)this.save(job);}
+      if(!item.remoteTask){item.remoteTask=findNewTask(tasks,job,item);if(item.remoteTask){this.save(job);if(releaseSubmission){await releaseSubmission();releaseSubmission=null;}}}
       const remote=item.remoteTask?tasks.find(t=>t.id===item.remoteTask.id):null;
       if(remote){if(!taskMatches(remote,job,item)||remote.name!==item.remoteTask.name)throw Error('平台任务信息与记录不一致');item.remoteTask=remote;this.save(job);if(/失败|取消/.test(remote.status))throw Error('平台任务'+remote.status+'，请在菜鸟核对');if(remote.status==='已完成')break;}
       if(Date.now()>=deadline){item.status='waiting';item.error=item.remoteTask?'等待平台生成，稍后可继续':'尚未找到本次任务，请核对平台后继续；不会自动重复提交';break;}
@@ -95,14 +99,15 @@ export class SalesCainiaoDownloads{
     const archived=archiveFile(this.s,job,item,item.target,item.filename,inspection,verification);item.fileIds=[archived.id];item.verification=verification;item.reused=archived.reused;item.status=verification.verified?'completed':'needs_review';item.error=verification.verified?'':verification.reason;
     fs.unlinkSync(item.target);delete item.target;delete item.downloadReady;this.save(job);this.check(job);
    }catch(e){
+    if(this.submissionAbort?.signal.aborted)e.cancelled=true;
     item.error=humanError(e);
     if(e.cancelled){if(!done(item))item.status=item.submittedAt?'waiting':'pending';job.status='cancelled';job.message=e.message;this.save(job);return;}
     if(/NEEDS_LOGIN|ACCOUNT_CHANGED|NEEDS_ACTION|connect|extension|closed|timeout|timed out|disconnected/i.test(e.message)){if(!done(item))item.status=item.submittedAt?'waiting':'pending';job.status='paused';job.message=humanError(e);this.save(job);return;}
     item.status=item.submittedAt&&!item.remoteTask?'uncertain':'failed';this.save(job);
     if(item.status==='uncertain'){job.status='paused';job.message='提交结果待核对，继续时先查询平台任务，避免重复申请';this.save(job);return;}
-   }
+   }finally{if(releaseSubmission)await releaseSubmission({unresolved:!!item.submittedAt&&!item.remoteTask&&!item.downloadReady&&!done(item)});}
   }
   job.status=job.items.every(done)?'completed':job.items.some(i=>done(i)||i.fileIds.length)?'partial':'paused';job.message=job.status==='completed'?'下载完成，原件已保存；尚未入账':'部分项目仍待处理，点击继续补齐';this.save(job);
  }
- async close(){if(this.active)this.cancelled.add(this.active.id);if(this.timer)clearTimeout(this.timer);this.wake?.();await this.browser.disconnect();await this.running;}
+ async close(){if(this.active)this.cancelled.add(this.active.id);this.submissionAbort?.abort();if(this.timer)clearTimeout(this.timer);this.wake?.();await this.browser.disconnect();await this.running;}
 }

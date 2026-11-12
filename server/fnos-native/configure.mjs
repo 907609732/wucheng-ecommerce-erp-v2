@@ -241,7 +241,7 @@ export async function configureNative(o={}){
      c.publicOrigin=u.origin;
      if(Array.isArray(c.fnos.allowedOrigins))c.fnos.allowedOrigins=[...new Set([...c.fnos.allowedOrigins,u.origin])];
     }
-    if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser=o.browser;
+    if(o.socketPath)c.fnos.socketPath=physicalPath(o.socketPath);if(o.browser)c.native.browser={...c.native.browser,...o.browser};
     if(o.requireBrowsers!==undefined)c.native.requireBrowsers=o.requireBrowsers;
     if(o.runtimeDir!==undefined)c.native.runtimeDir=physicalPath(o.runtimeDir);
     if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
@@ -286,7 +286,7 @@ export async function configureNative(o={}){
    if(o.entry!==undefined&&((o.entry==='tailscale')===Boolean(c.fnos?.enabled)))throw Error('迁移源与目标身份入口不同，拒绝切换');
    if(c.fnos?.enabled&&!c.fnos.instanceId)throw Error('迁移缺少原飞牛 instanceId，拒绝替换身份');
    if(o.accessPolicy!==undefined&&c.fnos?.enabled)c.fnos.accessPolicy=o.accessPolicy;
-   c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');c.native.browser=o.browser||c.native.browser;
+   c.tcpEnabled??=true;c.fnos.socketPath=o.socketPath||path.join(dataRoot,'socket','app.sock');if(o.browser)c.native.browser={...c.native.browser,...o.browser};
    if(o.cmPath&&c.dataVersion?.enabled)c.dataVersion.cmPath=resolveNativeCmPath(o.cmPath,{allowSymlink:true});
    validateReferences(stage);
    if(configFileAt(stage)===path.join(stage,'config.json'))fs.unlinkSync(path.join(stage,'config.json'));

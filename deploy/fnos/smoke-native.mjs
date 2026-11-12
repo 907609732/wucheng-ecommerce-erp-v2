@@ -8,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {verifySandboxResult,mcpEvaluationResult,isAllowedRuntimeLibrary,diagnosticCancellation,diagnosticInitializationCleanup} from './smoke-checks.mjs';
+import {verifySandboxResult,mcpEvaluationResult,isAllowedRuntimeLibrary,diagnosticCancellation,diagnosticInitializationCleanup,verifySharedBrowserProcesses} from './smoke-checks.mjs';
 const args={};for(let i=2;i<process.argv.length;i+=2)args[process.argv[i].replace(/^--/,'')]=process.argv[i+1];
 const app=fs.realpathSync(args['app-root']),release=path.join(app,'erp'),runtime=path.join(app,'runtime');
 const data=path.resolve(args['data-root']),evidence=path.resolve(args['evidence-dir']),offset=Number(args['port-offset']||0),diagnostic=args.diagnostic==='1';
@@ -21,6 +21,7 @@ fs.mkdirSync(evidence,{recursive:true});
 const {configureNative}=await import(pathToFileURL(path.join(release,'server/fnos-native/configure.mjs')));
 const {nativeLifecycle}=await import(pathToFileURL(path.join(release,'server/fnos-native/lifecycle.mjs')));
 const {collectorChildEnvironment}=await import(pathToFileURL(path.join(release,'server/collector-browser-connection.mjs')));
+const {createOwnedTarget,closeOwnedTarget,ownedOperationCode}=await import(pathToFileURL(path.join(release,'server/collector-owned-page.mjs')));
 const {databases,loadConfig,developmentConfig,validateConfig}=await import(pathToFileURL(path.join(release,'server/config.mjs')));
 const require=createRequire(path.join(release,'apps/sales/package.json'));
 const {Client}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/index.js')));
@@ -29,7 +30,7 @@ const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelc
 // API rather than assuming Node synthesizes named ESM exports for it.
 const {chromium}=require('playwright-core');
 const WebSocket=createRequire(path.join(release,'package.json'))('ws');
-const report={ok:false,cleanupComplete:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,successfulStarts:0,checks:[],ports:{sales:19222+offset,overview:19223+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
+const report={ok:false,cleanupComplete:false,uid:process.getuid(),node:process.version,sqlite:false,sandbox:false,successfulStarts:0,checks:[],ports:{sales:19222+offset,overview:19222+offset},scope:'Synthetic Linux CI / isolated device fixture; does not prove production NAS installation'};
 const fixture=http.createServer((req,res)=>{
  if(req.url==='/download'){res.writeHead(200,{'content-type':'text/plain','content-disposition':'attachment; filename="native-acceptance.txt"'});res.end('native FPK download acceptance\n');return;}
  if(req.url?.startsWith('/novnc/')){
@@ -41,7 +42,7 @@ const fixture=http.createServer((req,res)=>{
 });
 await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+fixture.address().port;
 report.fixturePort=fixture.address().port;
-let configFile,client,transport,browser,viewerBrowser,stopInitializingServices,pendingClient,pendingTransport,cancellation,cleanupTask;
+let configFile,client,transport,browser,stopInitializingServices,pendingClient,pendingTransport,cancellation,cleanupTask;
 let interrupting=false;
 function checkCancellation(){cancellation?.check();assert(!interrupting,'Diagnostic acceptance cancelled');}
 async function cleanupOwned(){
@@ -71,8 +72,8 @@ function diagnosticProcesses(){
  for(const pid of fs.readdirSync('/proc').filter(n=>/^\d+$/.test(n)))try{
   if(Number(pid)===process.pid||fs.statSync('/proc/'+pid).uid!==process.getuid())continue;
   const raw=fs.readFileSync('/proc/'+pid+'/stat','utf8'),fields=raw.slice(raw.lastIndexOf(')')+2).split(' ');
-  const environment=Object.fromEntries(fs.readFileSync('/proc/'+pid+'/environ','utf8').split('\0').filter(v=>/^(?:PURCHASE|SALES|OVERVIEW)_DATA_DIR=/.test(v)).map(v=>{const i=v.indexOf('=');return [v.slice(0,i),v.slice(i+1)];}));
-  rows.push({pid:Number(pid),parent:Number(fields[1]),startTicks:fields[19],cmdline:fs.readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0').filter(Boolean),dataDirectories:environment});
+  const values=fs.readFileSync('/proc/'+pid+'/environ','utf8').split('\0'),environment=Object.fromEntries(values.filter(v=>/^(?:PURCHASE|SALES|OVERVIEW)_DATA_DIR=/.test(v)).map(v=>{const i=v.indexOf('=');return [v.slice(0,i),v.slice(i+1)];}));
+  rows.push({pid:Number(pid),parent:Number(fields[1]),startTicks:fields[19],cmdline:fs.readFileSync('/proc/'+pid+'/cmdline','utf8').split('\0').filter(Boolean),dataDirectories:environment,runtimeDirectory:values.find(v=>v.startsWith('XDG_RUNTIME_DIR='))?.slice('XDG_RUNTIME_DIR='.length)});
  }catch(error){if(!['ENOENT','ESRCH'].includes(error.code))rows.push({pid:Number(pid),unreadable:error.code});}
  return rows;
 }
@@ -113,7 +114,7 @@ async function tool(name,arguments_={}){
  fs.appendFileSync(path.join(evidence,'mcp.log'),name+'\n'+text+'\n');if(r.isError)throw Error(name+': '+text);return text;
 }
 const ref=(snapshot,pattern)=>{const line=snapshot.split('\n').find(l=>pattern.test(l)),r=line?.match(/\[ref=([^\]]+)\]/)?.[1];assert(r,'Missing MCP reference: '+pattern+'\n'+snapshot);return r;};
-async function stopClients(){const errors=[];for(const value of new Set([client,pendingClient,transport,pendingTransport,browser,viewerBrowser].filter(Boolean)))try{await value.close();}catch(error){errors.push(error);}client=null;transport=null;pendingClient=null;pendingTransport=null;browser=null;viewerBrowser=null;if(errors.length)throw new AggregateError(errors,'Diagnostic clients did not all close cleanly');}
+async function stopClients(){const errors=[];for(const value of new Set([client,pendingClient,transport,pendingTransport,browser].filter(Boolean)))try{await value.close();}catch(error){errors.push(error);}client=null;transport=null;pendingClient=null;pendingTransport=null;browser=null;if(errors.length)throw new AggregateError(errors,'Diagnostic clients did not all close cleanly');}
 function auditLoadedLibraries(){
  const procs=new Map(),observed=[],unreadable=[],unexpected=[];
  for(const name of fs.readdirSync('/proc').filter(n=>/^\d+$/.test(n)))try{
@@ -139,7 +140,7 @@ function auditLoadedLibraries(){
 try{
  checkCancellation();
  const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE check_native(v TEXT)');db.prepare('INSERT INTO check_native VALUES (?)').run('ok');assert.equal(db.prepare('SELECT v FROM check_native').get().v,'ok');db.close();report.sqlite=true;
- const browserConfig={enabled:true,runtimeRoot:runtime,chromiumPath:path.join(runtime,'chromium/chrome'),novncRoot:path.join(runtime,'novnc'),instances:{sales:{cdpPort:19222+offset,vncPort:19322+offset,display:122+offset/100},overview:{cdpPort:19223+offset,vncPort:19323+offset,display:123+offset/100}}};
+ const browserConfig={enabled:true,shared:true,runtimeRoot:runtime,chromiumPath:path.join(runtime,'chromium/chrome'),novncRoot:path.join(runtime,'novnc'),instances:{sales:{cdpPort:19222+offset,vncPort:19322+offset,display:122+offset/100},overview:{cdpPort:19223+offset,vncPort:19323+offset,display:123+offset/100}}};
  if(diagnostic){
   // Build a synthetic production config without calling the main app's fixed
   // configureNative/native_env contracts or touching their directories.
@@ -163,7 +164,11 @@ try{
  process.env.HOME=c.native.home;
  for(const [i,m] of Object.values(c.modules).entries()){m.port=c.port+i+1;if(m.mobilePort)m.mobilePort=c.port+4;}
  fs.writeFileSync(configFile,JSON.stringify(c));
- checkCancellation();const first=await nativeLifecycle('start',configFile);checkCancellation();assert(first.ok&&first.browser.ready);report.successfulStarts++;report.checks.push('fresh lifecycle with two browsers and real collector');
+ const overviewProfile=path.join(data,'browser-profiles/overview'),overviewSentinel=path.join(overviewProfile,'retained-fixture.txt');fs.mkdirSync(overviewProfile,{recursive:true});fs.writeFileSync(overviewSentinel,'old overview profile retained\n');fs.writeFileSync(path.join(overviewProfile,'Last Version'),'999.0.0.0');
+ checkCancellation();const first=await nativeLifecycle('start',configFile);checkCancellation();assert(first.ok&&first.browser.ready);report.successfulStarts++;
+ assert.equal(first.browser.browsers.sales.cdpEndpoint,first.browser.browsers.overview.cdpEndpoint);assert.equal(first.browser.browsers.sales.physicalId,'sales');assert.equal(first.browser.browsers.overview.physicalId,'sales');
+ report.physicalInstances=verifySharedBrowserProcesses(diagnosticProcesses(),{profileRoot:path.join(data,'browser-profiles'),launchRoot:path.join(c.native.runtimeDir||c.stateDir,'native-browser'),instances:browserConfig.instances});report.checks.push('fresh lifecycle with one physical Chromium / Xvfb / x11vnc across all owned profiles and runtime generations');
+ assert.equal(fs.readFileSync(overviewSentinel,'utf8'),'old overview profile retained\n');assert.equal(fs.readFileSync(path.join(overviewProfile,'Last Version'),'utf8'),'999.0.0.0');
  const identity={serverId:first.serverId,dataSetId:first.dataSetId};
  if(diagnostic){assert.equal((await fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health')).status,200);report.checks.push('synthetic loopback-only TCP / fnOS disabled / UVCS disabled');}
  else{assert.equal((fs.statSync(path.join(app,'app.sock')).mode&0o777),0o600);await assert.rejects(fetch('http://127.0.0.1:'+c.port+'/api/workbench/v1/health',{signal:AbortSignal.timeout(1000)}));report.checks.push('Unix-only gateway / no TCP gateway');}
@@ -190,12 +195,24 @@ try{
  browser=await chromium.connectOverCDP('http://127.0.0.1:'+(19222+offset));
  const page=browser.contexts()[0].pages().find(p=>p.url()===url+'/');assert(page);
  await page.screenshot({path:path.join(evidence,'synthetic-browser.png')});
- const bounds=await page.locator('input').evaluate(e=>{const r=e.getBoundingClientRect();return {x:window.screenX+r.x+r.width/2,y:window.screenY+r.y+r.height/2,top:window.outerHeight-window.innerHeight};});
- viewerBrowser=await chromium.connectOverCDP('http://127.0.0.1:'+(19223+offset));const viewer=await viewerBrowser.contexts()[0].newPage();await viewer.goto(url);
+ const moduleTargets={sales:await createOwnedTarget(first.browser.browsers.sales.cdpEndpoint),overview:await createOwnedTarget(first.browser.browsers.overview.cdpEndpoint)};assert.notEqual(moduleTargets.sales.targetId,moduleTargets.overview.targetId);
+ async function fixtureOperation(owned,args){await owned.goto(args.url);return await owned.evaluate(()=>({cookie:document.cookie,storage:localStorage.getItem('native_acceptance')}));}
+ for(const target of Object.values(moduleTargets)){const session=mcpEvaluationResult(await tool('browser_run_code_unsafe',{code:ownedOperationCode(fixtureOperation,{url},target.targetId)}));assert.match(session.cookie,/native_acceptance=retained/);assert.equal(session.storage,'retained');}
+ await closeOwnedTarget(moduleTargets.sales);await assert.rejects(tool('browser_run_code_unsafe',{code:ownedOperationCode(fixtureOperation,{url},moduleTargets.sales.targetId)}),/BROWSER_PAGE_CLOSED/);
+ assert.equal(mcpEvaluationResult(await tool('browser_run_code_unsafe',{code:ownedOperationCode(fixtureOperation,{url},moduleTargets.overview.targetId)})).storage,'retained');await closeOwnedTarget(moduleTargets.overview);assert.equal(page.isClosed(),false);
+ report.sharedSession={targets:Object.fromEntries(Object.entries(moduleTargets).map(([id,target])=>[id,target.targetId])),cookieShared:true,localStorageShared:true,closedOwnerRejected:true,siblingRetained:true};report.checks.push('actual owned-target MCP wrapper isolates module tabs and shares cookie/localStorage');
+ // This viewer is a background tab in the one physical browser. Keep the
+ // fixture in the actual X display foreground; the viewer never displays
+ // itself recursively or receives its own OS keyboard input.
+ const viewer=await browser.contexts()[0].newPage();await viewer.goto(url);
  await viewer.evaluate(async vnc=>{document.body.innerHTML='<div id="screen" style="width:1440px;height:900px"></div>';document.body.style.margin='0';const {default:RFB}=await import('/novnc/core/rfb.js');window.rfb=new RFB(document.querySelector('#screen'),'ws://127.0.0.1:'+vnc+'/websockify',{shared:true});window.rfb.scaleViewport=false;await new Promise((resolve,reject)=>{window.rfb.addEventListener('connect',resolve,{once:true});window.rfb.addEventListener('disconnect',()=>reject(Error('RFB disconnected')),{once:true});setTimeout(()=>reject(Error('RFB timeout')),10000);});},19322+offset);
- const canvas=viewer.locator('canvas');await canvas.waitFor();await viewer.waitForTimeout(500);
- await canvas.click({position:{x:bounds.x,y:bounds.y+bounds.top}});await viewer.keyboard.type(' RFB');
- await page.waitForFunction(()=>document.querySelector('input').value.includes('RFB'));await viewer.screenshot({path:path.join(evidence,'novnc-live.png')});
+ await viewer.locator('canvas').waitFor();await page.bringToFront();await page.waitForTimeout(500);await page.locator('input').evaluate(e=>e.blur());
+ const bounds=await page.locator('input').evaluate(e=>{const r=e.getBoundingClientRect();return {x:window.screenX+r.x+r.width/2,y:window.screenY+r.y+r.height/2+window.outerHeight-window.innerHeight};});
+ await viewer.evaluate(({x,y})=>{const canvas=document.querySelector('canvas'),r=canvas.getBoundingClientRect();for(const [type,buttons] of [['mousemove',0],['mousedown',1],['mouseup',0]])canvas.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,clientX:r.left+x,clientY:r.top+y,button:0,buttons}));},bounds);
+ await page.waitForFunction(()=>document.activeElement===document.querySelector('input'));
+ await viewer.evaluate(()=>{for(const c of ' RFB')window.rfb.sendKey(c.codePointAt(0),'Unidentified');});
+ await page.waitForFunction(()=>document.querySelector('input').value.includes('RFB'));await page.waitForTimeout(1500);
+ const framebuffer=await viewer.evaluate(()=>{const canvas=document.querySelector('canvas');if(!canvas.width||!canvas.height)throw Error('RFB framebuffer is empty');return canvas.toDataURL('image/png').split(',')[1];});fs.writeFileSync(path.join(evidence,'novnc-live.png'),Buffer.from(framebuffer,'base64'));await viewer.evaluate(()=>window.rfb.disconnect());await viewer.close();
  report.checks.push('upstream noVNC real RFB framebuffer / pointer / keyboard via x11vnc');
  report.loadedLibraries=auditLoadedLibraries();report.checks.push('readable controlled-process maps limited to payload and host glibc');
  const profileRoot=path.join(data,'browser-profiles/sales'),cookie=(await page.context().cookies(url)).find(c=>c.name==='native_acceptance');
@@ -204,7 +221,9 @@ try{
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');
  assert(fs.existsSync(profileRoot));assert.equal(fs.readdirSync(path.dirname(profileRoot)).filter(n=>n.startsWith('sales.retained-')).length,0,'Unexpected profile archive');
  checkCancellation();const second=await nativeLifecycle('start',configFile);checkCancellation();report.successfulStarts++;assert.notEqual(second.generation,first.generation);assert.equal(second.serverId,identity.serverId);assert.equal(second.dataSetId,identity.dataSetId);
+ report.physicalInstancesAfterRestart=verifySharedBrowserProcesses(diagnosticProcesses(),{profileRoot:path.join(data,'browser-profiles'),launchRoot:path.join(c.native.runtimeDir||c.stateDir,'native-browser'),instances:browserConfig.instances});
  assert.equal(second.browser.browsers.sales.retainedProfile,null);assert.equal(fs.realpathSync(profileRoot),report.persistenceBefore.profileRealpath);
+ assert.equal(fs.readFileSync(overviewSentinel,'utf8'),'old overview profile retained\n');assert.equal(fs.readFileSync(path.join(overviewProfile,'Last Version'),'utf8'),'999.0.0.0');assert.equal(fs.readdirSync(path.dirname(overviewProfile)).filter(n=>n.startsWith('overview.retained-')).length,0);report.checks.push('unused overview profile retained byte-for-byte across shared-browser restart');
  ({client,transport}=await connect(19222+offset));await tool('browser_navigate',{url});const retained=mcpEvaluationResult(await tool('browser_evaluate',{function:'() => ({cookie:document.cookie,storage:localStorage.getItem("native_acceptance")})'}));report.persistenceAfter=retained;assert.match(retained.cookie,/native_acceptance=retained/);assert.equal(retained.storage,'retained');
  report.checks.push('restart generation / ledger identity / persistent synthetic browser session');
  await stopClients();await nativeLifecycle('stop',configFile);assert.equal((await nativeLifecycle('status',configFile)).status,'stopped');

@@ -72,3 +72,17 @@ test('运行中取消：保留正在完成的原件，停止后续导出，之�
  const f=fixture(),b=new FakeBrowser(f.dir,await samples()),m=new CainiaoDownloads(f.s,{browser:b,pollMs:1,waitMs:1});let release,entered;const ready=new Promise(r=>{entered=r;}),hold=new Promise(r=>{release=r;}),original=b.run.bind(b);b.run=async(op,a)=>{if(op==='download'&&a.task.type==='transactions'){entered();await hold;}return original(op,a);};
  try{const j=m.start({from:'2026-09',account:'cn-test'});await ready;m.cancel(j.id);release();await m.running;let result=m.get(j.id);assert.equal(result.status,'cancelled');assert.equal(result.items[0].status,'completed');assert.equal(m.files(result).length,1);assert.equal(b.submits,1);b.run=original;m.resume(j.id);await m.running;result=m.get(j.id);assert.equal(result.status,'completed');assert.equal(b.submits,3);}finally{release?.();await m.close();f.close();}
 });
+test('共享浏览器提交占用覆盖基线和任务绑定，下载时已释放；未确认申请保留待核对',async t=>{
+ const f=fixture(),browser=new FakeBrowser(f.dir,await samples()),manager=new CainiaoDownloads(f.s,{browser,pollMs:1,waitMs:1});
+ let held=false,acquires=0;const releases=[],original=browser.run.bind(browser);
+ browser.acquireSubmission=async({key,account})=>{assert.ok(key.includes(':'));assert.equal(account,browser.account);assert.equal(held,false);held=true;acquires++;return async options=>{if(!held)return;releases.push(options?.unresolved===true);held=false;};};
+ browser.run=async(op,args)=>{if(['prepare','submit'].includes(op))assert.equal(held,true,op+' must own submission');if(op==='tasks'&&!args.recovery)assert.equal(held,true,'baseline/first binding owns submission');if(op==='download')assert.equal(held,false,'bound task polling/download no longer owns submission');return original(op,args);};
+ try{const job=manager.start({from:'2026-09',account:browser.account});await manager.running;assert.equal(manager.get(job.id).status,'completed');assert.equal(acquires,3);assert.deepEqual(releases,[false,false,false]);assert.equal(held,false);
+  browser.uncertain=true;const pending=manager.start({from:'2026-09',account:browser.account,force:true});await manager.running;assert.equal(manager.get(pending.id).status,'paused');assert.equal(releases.at(-1),true,'ambiguous request reserves task ownership');assert.equal(held,false);
+ }finally{await manager.close();f.close();}
+});
+test('恢复已绑定平台编号时补清理未确认的共享提交占用',async t=>{
+ const f=fixture(),browser=new FakeBrowser(f.dir,await samples()),manager=new CainiaoDownloads(f.s,{browser,pollMs:1,waitMs:1});const settled=[];browser.settleSubmission=async data=>settled.push(data);
+ try{const job=manager.start({from:'2026-09',account:browser.account});await manager.running;const saved=manager.get(job.id);saved.status='paused';saved.items[0].status='waiting';manager.save(saved);manager.resume(job.id);await manager.running;assert.equal(manager.get(job.id).status,'completed');assert.ok(settled.some(r=>r.key===job.id+':'+saved.items[0].month+':'+saved.items[0].type&&r.account===browser.account&&r.proof==='task-bound'));}
+ finally{await manager.close();f.close();}
+});

@@ -101,6 +101,7 @@ export async function createWebRuntime(
       cacheStaticAssets: config.mode === "production",
       localDevelopment: config.mode === "development",
       nativeBrowserEnabled: config.native?.browser?.enabled===true,
+      nativeBrowserShared: config.native?.browser?.shared===true,
       registerRoutes: async (app, context) => {
         await registerNativeBrowserRoutes(app,context,config);
         registerDataVersionRoutes(app, context, dataVersions);

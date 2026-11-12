@@ -2,6 +2,13 @@
 export async function browserOperation(page,arg){
  const base='https://b.cainiao.com',home=base+'/cf_seller/workbench',bill=base+'/cf_seller/merchant-counter-bill-manage',tasks=base+'/cf_seller/bill-detail-downloads-query';
  const visibleText=()=>page.locator('xpath=/html/body').innerText();
+ // Only this page and popups opened by it belong to this operation. A manual
+ // download in another shared-browser tab must never become this bill's file.
+ function captureOwnedDownloads(listener){
+  const attached=new Set();
+  const attach=p=>{if(attached.has(p))return;attached.add(p);p.on('download',listener);p.on('popup',attach);};
+  attach(page);return ()=>{for(const p of attached){p.off('download',listener);p.off('popup',attach);}attached.clear();};
+ }
  async function guard(){
   if(new URL(page.url()).origin!==base)throw Error('NEEDS_LOGIN:请选择已经登录的菜鸟金掌柜标签页');
   if(await page.getByText(/拖动滑块|请完成验证|安全验证|扫码登录|账号登录/).filter({visible:true}).count())throw Error('NEEDS_LOGIN:请先在 Chrome 完成登录或验证');
@@ -51,7 +58,7 @@ export async function browserOperation(page,arg){
   return expected;
  }
  async function clickAndCapture(action){
-  let resolveDownload;const found=new Promise(resolve=>{resolveDownload=resolve;});const listen=p=>p.on('download',resolveDownload);const ctx=page.context();for(const p of ctx.pages())listen(p);ctx.on('page',listen);
+  let resolveDownload;const found=new Promise(resolve=>{resolveDownload=resolve;});const cleanup=captureOwnedDownloads(resolveDownload);
   try{
    await action();const result=await Promise.race([found.then(download=>({download})),page.getByText(/下载任务成功提交|无数据|暂无数据|没有可下载|邮箱|邮件配置|下载失败/).filter({visible:true}).first().waitFor({state:'visible',timeout:15000}).then(()=>({submitted:true})).catch(()=>({uncertain:true}))]);
    if(result.download){await result.download.saveAs(arg.target);return {direct:true,filename:result.download.suggestedFilename()};}
@@ -59,7 +66,7 @@ export async function browserOperation(page,arg){
    if(/暂无数据|无数据|没有可下载/.test(text))return {empty:true,reason:'平台明确提示没有可下载数据'};
    if(/邮箱|邮件配置/.test(text))throw Error('NEEDS_ACTION:平台要求邮件配置，请手动处理；程序不会发送邮件');
    throw Error('UNCERTAIN:平台未明确返回下载任务结果，请先核对任务中心');
-  }finally{ctx.off('page',listen);for(const p of ctx.pages())p.off('download',resolveDownload);}
+  }finally{cleanup();}
  }
  // The official extension can connect by creating a new, empty tab. Open only
  // our fixed home URL there; never redirect an unrelated or extension page.
@@ -96,8 +103,7 @@ export async function browserOperation(page,arg){
   // 浏览器下载，在 CDP/扩展连接下不会再抛 Playwright download 事件。先截获真实
   // 地址，交给服务端直接取回；download 事件只作为兼容旧页面的兜底。
   await page.evaluate(()=>{const open=window.open;window.__ltOpen=window.__ltOpen||open;window.__ltDownloadUrl='';window.open=function(url,...rest){try{window.__ltDownloadUrl=String(url||'')}catch{}return open.apply(this,[url,...rest]);};});
-  let listener,download=null;const ctx=page.context();listener=d=>{download=d;};for(const p of ctx.pages())p.on('download',listener);
-  const attach=p=>p.on('download',listener);ctx.on('page',attach);
+  let download=null;const cleanup=captureOwnedDownloads(d=>{download=d;});
   try{
    await row.getByRole('button',{name:'下载',exact:true}).click();
    const deadline=Date.now()+30000;
@@ -108,7 +114,7 @@ export async function browserOperation(page,arg){
     if(Date.now()>=deadline)throw Error('下载未完成，请重新连接后继续');
     await page.waitForTimeout(400);
    }
-  }finally{ctx.off('page',attach);for(const p of ctx.pages())p.off('download',listener);await page.evaluate(()=>{if(window.__ltOpen){window.open=window.__ltOpen;delete window.__ltOpen;}}).catch(()=>{});}
+  }finally{cleanup();await page.evaluate(()=>{if(window.__ltOpen){window.open=window.__ltOpen;delete window.__ltOpen;}}).catch(()=>{});}
  }
  throw Error('不支持的浏览器操作');
 }

@@ -4,6 +4,7 @@ import http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { loadConfig, developmentConfig } from "./config.mjs";
+import {CollectorQueue} from './collector-queue.mjs';
 const ops = new Set(["account", "prepare", "tasks", "submit", "download"]);
 export async function startCollector(config, { factory, onError } = {}) {
   if (!factory)
@@ -19,7 +20,8 @@ export async function startCollector(config, { factory, onError } = {}) {
   const servers = [],
     browsers = [],
     records = [];
-  let timer, failure, stopping;
+  let timer, failure, stopping, queue;
+  const shared=config.native?.browser?.enabled===true&&config.native.browser.shared===true;
   const publish = () => {
     for (const r of records) {
       const value = {
@@ -28,7 +30,7 @@ export async function startCollector(config, { factory, onError } = {}) {
         url: r.url,
         token: r.token,
         at: Date.now(),
-        state: r.browser.status(),
+        state: {...r.browser.status(),...(shared?{mode:'native-shared',coordination:queue?.state(r.id)}:{})},
       };
       const tmp = r.file + "." + process.pid + ".tmp";
       fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
@@ -38,8 +40,10 @@ export async function startCollector(config, { factory, onError } = {}) {
   function stop() {
     if (stopping) return stopping;
     clearInterval(timer);
+    queue?.close();
     stopping = (async () => {
-      await Promise.all(browsers.map((b) => b.disconnect().catch(() => {})));
+      const results=await Promise.allSettled(browsers.map((b) => b.disconnect()));
+      await queue?.drain();
       await Promise.all(servers.map((s) => new Promise((r) => s.close(r))));
       for (const r of records)
         try {
@@ -48,6 +52,7 @@ export async function startCollector(config, { factory, onError } = {}) {
         } catch {}
       for (const r of records)
         try { fs.unlinkSync(r.file + "." + process.pid + ".tmp"); } catch {}
+      const failed=results.find(r=>r.status==='rejected');if(shared&&failed)throw failed.reason;
     })();
     return stopping;
   }
@@ -57,6 +62,7 @@ export async function startCollector(config, { factory, onError } = {}) {
     catch (error) {
       const code = /^E[A-Z0-9]{1,30}$/.test(error.code) ? error.code : "WRITE_FAILED";
       failure = new Error(`采集助手状态写入失败（${code}），已停止采集`);
+      queue?.close(failure);
       clearInterval(timer);
       console.error(failure.message);
       process.exitCode = 1;
@@ -68,6 +74,7 @@ export async function startCollector(config, { factory, onError } = {}) {
     }
   }
   try {
+    if(shared){fs.mkdirSync(config.modules.sales.dataDir,{recursive:true});queue=new CollectorQueue(path.join(config.modules.sales.dataDir,'.shared-cainiao-submission.json'),{onChange:()=>publishSafely()});}
     for (const id of ["sales", "overview"]) {
       const dir = config.modules[id].dataDir;
       fs.mkdirSync(dir, { recursive: true });
@@ -85,6 +92,7 @@ export async function startCollector(config, { factory, onError } = {}) {
         res.setHeader("content-type", "application/json; charset=utf-8");
         res.setHeader("cache-control", "no-store");
         const send = (code, value) => {
+          if(res.destroyed||res.writableEnded)return;
           res.statusCode = code;
           res.end(JSON.stringify(value));
         };
@@ -101,7 +109,7 @@ export async function startCollector(config, { factory, onError } = {}) {
           !timingSafeEqual(Buffer.from(auth), Buffer.from("Bearer " + token))
         )
           return send(401, { error: "采集助手身份无效" });
-        if (busy)
+        if (busy&&!shared)
           return send(409, { error: "采集助手正在操作浏览器，请稍后重试" });
         try {
           let bytes = 0;
@@ -111,7 +119,8 @@ export async function startCollector(config, { factory, onError } = {}) {
             if (bytes > 65536) throw Error("采集请求过大");
             chunks.push(chunk);
           }
-          const { action, args = {} } = JSON.parse(Buffer.concat(chunks));
+          const { action, args = {}, deadline, lease } = JSON.parse(Buffer.concat(chunks));
+          if(stopping)throw Error('采集助手正在关闭');
           if (failure && action !== "disconnect") throw failure;
           if (
             ![
@@ -120,9 +129,11 @@ export async function startCollector(config, { factory, onError } = {}) {
               "run",
               "rememberAuthorization",
               "forgetAuthorization",
+              ...(shared?["acquireSubmission","releaseSubmission","settleSubmission"]:[]),
             ].includes(action)
           )
             throw Error("采集操作无效");
+          if(shared&&(!Number.isSafeInteger(deadline)||deadline<Date.now()||deadline>Date.now()+1321000))throw Error('采集请求已过期或等待时间无效');
           if (action === "run") {
             if (!ops.has(args.op)) throw Error("浏览器操作未登记");
             if (args.args?.target) {
@@ -140,24 +151,41 @@ export async function startCollector(config, { factory, onError } = {}) {
             )
               throw Error("等待时间无效");
           }
-          if (busy) throw Error("采集助手正在操作浏览器，请稍后重试");
-          busy = true;
+          if (busy&&!shared) throw Error("采集助手正在操作浏览器，请稍后重试");
+          const cancellation=new AbortController();
+          const abort=()=>{if(!res.writableEnded)cancellation.abort();};
+          res.once('close',abort);
+          if(shared&&action==='disconnect')queue.cancelOwner(id);
           let result;
           try {
-            result =
+            const perform=async()=>{
+              if(failure&&action!=='disconnect')throw failure;
+              if(action==='acquireSubmission')return queue.acquire(id,args);
+              if(action==='settleSubmission')return queue.settle(id,args);
+              if(action==='releaseSubmission'){queue.release(id,lease,args);return;}
+              if(shared&&action==='disconnect')queue.abandon();
+              if(shared&&action==='run'&&args.op==='submit')queue.submitted(id,lease);
+              busy=true;
+              try{return (
               action === "run"
-                ? await browser.run(args.op, args.args || {}, args.timeout)
+                ? await browser.run(args.op, args.args || {}, shared?Math.max(1,Math.min(args.timeout,deadline-Date.now())):args.timeout)
                 : action === "rememberAuthorization"
                   ? await browser.rememberAuthorization(args.token)
-                  : await browser[action]();
+                  : await browser[action]());}
+              catch(error){if(shared&&error.code==='BROWSER_ISOLATION_FAILED'){failure=error;queue.close(error);void Promise.resolve().then(()=>onError?onError(error):stop()).catch(()=>console.error('共享采集故障清理失败'));}throw error;}
+              finally{busy=false;}
+            };
+            // A poisoned queue rejects all work, but each module still needs
+            // its own adapter teardown while the native owner drains services.
+            result=shared&&!(failure&&action==='disconnect')?await queue.enqueue(id,action,perform,{signal:cancellation.signal,deadline,lease}):await perform();
           } finally {
-            busy = false;
+            res.off('close',abort);
             publishSafely();
           }
           if (failure && action !== "disconnect") throw failure;
           send(200, { result: result ?? null });
         } catch (e) {
-          send(409, { error: e.message });
+          send(409, { error: e.message, code:e.code });
         }
       });
       servers.push(server);
@@ -165,6 +193,7 @@ export async function startCollector(config, { factory, onError } = {}) {
         server.once("error", j).listen(0, "127.0.0.1", r),
       );
       records.push({
+        id,
         file,
         browser,
         token,

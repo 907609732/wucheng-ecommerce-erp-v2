@@ -98,7 +98,7 @@ export async function main(argv=process.argv.slice(2)){
    socketPath:o.socket||process.env.ERP_NATIVE_SOCKET,basePrefix:process.env.ERP_NATIVE_BASE_PREFIX,
    cmPath:o['cm-path']||process.env.ERP_NATIVE_CM_PATH,runtimeDir:o['runtime-dir']||process.env.ERP_NATIVE_RUNTIME_DIR,
    requireBrowsers:packaged?true:undefined,
-   browser:packaged?{enabled:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined
+   browser:packaged?{enabled:true,shared:true,runtimeRoot:path.join(appRoot,'runtime'),chromiumPath:path.join(appRoot,'runtime','chromium','chrome'),novncRoot:path.join(appRoot,'runtime','novnc')}:undefined
   });
   return {ok:true,config:file};
  }

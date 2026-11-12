@@ -5,6 +5,18 @@ import os from 'node:os';
 import path from 'node:path';
 const raw=body=>'### Result\n'+JSON.stringify(body)+'\n### Ran Playwright code\n```js\nawait page.evaluate(...);\n```';
 const current='Sandbox Status\nLayer 1 Sandbox\tNamespace\nPID namespaces\tYes\nNetwork namespaces\tYes\nSeccomp-BPF sandbox\tYes\nYou are adequately sandboxed.';
+test('single-browser smoke rejects an extra owned overview stack instead of counting sales alone',async()=>{
+ const {verifySharedBrowserProcesses}=await import('../deploy/fnos/smoke-checks.mjs');
+ const profileRoot='/fixture/data/browser-profiles',launchRoot='/fixture/data/state/native-browser',run=launchRoot+'/01234567-89ab-cdef-0123-456789abcdef',instances={sales:{cdpPort:19222,vncPort:19322,display:122},overview:{cdpPort:19223,vncPort:19323,display:123}},options={profileRoot,launchRoot,instances};
+ const stack=(id,pid)=>[{pid,cmdline:['/app/runtime/chromium/chrome','--user-data-dir='+profileRoot+'/'+id,'--remote-debugging-port='+instances[id].cdpPort],runtimeDirectory:run},{pid:pid+1,cmdline:['/app/runtime/sysroot/usr/bin/Xvfb',':'+instances[id].display],runtimeDirectory:run},{pid:pid+2,cmdline:['/app/runtime/sysroot/usr/bin/x11vnc','-display',':'+instances[id].display,'-rfbport',String(instances[id].vncPort)],runtimeDirectory:run}];
+ const sales=stack('sales',100),overview=stack('overview',200);assert.deepEqual(verifySharedBrowserProcesses(sales,options),{chromium:[100],xvfb:[101],vnc:[102]});
+ for(const extra of [overview,[overview[0]],[overview[1]],[overview[2]]])assert.throws(()=>verifySharedBrowserProcesses([...sales,...extra],options),/one|physical|shared|instance|owned|Chromium|Xvfb|x11vnc/);
+ const unexpected=[{...overview[0],cmdline:[overview[0].cmdline[0],'--user-data-dir='+profileRoot+'/unknown-profile','--remote-debugging-port=29999']},{...overview[1],cmdline:[overview[1].cmdline[0],':777']},{...overview[2],cmdline:[overview[2].cmdline[0],'-display',':777','-rfbport','29999']}];
+ for(const extra of unexpected)assert.throws(()=>verifySharedBrowserProcesses([...sales,extra],options),/one physical owned/);
+ const foreign={pid:999,cmdline:[sales[0].cmdline[0],'--user-data-dir=/fixture/data','--remote-debugging-port=29999'],runtimeDirectory:'/foreign/runtime'},renderer={...sales[0],pid:998,cmdline:[...sales[0].cmdline,'--type=renderer']};
+ assert.deepEqual(verifySharedBrowserProcesses([...sales,foreign,renderer],options),{chromium:[100],xvfb:[101],vnc:[102]});
+ for(const mutate of [rows=>{rows[0].cmdline[2]='--remote-debugging-port=19223';},rows=>{rows[1].runtimeDirectory=launchRoot+'/11111111-1111-1111-1111-111111111111';},rows=>{rows[2].cmdline[4]='19323';}]){const rows=structuredClone(sales);mutate(rows);assert.throws(()=>verifySharedBrowserProcesses(rows,options));}
+});
 test('smoke accepts actual Chromium156 namespace status and rejects missing protection',async()=>{
  const {verifySandboxResult}=await import('../deploy/fnos/smoke-checks.mjs');
  assert.equal(verifySandboxResult(raw(current)).namespace,true);

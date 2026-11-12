@@ -135,3 +135,22 @@ test('真实签名HTTP：后台下载→原件预览→中央人审→入账/附
   }
  });
 });
+test('共享浏览器提交占用覆盖基线和任务绑定，下载时已释放；未确认申请保留待核对',async t=>{
+ const f=fixture(t,await samples()),{browser}=f,manager=f.api.manager;
+ let held=false,acquires=0;const releases=[],original=browser.run.bind(browser);
+ browser.acquireSubmission=async({key,account})=>{assert.ok(key.includes(':'));assert.equal(account,browser.account);assert.equal(held,false);held=true;acquires++;return async options=>{if(!held)return;releases.push(options?.unresolved===true);held=false;};};
+ browser.run=async(op,args)=>{if(['prepare','submit'].includes(op))assert.equal(held,true,op+' must own submission');if(op==='tasks'&&!args.recovery)assert.equal(held,true,'baseline/first binding owns submission');if(op==='download')assert.equal(held,false,'bound task polling/download no longer owns submission');return original(op,args);};
+ try{const job=manager.start({from:historic,account:browser.account});await manager.running;assert.equal(manager.get(job.id).status,'completed');assert.equal(acquires,3);assert.deepEqual(releases,[false,false,false]);assert.equal(held,false);
+  browser.uncertain=true;const pending=manager.start({from:historic,account:browser.account,force:true});await manager.running;assert.equal(manager.get(pending.id).status,'paused');assert.equal(releases.at(-1),true,'ambiguous request reserves task ownership');assert.equal(held,false);
+ }finally{await manager.close();}
+});
+test('恢复已绑定平台编号时补清理未确认的共享提交占用',async t=>{
+ const f=fixture(t,await samples()),{browser}=f,manager=f.api.manager;const settled=[];browser.settleSubmission=async data=>settled.push(data);
+ try{const job=manager.start({from:historic,account:browser.account});await manager.running;const saved=manager.get(job.id);saved.status='paused';saved.items[0].status='waiting';manager.save(saved);manager.resume(job.id);await manager.running;assert.equal(manager.get(job.id).status,'completed');assert.ok(settled.some(r=>r.key===job.id+':'+saved.items[0].month+':'+saved.items[0].type&&r.account===browser.account&&r.proof==='task-bound'));}
+ finally{await manager.close();}
+});
+test('销售提交只比较平台查询证据，查询时间继续保存在任务审计记录',async t=>{
+ const f=fixture(t,await samples()),original=f.browser.run.bind(f.browser);let evidence;
+ f.browser.run=async(op,args)=>{if(op==='submit')assert.deepEqual(args.expected,evidence,'审计时间不能混入页面重新查询的比对');const result=await original(op,args);if(op==='prepare')evidence=result;return result;};
+ const job=await download(f);assert.equal(job.status,'completed');assert.ok(job.items.filter(i=>i.type!=='warehouse').every(i=>typeof i.expected.queriedAt==='string'));
+});

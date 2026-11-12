@@ -11,13 +11,13 @@ import {WebSocket,WebSocketServer} from 'ws';
 import {createWorkbenchGateway} from '../server/gateway/gateway.mjs';
 const api='/api/workbench/v1',prefix='/app/wuchengerp';
 const tail={host:'erp.example.test','tailscale-user-login':'a@example.test'},fn={host:'nas.example.test','x-trim-userid':'1000','x-trim-username':'person'};
-async function setup(t,{enabled=true,tcpEnabled=true,novncHtml='UPSTREAM noVNC',requireUpstreamOrigin=true}={}){
+async function setup(t,{enabled=true,shared=false,tcpEnabled=true,novncHtml='UPSTREAM noVNC',requireUpstreamOrigin=true}={}){
  const {registerNativeBrowserRoutes}=await import('../server/fnos-native/browser-routes.mjs');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'browser-auth-'));fs.chmodSync(dir,0o700);
  const root=path.join(dir,'novnc');fs.mkdirSync(root);fs.writeFileSync(path.join(root,'vnc.html'),novncHtml);fs.mkdirSync(path.join(root,'core'));fs.writeFileSync(path.join(root,'core/rfb.js'),'upstream module');
  const seen=[],upstreams=[];for(const id of ['sales','overview']){const server=http.createServer(),wss=new WebSocketServer({server,verifyClient:info=>!requireUpstreamOrigin||info.origin==='http://127.0.0.1:'+server.address().port});wss.on('connection',(ws,req)=>{ws.on('error',()=>{});seen.push({id,url:req.url,headers:req.headers});ws.on('message',(data,binary)=>ws.send(data,{binary}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));upstreams.push({server,wss});}
- const config={native:{dataRoot:dir,browser:{enabled,novncRoot:root,instances:{sales:{cdpPort:20222,vncPort:upstreams[0].server.address().port,display:222},overview:{cdpPort:20223,vncPort:upstreams[1].server.address().port,display:223}}}}};
- const gateway=await createWorkbenchGateway({services:{config:()=>({}),capabilities:async()=>null},storeDir:path.join(dir,'gateway'),publicOrigin:'https://erp.example.test',port:0,tcpEnabled,nativeBrowserEnabled:enabled,fnos:{enabled:true,instanceId:'auth',socketPath:path.join(dir,'app.sock'),basePrefix:prefix,allowedOrigins:['https://nas.example.test'],allowedUids:['1000']},registerRoutes:async(app,context)=>registerNativeBrowserRoutes(app,context,config)});
+ const config={native:{dataRoot:dir,browser:{enabled,shared,novncRoot:root,instances:{sales:{cdpPort:20222,vncPort:upstreams[0].server.address().port,display:222},overview:{cdpPort:20223,vncPort:upstreams[1].server.address().port,display:223}}}}};
+ const gateway=await createWorkbenchGateway({services:{config:()=>({}),capabilities:async()=>null},storeDir:path.join(dir,'gateway'),publicOrigin:'https://erp.example.test',port:0,tcpEnabled,nativeBrowserEnabled:enabled,nativeBrowserShared:shared,fnos:{enabled:true,instanceId:'auth',socketPath:path.join(dir,'app.sock'),basePrefix:prefix,allowedOrigins:['https://nas.example.test'],allowedUids:['1000']},registerRoutes:async(app,context)=>registerNativeBrowserRoutes(app,context,config)});
  await gateway.start();
  t.after(async()=>{await gateway.stop();for(const {server,wss} of upstreams){for(const ws of wss.clients)ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>server.close(resolve));}fs.rmSync(dir,{recursive:true,force:true});});
  const port=gateway.app.server.address()?.port||0;
@@ -64,6 +64,11 @@ test('real Unix-only listener upgrades and shuts down authenticated browsers wit
 });
 test('native browser disabled exposes no login page, assets, upgrade endpoint or feature flag',async t=>{
  const {port}=await setup(t,{enabled:false}),s=await get(port,tail),auth={...tail,cookie:s.cookie,origin:'https://erp.example.test'};assert.equal(JSON.parse(s.body).nativeBrowser,undefined);for(const url of ['/web/native-browser.html','/web/novnc/vnc.html',api+'/native-browser/sales/websockify'])assert.equal((await get(port,auth,url)).status,404);
+});
+
+for(const shared of [false,true])test(`native browser session explicitly reports shared=${shared}`,async t=>{
+ const {port}=await setup(t,{shared}),session=await get(port,tail);
+ assert.equal(session.status,200);assert.deepEqual(JSON.parse(session.body).nativeBrowser,{enabled:true,shared});
 });
 test('chooser and unmodified upstream noVNC assets require session and preserve public prefix',async t=>{
  const {port}=await setup(t);assert.equal((await get(port,tail,'/web/native-browser.html')).status,401);const s=await get(port,tail),h={...tail,cookie:s.cookie};
