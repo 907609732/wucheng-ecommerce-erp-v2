@@ -30,32 +30,38 @@
 ### Task 1: Native shared instance and real package smoke
 Files: server/fnos-native/browsers.mjs, lifecycle/configure/supervisor as needed, deploy/fnos/smoke-native.mjs and native tests.
 Interfaces: nativeBrowserSpecs returns sales/overview aliases with explicit physical identity; browser.shared=true enables sharing. supervisor exports LINGTU_SHARED_BROWSER=1 for collector.
-- [ ] Add failing tests for one physical launch, endpoint aliases, old overview profile preservation, legacy mode.
-- [ ] Implement shared physical specs/start/status while retaining validations, generation ownership and sandbox.
-- [ ] Update real smoke to verify distinct module tabs share storage; both VNC routes; real RFB keyboard/pointer without self-recursive viewer.
-- [ ] Run targeted tests and syntax checks; report red/green evidence.
+- [x] Add failing tests for one physical launch, endpoint aliases, old overview profile preservation, legacy mode.
+- [x] Implement shared physical specs/start/status while retaining validations, generation ownership and sandbox.
+- [x] Update real smoke to verify distinct module tabs share storage; both VNC routes; real RFB keyboard/pointer without self-recursive viewer.
+- [x] Run targeted tests and syntax checks; report red/green evidence.
 
 ### Task 2: Owned tabs and isolated downloads
 Files: both module CainiaoBrowser/page adapters, small shared CDP helper if useful, adapter tests.
 Interfaces: existing connect/disconnect/run methods unchanged. disconnect must throw if it cannot prove timed-out execution isolated; collector then blocks future work. Native mode uses owned target; Windows extension unchanged.
-- [ ] Add failing tests for owned page selection, closure/reconnect, sibling protection and popup download filtering.
-- [ ] Implement stable target resolution each operation, owned-tab cleanup, timeout teardown with child-exit/target-closure proof.
-- [ ] Use existing public CDP/Playwright APIs; no new dependency. Preserve browser/context and unknown profile tabs.
-- [ ] Run targeted tests and syntax checks; report evidence.
+- [x] Add failing tests for owned page selection, closure/reconnect, sibling protection and popup download filtering.
+- [x] Implement stable target resolution each operation, owned-tab cleanup, timeout teardown with child-exit/target-closure proof.
+- [x] Use existing public CDP/Playwright APIs; no new dependency. Preserve browser/context and unknown profile tabs.
+- [x] Run targeted tests and syntax checks; report evidence.
 
 ### Task 3: Collector queue and submission lease
 Files: server/collector.mjs, collector-client.mjs, new focused scheduler module/tests, both business managers.
 Interfaces: CollectorBrowser.acquireSubmission(signal?) -> async release function; optional method in managers to preserve existing injected browser tests. A module-scoped opaque lease is included automatically on run calls; invalid/expired token fails closed. Queue uses absolute per-request deadline and cancellation.
-- [ ] Add failing FIFO/cancel/lease/deadline/shutdown tests and manager submission ownership tests.
-- [ ] Implement abortable queue, cancellation and bounded leases, module status for waiting and error messages.
-- [ ] Hold lease before baseline and until unique remoteTask assignment, release finally on all exits. Keep unresolved submission block until recovery so a later same-account submission cannot cross-bind.
-- [ ] Run root and both module targeted tests; inspect integration boundary with Tasks 1/2.
+- [x] Add failing FIFO/cancel/lease/deadline/shutdown tests and manager submission ownership tests.
+- [x] Implement abortable queue, cancellation and bounded leases, module status for waiting and error messages.
+- [x] Hold lease before baseline and until unique remoteTask assignment, release finally on all exits. Keep unresolved submission block until recovery so a later same-account submission cannot cross-bind.
+- [x] Run root and both module targeted tests; inspect integration boundary with Tasks 1/2.
 
 ### Task 4: UI, verification and delivery
 Files: native-browser.html/js, relevant docs, package versions/lockfiles.
-- [ ] Apply reviewed minimal shared-login wording and one login entry while retaining legacy module URLs.
-- [ ] Fresh review; fix important findings with regression tests.
-- [ ] Set 0.15.7, run appropriate suites, commit/push feature branch and dispatch full native GitHub build with trial.
-- [ ] Require successful full CI and real normal/clean-runtime smoke; download same-run FPK and verify SHA/BUILDINFO.
-- [ ] Provide package/build evidence, leaving production NAS unchanged; keep entry configuration follow-up explicit.
+- [x] Apply reviewed minimal shared-login wording and one login entry while retaining legacy module URLs.
+- [x] Fresh review; fix important findings with regression tests.
+- [x] Set 0.15.7, run appropriate suites, commit/push feature branch and dispatch full native GitHub build with trial.
+- [x] Require successful full CI and real normal/clean-runtime smoke; download same-run FPK and verify SHA/BUILDINFO.
+- [x] Provide package/build evidence, leaving production NAS unchanged; keep entry configuration follow-up explicit.
 
+
+## Delivery evidence
+
+Runtime commit aa6218c2f004c98b609b7ce97b91c91b55ef4ead; native full build 43155768567 succeeded with 962 passing checks, no failures and 3 conditional skips. Normal native and clean formal/trial/diagnostic runs verified one browser, shared storage, owned tabs, real RFB input, restart retention and three-book integrity. Draft archive 43157591549 verified five same-run delivery files including complete corresponding source; no production installation performed.
+
+FPK SHA256: f66f598b5bbbc590046fa9175430d73f1581c18b48a1d981c6bfe9a62ed96423. Entry configuration live dual-access verification remains a separate pending follow-up.
