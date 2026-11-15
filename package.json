@@ -34,7 +34,7 @@
     "ws": "8.22.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.0"
+    "@playwright/test": "^1.65.0"
   },
   "packageManager": "npm@11.16.0",
   "engines": {
